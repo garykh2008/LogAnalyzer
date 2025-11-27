@@ -44,13 +44,18 @@ class Filter:
 class LogAnalyzerApp:
 	def __init__(self, root):
 		self.root = root
-		self.root.title("My Log Analyzer (Large File Support)")
 		self.root.geometry("1000x700")
 
 		self.filters = []
 		self.raw_lines = []         # 原始資料
 		self.filtered_cache = []    # 過濾後的資料 (只存內容與 Tag，不存 Widget)
+
+		# 狀態變數：記錄目前開啟的檔案路徑
+		self.current_log_path = None
 		self.current_tat_path = None
+
+		# 初始化標題
+		self.update_title()
 
 		# 虛擬捲動相關變數
 		self.view_start_index = 0   # 目前顯示的第一行在 filtered_cache 中的索引
@@ -71,12 +76,11 @@ class LogAnalyzerApp:
 		tk.Button(toolbar, text="JSON 匯出", command=self.export_filters).pack(side=tk.RIGHT, padx=2, pady=2)
 		tk.Button(toolbar, text="JSON 匯入", command=self.import_json_filters).pack(side=tk.RIGHT, padx=2, pady=2)
 
-		# 狀態列 (顯示行數資訊)
+		# 狀態列
 		self.status_bar = tk.Label(root, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
 		self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
 		# Log 顯示區與捲動條
-		# 注意：這裡我們需要手動控制 Scrollbar，所以不使用 yscrollcommand 連動
 		content_frame = tk.Frame(root)
 		content_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
@@ -85,14 +89,13 @@ class LogAnalyzerApp:
 
 		self.text_area = tk.Text(content_frame, wrap="none", font=("Consolas", 10))
 		self.scrollbar_x = tk.Scrollbar(root, orient="horizontal", command=self.text_area.xview)
-		self.text_area.configure(xscrollcommand=self.scrollbar_x.set) # X 軸可以維持原樣
+		self.text_area.configure(xscrollcommand=self.scrollbar_x.set)
 
 		self.scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
 		self.text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
 		# 綁定滑鼠滾輪
 		self.text_area.bind("<MouseWheel>", self.on_mousewheel)
-		# Linux 系統滾輪事件不同
 		self.text_area.bind("<Button-4>", self.on_mousewheel)
 		self.text_area.bind("<Button-5>", self.on_mousewheel)
 
@@ -107,9 +110,11 @@ class LogAnalyzerApp:
 		self.filter_list_canvas.create_window((0, 0), window=self.filter_container, anchor="nw")
 		self.filter_container.bind("<Configure>", lambda e: self.filter_list_canvas.configure(scrollregion=self.filter_list_canvas.bbox("all")))
 
+	# --- 標題更新邏輯 (新功能) ---
 	def update_title(self):
-		filename = os.path.basename(self.current_tat_path) if self.current_tat_path else "未儲存"
-		self.root.title(f"My Log Analyzer - {filename}")
+		log_name = os.path.basename(self.current_log_path) if self.current_log_path else "No file load"
+		filter_name = os.path.basename(self.current_tat_path) if self.current_tat_path else "No filter file"
+		self.root.title(f"[{log_name}] - [{filter_name}] - Log Analyzer")
 
 	def update_status(self, msg):
 		self.status_bar.config(text=msg)
@@ -123,50 +128,43 @@ class LogAnalyzerApp:
 
 		self.update_status(f"正在讀取檔案: {filepath} ...")
 		try:
-			# 對於 500MB 檔案，readlines() 會吃掉約 1~2GB RAM，這是現代電腦可接受的
-			# 如果要更省記憶體，需要用 file seek 機制，但實作複雜度會高很多
 			with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
 				self.raw_lines = f.readlines()
 
+			# 更新狀態與標題
+			self.current_log_path = filepath
+			self.update_title()
+
 			self.update_status(f"讀取完成，共 {len(self.raw_lines)} 行。正在建立索引...")
-			self.recalc_filtered_data() # 讀取後執行一次過濾
+			self.recalc_filtered_data()
 
 		except Exception as e:
 			messagebox.showerror("讀取錯誤", str(e))
 			self.update_status("讀取失敗")
 
-	# --- 虛擬捲動核心邏輯 (Virtual Scrolling) ---
+	# --- 虛擬捲動核心邏輯 ---
 
 	def recalc_filtered_data(self):
-		"""
-		當 Filter 改變或讀取新檔時呼叫。
-		這裡只負責「計算」哪些行要顯示，以及它們的顏色 Tag，不負責「繪圖」。
-		"""
 		self.update_status("正在套用過濾器...")
-
-		# 1. 準備 Tag 設定
 		self.text_area.config(state=tk.NORMAL)
-		self.text_area.delete("1.0", tk.END) # 清空畫面
+		self.text_area.delete("1.0", tk.END)
 
-		# 設定 Text Widget 的 Tag 樣式
 		for i, flt in enumerate(self.filters):
 			tag_name = f"filter_{i}"
 			self.text_area.tag_config(tag_name, foreground=flt.fore_color, background=flt.back_color)
 
-		# 2. 執行過濾 (這是最花時間的步驟，純 Python 運算)
-		self.filtered_cache = [] # 格式: [(line_content, [tag_list]), ...]
+		self.filtered_cache = []
 
 		active_filters = [f for f in self.filters if f.enabled and not f.is_exclude]
 		exclude_filters = [f for f in self.filters if f.enabled and f.is_exclude]
 
-		# 為了加速，預先編譯 Regex
 		compiled_excludes = []
 		for f in exclude_filters:
 			if f.is_regex:
 				try: compiled_excludes.append(re.compile(f.text, re.IGNORECASE))
 				except: pass
 			else:
-				compiled_excludes.append(f.text) # 純文字用字串比對
+				compiled_excludes.append(f.text)
 
 		compiled_includes = []
 		for i, flt in enumerate(self.filters):
@@ -176,11 +174,9 @@ class LogAnalyzerApp:
 					try: compiled_includes.append((re.compile(flt.text, re.IGNORECASE), tag, True))
 					except: pass
 				else:
-					compiled_includes.append((flt.text, tag, False)) # False 代表非 Regex
+					compiled_includes.append((flt.text, tag, False))
 
-		# 遍歷所有原始資料
 		for line in self.raw_lines:
-			# Exclude Check
 			skip = False
 			for exc in compiled_excludes:
 				if isinstance(exc, str):
@@ -191,7 +187,6 @@ class LogAnalyzerApp:
 						skip = True; break
 			if skip: continue
 
-			# Include Check
 			matched_tags = []
 			is_match = False
 
@@ -209,17 +204,14 @@ class LogAnalyzerApp:
 							matched_tags.append(tag)
 
 			if is_match:
-				# 只存資料，不操作 UI
 				self.filtered_cache.append((line, matched_tags))
 
-		# 3. 重置檢視位置並渲染
 		self.view_start_index = 0
 		self.render_viewport()
 		self.update_scrollbar_thumb()
 		self.update_status(f"顯示 {len(self.filtered_cache)} 行 (原始 {len(self.raw_lines)} 行)")
 
 	def render_viewport(self):
-		"""只渲染目前看得到的幾行"""
 		self.text_area.config(state=tk.NORMAL)
 		self.text_area.delete("1.0", tk.END)
 
@@ -231,75 +223,61 @@ class LogAnalyzerApp:
 		end_index = min(self.view_start_index + self.visible_rows, total)
 		lines_to_render = self.filtered_cache[self.view_start_index : end_index]
 
-		# 批次插入文字
 		full_text = "".join([item[0] for item in lines_to_render])
 		self.text_area.insert("1.0", full_text)
 
-		# 批次套用 Tag
 		for i, (line, tags) in enumerate(lines_to_render):
 			if tags:
-				line_idx = i + 1 # Tkinter 行號從 1 開始
+				line_idx = i + 1
 				for tag in tags:
 					self.text_area.tag_add(tag, f"{line_idx}.0", f"{line_idx}.end")
 
 		self.text_area.config(state=tk.DISABLED)
 
 	def update_scrollbar_thumb(self):
-		"""手動計算 Scrollbar 滑塊位置"""
 		total = len(self.filtered_cache)
 		if total == 0:
 			self.scrollbar_y.set(0, 1)
 		else:
-			# 計算顯示比例
 			page_size = self.visible_rows / total
 			start = self.view_start_index / total
 			end = start + page_size
 			self.scrollbar_y.set(start, end)
 
 	def on_scroll_y(self, *args):
-		"""處理捲動條拖拉事件"""
 		total = len(self.filtered_cache)
 		if total == 0: return
 
 		op = args[0]
 		if op == "scroll":
-			# 點擊箭頭或滾輪 (scroll N units)
 			units = int(args[1])
-			what = args[2] # "units" or "pages"
+			what = args[2]
 			if what == "pages":
 				step = self.visible_rows
 			else:
 				step = 1
-
 			new_start = self.view_start_index + (units * step)
-
 		elif op == "moveto":
-			# 拖拉滑塊 (0.0 ~ 1.0)
 			fraction = float(args[1])
 			new_start = int(total * fraction)
 
-		# 邊界檢查
 		new_start = max(0, min(new_start, total - self.visible_rows))
-
 		if new_start != self.view_start_index:
 			self.view_start_index = int(new_start)
 			self.render_viewport()
 			self.update_scrollbar_thumb()
 
 	def on_mousewheel(self, event):
-		"""處理滑鼠滾輪"""
 		total = len(self.filtered_cache)
 		if total == 0: return
 
-		# Windows: event.delta 通常是 120 的倍數
-		# Linux: Button-4 / Button-5
 		scroll_dir = 0
 		if event.num == 5 or event.delta < 0:
-			scroll_dir = 1 # 向下
+			scroll_dir = 1
 		elif event.num == 4 or event.delta > 0:
-			scroll_dir = -1 # 向上
+			scroll_dir = -1
 
-		step = 3 # 滾一次動幾行
+		step = 3
 		new_start = self.view_start_index + (scroll_dir * step)
 		new_start = max(0, min(new_start, total - self.visible_rows))
 
@@ -307,10 +285,9 @@ class LogAnalyzerApp:
 			self.view_start_index = int(new_start)
 			self.render_viewport()
 			self.update_scrollbar_thumb()
+		return "break"
 
-		return "break" # 阻止 Text Widget 原生的滾動
-
-	# --- Filter 操作 (與之前相同) ---
+	# --- Filter 操作 ---
 
 	def add_filter_dialog(self):
 		dialog = tk.Toplevel(self.root)
@@ -338,7 +315,7 @@ class LogAnalyzerApp:
 				new_filter = Filter(entry_text.get(), colors["fg"], colors["bg"])
 				self.filters.append(new_filter)
 				self.refresh_filter_list()
-				self.recalc_filtered_data() # 改呼叫 recalc
+				self.recalc_filtered_data()
 				dialog.destroy()
 
 		tk.Button(dialog, text="確定", command=save).grid(row=2, column=0, columnspan=2)
@@ -351,7 +328,7 @@ class LogAnalyzerApp:
 			var = tk.BooleanVar(value=flt.enabled)
 			def toggle_handler(idx=idx, var=var):
 				self.filters[idx].enabled = var.get()
-				self.recalc_filtered_data() # 改呼叫 recalc
+				self.recalc_filtered_data()
 
 			text_label = flt.text
 			if flt.is_exclude: text_label = f"[Ex] {text_label}"
@@ -360,8 +337,7 @@ class LogAnalyzerApp:
 								 bg=flt.back_color, fg=flt.fore_color, selectcolor=flt.back_color)
 			chk.pack(side=tk.LEFT, padx=5)
 
-	# --- 匯入匯出相關 (邏輯不變) ---
-
+	# --- 檔案寫入核心 ---
 	def _write_tat_file(self, filepath):
 		try:
 			root = ET.Element("TextAnalysisTool.NET")
@@ -394,7 +370,8 @@ class LogAnalyzerApp:
 		filepath = filedialog.asksaveasfilename(defaultextension=".tat", filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")])
 		if not filepath: return
 		if self._write_tat_file(filepath):
-			self.current_tat_path = filepath; self.update_title()
+			self.current_tat_path = filepath
+			self.update_title() # 更新標題
 			messagebox.showinfo("成功", "已另存新檔")
 
 	def import_tat_filters(self):
@@ -413,7 +390,10 @@ class LogAnalyzerApp:
 				is_regex = is_true(f.get('regex'))
 				if text: new_filters.append(Filter(text, fore, back, enabled, is_regex, is_exclude))
 			self.filters = new_filters
-			self.current_tat_path = filepath; self.update_title()
+
+			self.current_tat_path = filepath
+			self.update_title() # 更新標題
+
 			self.refresh_filter_list()
 			self.recalc_filtered_data()
 			messagebox.showinfo("成功", f"已匯入 {len(new_filters)} 個 Filters")
