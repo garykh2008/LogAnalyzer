@@ -66,6 +66,9 @@ class LogAnalyzerApp:
 		self.visible_rows = 50
 		self.font_size = 10
 
+		# 控制是否只顯示過濾後的行
+		self.show_only_filtered_var = tk.BooleanVar(value=True)
+
 		# --- 介面佈局 ---
 
 		# 1. 頂部工具列
@@ -74,11 +77,19 @@ class LogAnalyzerApp:
 
 		tk.Button(toolbar, text="開啟 Log", command=self.load_log).pack(side=tk.LEFT, padx=2, pady=2)
 		tk.Frame(toolbar, width=10).pack(side=tk.LEFT)
+
 		tk.Button(toolbar, text="新增 Filter", command=self.add_filter_dialog).pack(side=tk.LEFT, padx=2, pady=2)
+		tk.Frame(toolbar, width=10).pack(side=tk.LEFT)
+
+		# [修改] 快速切換 Checkbox 文字改為 Ctrl+H
+		chk_show = tk.Checkbutton(toolbar, text="只顯示過濾結果 (Ctrl+H)", variable=self.show_only_filtered_var, command=self.recalc_filtered_data)
+		chk_show.pack(side=tk.LEFT, padx=5, pady=2)
+
 		tk.Frame(toolbar, width=10).pack(side=tk.LEFT)
 		tk.Button(toolbar, text="匯入 TAT", command=self.import_tat_filters).pack(side=tk.LEFT, padx=2, pady=2)
 		tk.Button(toolbar, text="儲存 TAT", command=self.quick_save_tat).pack(side=tk.LEFT, padx=2, pady=2)
 		tk.Button(toolbar, text="另存 TAT", command=self.save_as_tat_filters).pack(side=tk.LEFT, padx=2, pady=2)
+
 		tk.Button(toolbar, text="JSON 匯出", command=self.export_filters).pack(side=tk.RIGHT, padx=2, pady=2)
 		tk.Button(toolbar, text="JSON 匯入", command=self.import_json_filters).pack(side=tk.RIGHT, padx=2, pady=2)
 
@@ -86,7 +97,7 @@ class LogAnalyzerApp:
 		self.status_bar = tk.Label(root, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
 		self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
-		# 3. 中間可調整區域 (PanedWindow)
+		# 3. 中間可調整區域
 		self.paned_window = tk.PanedWindow(root, orient=tk.VERTICAL, sashwidth=4, sashrelief=tk.RAISED, bg="#d9d9d9")
 		self.paned_window.pack(fill=tk.BOTH, expand=True)
 
@@ -103,12 +114,17 @@ class LogAnalyzerApp:
 		self.scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
 		self.text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+		# 綁定事件
 		self.text_area.bind("<MouseWheel>", self.on_mousewheel)
 		self.text_area.bind("<Button-4>", self.on_mousewheel)
 		self.text_area.bind("<Button-5>", self.on_mousewheel)
 		self.text_area.bind("<Control-MouseWheel>", self.on_zoom)
 		self.text_area.bind("<Control-Button-4>", self.on_zoom)
 		self.text_area.bind("<Control-Button-5>", self.on_zoom)
+
+		# [修改] 綁定 Ctrl+H 快速切換
+		self.root.bind("<Control-h>", self.toggle_show_filtered)
+		self.root.bind("<Control-H>", self.toggle_show_filtered)
 
 		self.paned_window.add(content_frame, height=450, minsize=100)
 
@@ -120,13 +136,10 @@ class LogAnalyzerApp:
 
 		self.tree.heading("enabled", text="En")
 		self.tree.column("enabled", width=40, anchor="center")
-
 		self.tree.heading("type", text="Type")
 		self.tree.column("type", width=60, anchor="center")
-
 		self.tree.heading("pattern", text="Pattern / Regex")
 		self.tree.column("pattern", width=600, anchor="w")
-
 		self.tree.heading("hits", text="Hits")
 		self.tree.column("hits", width=80, anchor="e")
 
@@ -142,22 +155,18 @@ class LogAnalyzerApp:
 
 		self.paned_window.add(filter_frame, minsize=100)
 
-	# --- 設定檔管理 (新功能) ---
+	# --- 設定檔管理 ---
 	def load_config(self):
 		if os.path.exists(self.config_file):
 			try:
-				with open(self.config_file, 'r') as f:
-					return json.load(f)
-			except:
-				pass
+				with open(self.config_file, 'r') as f: return json.load(f)
+			except: pass
 		return {}
 
 	def save_config(self):
 		try:
-			with open(self.config_file, 'w') as f:
-				json.dump(self.config, f)
-		except:
-			pass
+			with open(self.config_file, 'w') as f: json.dump(self.config, f)
+		except: pass
 
 	# --- 標題更新邏輯 ---
 	def update_title(self):
@@ -171,40 +180,26 @@ class LogAnalyzerApp:
 
 	# --- 檔案讀取 ---
 	def load_log(self):
-		# 讀取上次的路徑
 		init_dir = self.config.get("last_log_dir", ".")
-
-		filepath = filedialog.askopenfilename(
-			initialdir=init_dir,
-			filetypes=[("Log Files", "*.log *.txt"), ("All Files", "*.*")]
-		)
+		filepath = filedialog.askopenfilename(initialdir=init_dir, filetypes=[("Log Files", "*.log *.txt"), ("All Files", "*.*")])
 		if not filepath: return
 
-		# 儲存本次的路徑
-		self.config["last_log_dir"] = os.path.dirname(filepath)
-		self.save_config()
-
+		self.config["last_log_dir"] = os.path.dirname(filepath); self.save_config()
 		self.update_status(f"正在讀取檔案: {filepath} ...")
 		try:
 			with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
 				self.raw_lines = f.readlines()
-
-			self.current_log_path = filepath
-			self.update_title()
-
+			self.current_log_path = filepath; self.update_title()
 			self.update_status(f"讀取完成，共 {len(self.raw_lines)} 行。正在建立索引...")
 			self.recalc_filtered_data()
-
 		except Exception as e:
-			messagebox.showerror("讀取錯誤", str(e))
-			self.update_status("讀取失敗")
+			messagebox.showerror("讀取錯誤", str(e)); self.update_status("讀取失敗")
 
-	# --- 核心過濾與顯示邏輯 ---
+	# --- 核心過濾邏輯 ---
 	def recalc_filtered_data(self):
 		self.update_status("正在套用過濾器...")
 
-		for f in self.filters:
-			f.hit_count = 0
+		for f in self.filters: f.hit_count = 0
 
 		self.text_area.config(state=tk.NORMAL)
 		self.text_area.delete("1.0", tk.END)
@@ -213,7 +208,9 @@ class LogAnalyzerApp:
 			self.text_area.tag_config(tag_name, foreground=flt.fore_color, background=flt.back_color)
 
 		self.filtered_cache = []
+		show_only_filtered = self.show_only_filtered_var.get()
 
+		# 預編譯 Regex
 		compiled_excludes = []
 		for idx, f in enumerate(self.filters):
 			if f.enabled and f.is_exclude:
@@ -234,7 +231,9 @@ class LogAnalyzerApp:
 				else:
 					compiled_includes.append((flt.text, tag, idx, False))
 
+		# 執行過濾
 		for line in self.raw_lines:
+			# 1. 檢查 Exclude
 			skip = False
 			for rule, idx, is_re in compiled_excludes:
 				matched = False
@@ -247,35 +246,50 @@ class LogAnalyzerApp:
 					self.filters[idx].hit_count += 1
 					skip = True
 					break
-			if skip: continue
 
+			# 2. 檢查 Include
 			matched_tags = []
 			is_match = False
 
-			if not active_has_includes:
-				is_match = True
+			if not skip:
+				if not active_has_includes:
+					is_match = True
+				else:
+					for rule, tag, idx, is_re in compiled_includes:
+						matched = False
+						if is_re:
+							if rule.search(line): matched = True
+						else:
+							if rule in line: matched = True
+
+						if matched:
+							is_match = True
+							matched_tags.append(tag)
+							self.filters[idx].hit_count += 1
+
+			# 3. 決定顯示
+			if show_only_filtered:
+				if not skip and is_match:
+					self.filtered_cache.append((line, matched_tags))
 			else:
-				for rule, tag, idx, is_re in compiled_includes:
-					matched = False
-					if is_re:
-						if rule.search(line): matched = True
-					else:
-						if rule in line: matched = True
-
-					if matched:
-						is_match = True
-						matched_tags.append(tag)
-						self.filters[idx].hit_count += 1
-
-			if is_match:
-				self.filtered_cache.append((line, matched_tags))
+				final_tags = matched_tags if (not skip and is_match) else []
+				self.filtered_cache.append((line, final_tags))
 
 		self.refresh_filter_list()
 		self.view_start_index = 0
 		self.render_viewport()
 		self.update_scrollbar_thumb()
-		self.update_status(f"顯示 {len(self.filtered_cache)} 行 (原始 {len(self.raw_lines)} 行)")
 
+		mode_text = "過濾檢視" if show_only_filtered else "完整檢視"
+		self.update_status(f"[{mode_text}] 顯示 {len(self.filtered_cache)} 行 (原始 {len(self.raw_lines)} 行)")
+
+	def toggle_show_filtered(self, event=None):
+		"""Ctrl+H 快捷鍵處理"""
+		current = self.show_only_filtered_var.get()
+		self.show_only_filtered_var.set(not current)
+		self.recalc_filtered_data()
+
+	# --- 虛擬捲動與 UI 邏輯 ---
 	def render_viewport(self):
 		self.text_area.config(state=tk.NORMAL)
 		self.text_area.delete("1.0", tk.END)
@@ -283,18 +297,14 @@ class LogAnalyzerApp:
 		if total == 0:
 			self.text_area.config(state=tk.DISABLED)
 			return
-
 		end_index = min(self.view_start_index + self.visible_rows, total)
 		lines_to_render = self.filtered_cache[self.view_start_index : end_index]
-
 		full_text = "".join([item[0] for item in lines_to_render])
 		self.text_area.insert("1.0", full_text)
-
 		for i, (line, tags) in enumerate(lines_to_render):
 			if tags:
 				line_idx = i + 1
-				for tag in tags:
-					self.text_area.tag_add(tag, f"{line_idx}.0", f"{line_idx}.end")
+				for tag in tags: self.text_area.tag_add(tag, f"{line_idx}.0", f"{line_idx}.end")
 		self.text_area.config(state=tk.DISABLED)
 
 	def update_scrollbar_thumb(self):
@@ -318,7 +328,6 @@ class LogAnalyzerApp:
 		elif op == "moveto":
 			fraction = float(args[1])
 			new_start = int(total * fraction)
-
 		new_start = max(0, min(new_start, total - self.visible_rows))
 		if new_start != self.view_start_index:
 			self.view_start_index = int(new_start)
@@ -344,7 +353,6 @@ class LogAnalyzerApp:
 		delta = 0
 		if event.num == 5 or event.delta < 0: delta = -1
 		elif event.num == 4 or event.delta > 0: delta = 1
-
 		if delta != 0:
 			new_size = self.font_size + delta
 			new_size = max(6, min(new_size, 50))
@@ -355,9 +363,7 @@ class LogAnalyzerApp:
 
 	# --- Filter 列表與編輯 ---
 	def refresh_filter_list(self):
-		for item in self.tree.get_children():
-			self.tree.delete(item)
-
+		for item in self.tree.get_children(): self.tree.delete(item)
 		for idx, flt in enumerate(self.filters):
 			en_str = "[X]" if flt.enabled else "[ ]"
 			type_str = "Excl" if flt.is_exclude else ("Regex" if flt.is_regex else "Text")
@@ -372,17 +378,14 @@ class LogAnalyzerApp:
 		for item_id in selected_item:
 			idx = self.tree.index(item_id)
 			self.filters[idx].enabled = not self.filters[idx].enabled
-		self.refresh_filter_list()
-		self.recalc_filtered_data()
+		self.refresh_filter_list(); self.recalc_filtered_data()
 
 	def on_filter_delete(self, event):
 		selected_items = self.tree.selection()
 		if not selected_items: return
 		indices_to_delete = sorted([self.tree.index(item) for item in selected_items], reverse=True)
-		for idx in indices_to_delete:
-			del self.filters[idx]
-		self.refresh_filter_list()
-		self.recalc_filtered_data()
+		for idx in indices_to_delete: del self.filters[idx]
+		self.refresh_filter_list(); self.recalc_filtered_data()
 
 	def on_filter_double_click(self, event):
 		item_id = self.tree.identify_row(event.y)
@@ -390,69 +393,43 @@ class LogAnalyzerApp:
 		idx = self.tree.index(item_id)
 		self.open_filter_dialog(self.filters[idx], idx)
 
-	def add_filter_dialog(self):
-		self.open_filter_dialog(None)
+	def add_filter_dialog(self): self.open_filter_dialog(None)
 
 	def open_filter_dialog(self, filter_obj=None, index=None):
 		dialog = tk.Toplevel(self.root)
 		dialog.title("Edit Filter" if filter_obj else "Add Filter")
-
 		tk.Label(dialog, text="Pattern:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
 		entry_text = tk.Entry(dialog, width=40)
 		entry_text.grid(row=0, column=1, columnspan=2, padx=5, pady=5)
 		if filter_obj: entry_text.insert(0, filter_obj.text)
-
 		var_regex = tk.BooleanVar(value=filter_obj.is_regex if filter_obj else False)
 		var_exclude = tk.BooleanVar(value=filter_obj.is_exclude if filter_obj else False)
-
 		tk.Checkbutton(dialog, text="Regex", variable=var_regex).grid(row=1, column=1, sticky="w")
 		tk.Checkbutton(dialog, text="Exclude", variable=var_exclude).grid(row=1, column=2, sticky="w")
-
-		colors = {
-			"fg": filter_obj.fore_color if filter_obj else "#000000",
-			"bg": filter_obj.back_color if filter_obj else "#FFFFFF"
-		}
-
+		colors = {"fg": filter_obj.fore_color if filter_obj else "#000000", "bg": filter_obj.back_color if filter_obj else "#FFFFFF"}
 		def pick_fg():
 			c = colorchooser.askcolor(color=colors["fg"])[1]
-			if c:
-				colors["fg"] = c
-				btn_fg.config(bg=c)
-
+			if c: colors["fg"] = c; btn_fg.config(bg=c)
 		def pick_bg():
 			c = colorchooser.askcolor(color=colors["bg"])[1]
-			if c:
-				colors["bg"] = c
-				btn_bg.config(bg=c)
-
+			if c: colors["bg"] = c; btn_bg.config(bg=c)
 		btn_fg = tk.Button(dialog, text="Text Color", bg=colors["fg"], command=pick_fg)
 		btn_fg.grid(row=2, column=1, sticky="ew", padx=2)
 		btn_bg = tk.Button(dialog, text="Back Color", bg=colors["bg"], command=pick_bg)
 		btn_bg.grid(row=2, column=2, sticky="ew", padx=2)
-
 		def save():
 			text = entry_text.get()
 			if not text: return
-
 			if filter_obj:
-				filter_obj.text = text
-				filter_obj.fore_color = colors["fg"]
-				filter_obj.back_color = colors["bg"]
-				filter_obj.is_regex = var_regex.get()
-				filter_obj.is_exclude = var_exclude.get()
+				filter_obj.text = text; filter_obj.fore_color = colors["fg"]; filter_obj.back_color = colors["bg"]
+				filter_obj.is_regex = var_regex.get(); filter_obj.is_exclude = var_exclude.get()
 			else:
-				new_filter = Filter(text, colors["fg"], colors["bg"],
-									enabled=True,
-									is_regex=var_regex.get(),
-									is_exclude=var_exclude.get())
+				new_filter = Filter(text, colors["fg"], colors["bg"], enabled=True, is_regex=var_regex.get(), is_exclude=var_exclude.get())
 				self.filters.append(new_filter)
-
-			dialog.destroy()
-			self.recalc_filtered_data()
-
+			dialog.destroy(); self.recalc_filtered_data()
 		tk.Button(dialog, text="Save", command=save, width=15).grid(row=3, column=0, columnspan=3, pady=10)
 
-	# --- 檔案寫入核心 ---
+	# --- 檔案 I/O (TAT/JSON) ---
 	def _write_tat_file(self, filepath):
 		try:
 			root = ET.Element("TextAnalysisTool.NET")
@@ -473,8 +450,7 @@ class LogAnalyzerApp:
 			tree = ET.ElementTree(root)
 			tree.write(filepath, encoding="utf-8", xml_declaration=True)
 			return True
-		except Exception as e:
-			messagebox.showerror("寫入失敗", str(e)); return False
+		except Exception as e: messagebox.showerror("寫入失敗", str(e)); return False
 
 	def quick_save_tat(self):
 		if self.current_tat_path:
@@ -482,36 +458,19 @@ class LogAnalyzerApp:
 		else: self.save_as_tat_filters()
 
 	def save_as_tat_filters(self):
-		# 使用 last_filter_dir
 		init_dir = self.config.get("last_filter_dir", ".")
-		filepath = filedialog.asksaveasfilename(
-			initialdir=init_dir,
-			defaultextension=".tat",
-			filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")]
-		)
+		filepath = filedialog.asksaveasfilename(initialdir=init_dir, defaultextension=".tat", filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")])
 		if not filepath: return
-
-		# 儲存 Filter 目錄
-		self.config["last_filter_dir"] = os.path.dirname(filepath)
-		self.save_config()
-
+		self.config["last_filter_dir"] = os.path.dirname(filepath); self.save_config()
 		if self._write_tat_file(filepath):
 			self.current_tat_path = filepath; self.update_title()
 			messagebox.showinfo("成功", "已另存新檔")
 
 	def import_tat_filters(self):
-		# 使用 last_filter_dir
 		init_dir = self.config.get("last_filter_dir", ".")
-		filepath = filedialog.askopenfilename(
-			initialdir=init_dir,
-			filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")]
-		)
+		filepath = filedialog.askopenfilename(initialdir=init_dir, filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")])
 		if not filepath: return
-
-		# 儲存 Filter 目錄
-		self.config["last_filter_dir"] = os.path.dirname(filepath)
-		self.save_config()
-
+		self.config["last_filter_dir"] = os.path.dirname(filepath); self.save_config()
 		try:
 			tree = ET.parse(filepath); root = tree.getroot()
 			filters_node = root.findall('.//filter')
