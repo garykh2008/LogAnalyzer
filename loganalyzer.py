@@ -7,6 +7,8 @@ import os
 import time
 import threading
 import queue
+import webbrowser
+import sys  # Required for PyInstaller path handling
 
 # --- Helper Functions ---
 
@@ -52,6 +54,10 @@ class LogAnalyzerApp:
 		self.root = root
 		self.root.geometry("1000x750")
 
+		# App Info
+		self.APP_NAME = "Log Analyzer"
+		self.VERSION = "v1.0"
+
 		# Threading & Queue
 		self.msg_queue = queue.Queue()
 		self.is_processing = False
@@ -92,7 +98,7 @@ class LogAnalyzerApp:
 
 		# --- UI Layout ---
 
-		# 1. Menu Bar (Replaces Toolbar)
+		# 1. Menu Bar
 		self.menubar = tk.Menu(root)
 		root.config(menu=self.menubar)
 
@@ -102,11 +108,11 @@ class LogAnalyzerApp:
 
 		self.file_menu.add_command(label="Open Log", command=self.load_log)
 		self.file_menu.add_separator()
-		self.file_menu.add_command(label="Load Filters", command=self.import_tat_filters) # Import TAT
-		self.file_menu.add_command(label="Save Filters", command=self.quick_save_tat)     # Save TAT
-		self.file_menu.add_command(label="Save Filters As", command=self.save_as_tat_filters) # Save TAT As
+		self.file_menu.add_command(label="Load Filters", command=self.import_tat_filters)
+		self.file_menu.add_command(label="Save Filters", command=self.quick_save_tat)
+		self.file_menu.add_command(label="Save Filters As", command=self.save_as_tat_filters)
 
-		# JSON Features (Hidden/Commented as requested)
+		# JSON Features (Hidden)
 		# self.file_menu.add_separator()
 		# self.file_menu.add_command(label="Import JSON", command=self.import_json_filters)
 		# self.file_menu.add_command(label="Export JSON", command=self.export_filters)
@@ -123,6 +129,13 @@ class LogAnalyzerApp:
 										 variable=self.show_only_filtered_var,
 										 command=self.recalc_filtered_data,
 										 accelerator="Ctrl+H")
+
+		# [Help Menu]
+		self.help_menu = tk.Menu(self.menubar, tearoff=0)
+		self.menubar.add_cascade(label="Help", menu=self.help_menu)
+		self.help_menu.add_command(label="Documentation", command=self.open_documentation)
+		self.help_menu.add_separator()
+		self.help_menu.add_command(label="About", command=self.show_about)
 
 		# 2. Status Bar & Progress Bar Area
 		status_frame = tk.Frame(root, bd=1, relief=tk.SUNKEN)
@@ -226,6 +239,42 @@ class LogAnalyzerApp:
 
 		# Start Queue Checker
 		self.check_queue()
+
+	# --- [Helper] Path Resource Finder ---
+	def resource_path(self, relative_path):
+		""" Get absolute path to resource, works for dev and for PyInstaller """
+		try:
+			# PyInstaller creates a temp folder and stores path in _MEIPASS
+			base_path = sys._MEIPASS
+		except Exception:
+			base_path = os.path.abspath(".")
+
+		return os.path.join(base_path, relative_path)
+
+	# --- Documentation & About ---
+	def open_documentation(self):
+		# Use resource_path to find the Doc file even inside EXE
+		doc_path = self.resource_path(os.path.join("Doc", "Log_Analyzer_v1.0_Docs_EN.html"))
+
+		if not os.path.exists(doc_path):
+			# If not found inside, check if it's next to the EXE (User might have copied it there)
+			doc_path = os.path.join(os.path.abspath("."), "Doc", "Log_Analyzer_v1.0_Docs_EN.html")
+		if not os.path.exists(doc_path):
+			messagebox.showerror("Error", f"Documentation file not found at:\n{doc_path}\n\nPlease ensure the 'Doc' folder is in the application directory.")
+			return
+
+		try:
+			# Windows: os.startfile opens the file with the default associated app
+			os.startfile(doc_path)
+		except AttributeError:
+			# Non-Windows: fallback to webbrowser
+			webbrowser.open(doc_path)
+		except Exception as e:
+			messagebox.showerror("Error", f"Could not open file: {e}")
+
+	def show_about(self):
+		msg = f"{self.APP_NAME}\nVersion: {self.VERSION}\n\nA high-performance log analysis tool."
+		messagebox.showinfo("About", msg)
 
 	# --- Status Update (Unified) ---
 	def update_status(self, msg):
@@ -331,6 +380,7 @@ class LogAnalyzerApp:
 		try:
 			self.menubar.entryconfig("File", state=state)
 			self.menubar.entryconfig("Filter", state=state)
+			self.menubar.entryconfig("Help", state=state)
 		except: pass
 
 		self.tree.state(("disabled",) if is_busy else ("!disabled",))
@@ -353,7 +403,7 @@ class LogAnalyzerApp:
 	def update_title(self):
 		log_name = os.path.basename(self.current_log_path) if self.current_log_path else "No file load"
 		filter_name = os.path.basename(self.current_tat_path) if self.current_tat_path else "No filter file"
-		self.root.title(f"[{log_name}] - [{filter_name}] - Log Analyzer")
+		self.root.title(f"[{log_name}] - [{filter_name}] - {self.APP_NAME} {self.VERSION}")
 
 	# --- [Data Access Helpers] ---
 	def get_total_count(self):
@@ -615,7 +665,7 @@ class LogAnalyzerApp:
 			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
 			code_lines.append(f"            continue")
 
-		code_lines.append("        ")
+		code_lines.append("")
 
 		# 3. Includes
 		if not has_active_includes:
