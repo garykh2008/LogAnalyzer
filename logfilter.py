@@ -5,6 +5,8 @@ import json
 import xml.etree.ElementTree as ET
 import os
 import time
+import threading
+import queue
 
 # --- Helper Functions ---
 
@@ -48,7 +50,11 @@ class Filter:
 class LogAnalyzerApp:
 	def __init__(self, root):
 		self.root = root
-		self.root.geometry("1000x700")
+		self.root.geometry("1000x750")
+
+		# Threading & Queue
+		self.msg_queue = queue.Queue()
+		self.is_processing = False
 
 		# Config
 		self.config_file = "app_config.json"
@@ -61,14 +67,11 @@ class LogAnalyzerApp:
 		# If None, it means "Raw Mode"
 		self.filtered_cache = None
 
-		# [New] Filter Match Cache: { filter_index: [raw_idx1, raw_idx2, ...] }
-		# Stores raw indices of lines matched by specific filters
+		# Filter Match Cache: { filter_index: [raw_idx1, raw_idx2, ...] }
 		self.filter_matches = {}
 
 		self.current_log_path = None
 		self.current_tat_path = None
-
-		self.update_title()
 
 		self.view_start_index = 0
 		self.visible_rows = 50
@@ -89,27 +92,51 @@ class LogAnalyzerApp:
 
 		# --- UI Layout ---
 
-		# 1. Toolbar
-		toolbar = tk.Frame(root, bd=1, relief=tk.RAISED)
-		toolbar.pack(side=tk.TOP, fill=tk.X)
+		# 1. Menu Bar (Replaces Toolbar)
+		self.menubar = tk.Menu(root)
+		root.config(menu=self.menubar)
 
-		tk.Button(toolbar, text="Open Log", command=self.load_log).pack(side=tk.LEFT, padx=2, pady=2)
-		tk.Frame(toolbar, width=10).pack(side=tk.LEFT)
+		# [File Menu]
+		self.file_menu = tk.Menu(self.menubar, tearoff=0)
+		self.menubar.add_cascade(label="File", menu=self.file_menu)
 
-		tk.Button(toolbar, text="Add Filter", command=self.add_filter_dialog).pack(side=tk.LEFT, padx=2, pady=2)
-		tk.Frame(toolbar, width=10).pack(side=tk.LEFT)
+		self.file_menu.add_command(label="Open Log", command=self.load_log)
+		self.file_menu.add_separator()
+		self.file_menu.add_command(label="Load Filters", command=self.import_tat_filters) # Import TAT
+		self.file_menu.add_command(label="Save Filters", command=self.quick_save_tat)     # Save TAT
+		self.file_menu.add_command(label="Save Filters As", command=self.save_as_tat_filters) # Save TAT As
 
-		chk_show = tk.Checkbutton(toolbar, text="Show Filtered Only (Ctrl+H)", variable=self.show_only_filtered_var, command=self.recalc_filtered_data)
-		chk_show.pack(side=tk.LEFT, padx=5, pady=2)
+		# JSON Features (Hidden/Commented as requested)
+		# self.file_menu.add_separator()
+		# self.file_menu.add_command(label="Import JSON", command=self.import_json_filters)
+		# self.file_menu.add_command(label="Export JSON", command=self.export_filters)
 
-		tk.Frame(toolbar, width=10).pack(side=tk.LEFT)
-		tk.Button(toolbar, text="Import TAT", command=self.import_tat_filters).pack(side=tk.LEFT, padx=2, pady=2)
-		tk.Button(toolbar, text="Save TAT", command=self.quick_save_tat).pack(side=tk.LEFT, padx=2, pady=2)
-		tk.Button(toolbar, text="Save TAT As", command=self.save_as_tat_filters).pack(side=tk.LEFT, padx=2, pady=2)
+		self.file_menu.add_separator()
+		self.file_menu.add_command(label="Exit", command=root.quit)
 
-		# 2. Status Bar
-		self.status_bar = tk.Label(root, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
-		self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+		# [Filter Menu]
+		self.filter_menu = tk.Menu(self.menubar, tearoff=0)
+		self.menubar.add_cascade(label="Filter", menu=self.filter_menu)
+
+		self.filter_menu.add_command(label="Add Filter", command=self.add_filter_dialog)
+		self.filter_menu.add_checkbutton(label="Show Filtered Only", onvalue=True, offvalue=False,
+										 variable=self.show_only_filtered_var,
+										 command=self.recalc_filtered_data,
+										 accelerator="Ctrl+H")
+
+		# 2. Status Bar & Progress Bar Area
+		status_frame = tk.Frame(root, bd=1, relief=tk.SUNKEN)
+		status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+		self.progress_bar = ttk.Progressbar(status_frame, orient="horizontal", mode="determinate", length=200)
+		self.progress_bar.pack(side=tk.RIGHT, padx=5, pady=2)
+
+		self.status_label = tk.Label(status_frame, text="Ready", anchor=tk.W)
+		self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+
+		# Update initial title and status
+		self.update_title()
+		self.update_status("Ready")
 
 		# 3. Main Content Area (PanedWindow)
 		self.paned_window = tk.PanedWindow(root, orient=tk.VERTICAL, sashwidth=4, sashrelief=tk.RAISED, bg="#d9d9d9")
@@ -132,6 +159,9 @@ class LogAnalyzerApp:
 
 		self.scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
 		self.text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+		# Configure default selection tag immediately
+		self.text_area.tag_config("current_line", background="#0078D7", foreground="#FFFFFF")
 
 		# Bindings
 		self.text_area.bind("<MouseWheel>", self.on_mousewheel)
@@ -194,6 +224,118 @@ class LogAnalyzerApp:
 
 		self.paned_window.add(filter_frame, minsize=100)
 
+		# Start Queue Checker
+		self.check_queue()
+
+	# --- Status Update (Unified) ---
+	def update_status(self, msg):
+		full_text = f"{msg}    |    Load Time: {self.load_duration_str}    |    Filter Time: {self.filter_duration_str}"
+		self.status_label.config(text=full_text)
+
+	# --- Tag Configuration ---
+	def apply_tag_styles(self):
+		for i, flt in enumerate(self.filters):
+			tag_name = f"filter_{i}"
+			self.text_area.tag_config(tag_name, foreground=flt.fore_color, background=flt.back_color)
+		self.text_area.tag_config("current_line", background="#0078D7", foreground="#FFFFFF")
+
+	# --- Threading Infrastructure ---
+
+	def check_queue(self):
+		try:
+			while True:
+				msg = self.msg_queue.get_nowait()
+				msg_type = msg[0]
+
+				if msg_type == 'progress':
+					current, total, text = msg[1], msg[2], msg[3]
+					self.progress_bar["maximum"] = total
+					self.progress_bar["value"] = current
+					self.update_status(text)
+
+				elif msg_type == 'load_complete':
+					lines, duration, filepath = msg[1], msg[2], msg[3]
+					self.raw_lines = lines
+					self.load_duration_str = f"{duration:.4f}s"
+					self.current_log_path = filepath
+					self.update_title()
+					self.selected_raw_index = -1
+					self.selection_offset = 0
+					self.filter_matches = {}
+					self.set_ui_busy(False)
+					self.update_status(f"Loaded {len(lines)} lines")
+					self.recalc_filtered_data()
+
+				elif msg_type == 'load_error':
+					self.set_ui_busy(False)
+					messagebox.showerror("Load Error", msg[1])
+					self.update_status("Load failed")
+
+				elif msg_type == 'filter_complete':
+					cache, duration, counts, matches, is_filtered = msg[1], msg[2], msg[3], msg[4], msg[5]
+					self.filtered_cache = cache
+					self.filter_duration_str = f"{duration:.4f}s"
+
+					for i, count in enumerate(counts):
+						if i < len(self.filters):
+							self.filters[i].hit_count = count
+
+					if matches: self.filter_matches.update(matches)
+
+					self.apply_tag_styles()
+					self.refresh_filter_list()
+
+					target_raw_index = -1
+					anchor_offset = 0
+					if self.selected_raw_index != -1:
+						target_raw_index = self.selected_raw_index
+						anchor_offset = self.selection_offset
+
+					new_start_index = 0
+					new_total = self.get_total_count()
+
+					if target_raw_index >= 0:
+						if self.filtered_cache is None: found_idx = target_raw_index
+						else:
+							found_idx = -1
+							for i, item in enumerate(self.filtered_cache):
+								if item[2] >= target_raw_index: found_idx = i; break
+
+						if found_idx != -1: new_start_index = max(0, found_idx - anchor_offset)
+						else: new_start_index = max(0, new_total - self.visible_rows)
+
+					self.view_start_index = new_start_index
+					self.render_viewport()
+					self.update_scrollbar_thumb()
+
+					mode_text = "Filtered" if is_filtered else "Full View"
+					count_text = len(self.filtered_cache) if self.filtered_cache else len(self.raw_lines)
+					self.update_status(f"[{mode_text}] Showing {count_text} lines (Total {len(self.raw_lines)})")
+
+					self.set_ui_busy(False)
+					self.progress_bar["value"] = 0
+
+				elif msg_type == 'status':
+					self.update_status(msg[1])
+
+		except queue.Empty:
+			pass
+		finally:
+			self.root.after(100, self.check_queue)
+
+	def set_ui_busy(self, is_busy):
+		self.is_processing = is_busy
+		state = tk.DISABLED if is_busy else tk.NORMAL
+
+		# Disable Menus
+		try:
+			self.menubar.entryconfig("File", state=state)
+			self.menubar.entryconfig("Filter", state=state)
+		except: pass
+
+		self.tree.state(("disabled",) if is_busy else ("!disabled",))
+		self.root.config(cursor="watch" if is_busy else "")
+
 	# --- Config Management ---
 	def load_config(self):
 		if os.path.exists(self.config_file):
@@ -213,15 +355,9 @@ class LogAnalyzerApp:
 		filter_name = os.path.basename(self.current_tat_path) if self.current_tat_path else "No filter file"
 		self.root.title(f"[{log_name}] - [{filter_name}] - Log Analyzer")
 
-	def update_status(self, msg):
-		full_text = f"{msg}    |    Load Time: {self.load_duration_str}    |    Filter Time: {self.filter_duration_str}"
-		self.status_bar.config(text=full_text)
-		self.root.update_idletasks()
-
 	# --- [Data Access Helpers] ---
 	def get_total_count(self):
-		if self.filtered_cache is None:
-			return len(self.raw_lines)
+		if self.filtered_cache is None: return len(self.raw_lines)
 		return len(self.filtered_cache)
 
 	def get_view_item(self, index):
@@ -234,313 +370,339 @@ class LogAnalyzerApp:
 				return self.filtered_cache[index]
 			return ("", [], -1)
 
-	# --- File Loading ---
+	# --- File Loading (Threaded) ---
 	def load_log(self):
+		if self.is_processing: return
 		init_dir = self.config.get("last_log_dir", ".")
 		filepath = filedialog.askopenfilename(initialdir=init_dir, filetypes=[("Log Files", "*.log *.txt"), ("All Files", "*.*")])
 		if not filepath: return
 
 		self.config["last_log_dir"] = os.path.dirname(filepath); self.save_config()
-		self.update_status(f"Loading file: {filepath} ...")
+
+		self.set_ui_busy(True)
+		self.progress_bar["value"] = 0
+
+		t = threading.Thread(target=self._worker_load_log, args=(filepath,))
+		t.daemon = True
+		t.start()
+
+	def _worker_load_log(self, filepath):
 		try:
 			t_start = time.time()
+			file_size = os.path.getsize(filepath)
+			lines = []
+			self.msg_queue.put(('progress', 0, 100, f"Loading {os.path.basename(filepath)}..."))
+
 			with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-				self.raw_lines = f.readlines()
+				if file_size < 10 * 1024 * 1024:
+					lines = f.readlines()
+				else:
+					self.msg_queue.put(('progress', 10, 100, "Reading file into memory... (Please wait)"))
+					lines = f.readlines()
+
 			t_end = time.time()
-			self.load_duration_str = f"{t_end - t_start:.4f}s"
-
-			self.current_log_path = filepath; self.update_title()
-			self.selected_raw_index = -1; self.selection_offset = 0
-			self.filter_matches = {} # [New] Clear cache on new file
-			self.update_status(f"Loaded {len(self.raw_lines)} lines. Indexing...")
-			self.recalc_filtered_data()
+			self.msg_queue.put(('load_complete', lines, t_end - t_start, filepath))
 		except Exception as e:
-			messagebox.showerror("Load Error", str(e)); self.update_status("Load failed")
+			self.msg_queue.put(('load_error', str(e)))
 
-	# --- [NEW] Smart Update (Uses Cache for Instant Re-enable) ---
-	# --- Smart Update (Optimized: Skip Hit Lines) ---
+	# --- Filter Logic (Threaded) ---
+
 	def smart_update_filter(self, idx, is_enabling):
+		if self.is_processing: return
+
+		flt = self.filters[idx]
+		if (not is_enabling and flt.is_exclude) or (self.filtered_cache is None and is_enabling):
+			self.recalc_filtered_data()
+			return
+
+		self.set_ui_busy(True)
+		current_cache = self.filtered_cache if self.filtered_cache else []
+
+		t = threading.Thread(target=self._worker_smart_update, args=(idx, is_enabling, current_cache, self.show_only_filtered_var.get()))
+		t.daemon = True
+		t.start()
+
+	def _worker_smart_update(self, idx, is_enabling, current_cache, show_only):
+		# Smart update logic (omitted optimization here as it's partial update)
+		# Kept same as V2.2 for stability in smart update
+		t_start = time.time()
 		flt = self.filters[idx]
 
-		# 複雜情況回退到多執行緒全量重算
-		if (not is_enabling and flt.is_exclude) or (self.filtered_cache is None and is_enabling):
-			self.recalc_filtered_data(); return
+		rule = None
+		if flt.is_regex:
+			try: rule = re.compile(flt.text, re.IGNORECASE)
+			except: pass
+		else: rule = flt.text
 
-		t_start = time.time()
-		self.update_status("Smart updating...")
-
-		# 保存視角
-		target_raw_index = -1; anchor_offset = 0
-		if self.selected_raw_index != -1:
-			target_raw_index = self.selected_raw_index; anchor_offset = self.selection_offset
-		elif self.filtered_cache and self.view_start_index < len(self.filtered_cache):
-			target_raw_index = self.filtered_cache[self.view_start_index][2]; anchor_offset = 0
-
-		tag_name = f"filter_{idx}"
-		self.text_area.tag_config(tag_name, foreground=flt.fore_color, background=flt.back_color)
+		active_excludes = []
+		if is_enabling and not flt.is_exclude:
+			for i, f in enumerate(self.filters):
+				if f.enabled and f.is_exclude:
+					if f.is_regex:
+						try: active_excludes.append(re.compile(f.text, re.IGNORECASE))
+						except: pass
+					else: active_excludes.append(f.text)
 
 		new_cache = []
-		show_only = self.show_only_filtered_var.get()
+		local_hit_count = 0
+		tag_name = f"filter_{idx}"
 
-		# --- Logic A: Shrinking (關閉 Include / 開啟 Exclude) ---
-		# 這裡邏輯不變，因為是在縮減資料，只處理 cache 即可
+		total_steps = len(current_cache) if ((not is_enabling and not flt.is_exclude) or (is_enabling and flt.is_exclude)) else len(self.raw_lines)
+		report_interval = max(1, total_steps // 20)
+		step_count = 0
+
+		# A: Shrinking
 		if (not is_enabling and not flt.is_exclude) or (is_enabling and flt.is_exclude):
-			rule = None
-			if flt.is_regex:
-				try: rule = re.compile(flt.text, re.IGNORECASE)
-				except: pass
-			else: rule = flt.text
+			self.msg_queue.put(('progress', 0, total_steps, "Updating View (Shrinking)..."))
+			active_inc = any(f.enabled and not f.is_exclude for i, f in enumerate(self.filters) if i != idx)
 
-			flt.hit_count = 0
+			for line, tags, raw_idx in current_cache:
+				step_count += 1
+				if step_count % report_interval == 0:
+					self.msg_queue.put(('progress', step_count, total_steps, "Updating View (Shrinking)..."))
 
-			for line, tags, raw_idx in self.filtered_cache:
 				matched = False
 				if isinstance(rule, str): matched = (rule in line)
 				elif rule: matched = (rule.search(line) is not None)
 
-				# Disable Include
 				if not is_enabling and not flt.is_exclude:
-					if matched and tag_name in tags: tags.remove(tag_name)
-					active_inc = any(f.enabled and not f.is_exclude for f in self.filters)
-					if show_only and active_inc and not tags: continue
+					if matched and tag_name in tags:
+						tags = list(tags)
+						if tag_name in tags: tags.remove(tag_name)
+					if show_only:
+						if not tags and active_inc: continue
 
-				# Enable Exclude
 				if is_enabling and flt.is_exclude:
-					if matched: flt.hit_count += 1; continue
+					if matched:
+						local_hit_count += 1
+						continue
 
 				new_cache.append((line, tags, raw_idx))
-			self.filtered_cache = new_cache
 
-		# --- Logic B: Expanding (開啟 Include) [極致優化：跳過已命中] ---
+		# B: Expanding
 		elif is_enabling and not flt.is_exclude:
-
-			# 預編譯規則
-			rule = None
-			if flt.is_regex:
-				try: rule = re.compile(flt.text, re.IGNORECASE)
-				except: pass
-			else: rule = flt.text
-
-			flt.hit_count = 0
-
-			# 準備 Exclude 規則 (用來檢查新命中的行是否該被排除)
-			active_excludes = [f for f in self.filters if f.enabled and f.is_exclude]
-			exclude_rules = []
-			for f in active_excludes:
-				if f.is_regex:
-					try: exclude_rules.append(re.compile(f.text, re.IGNORECASE))
-					except: pass
-				else: exclude_rules.append(f.text)
-
-			# 雙指針遍歷：同時掃描 raw_lines 和 old_cache
-			# 利用 cache 是按順序排列的特性
+			self.msg_queue.put(('progress', 0, total_steps, "Updating View (Expanding)..."))
 			cache_idx = 0
-			cache_len = len(self.filtered_cache)
-
-			# 提取下一筆已存在的行號 (Sentinel)
-			next_cached_raw_idx = self.filtered_cache[0][2] if cache_len > 0 else -1
-
-			# 快取 append 方法加速
-			cache_append = new_cache.append
+			cache_len = len(current_cache)
+			next_cached_raw_idx = current_cache[0][2] if cache_len > 0 else -1
 
 			for raw_idx, line in enumerate(self.raw_lines):
+				step_count += 1
+				if step_count % report_interval == 0:
+					self.msg_queue.put(('progress', step_count, total_steps, "Updating View (Expanding)..."))
 
-				# 檢查：這一行是否已經被前面的 Filter 抓到了?
 				if raw_idx == next_cached_raw_idx:
-					# [Hit Skipped!] 已經在 Cache 裡，直接複製，不跑 Regex！
-					cache_item = self.filtered_cache[cache_idx]
-					cache_append(cache_item) # 原封不動搬過去，甚至不加新 Tag (因為 break 邏輯)
+					item = current_cache[cache_idx]
+					matched = False
+					if isinstance(rule, str): matched = (rule in line)
+					elif rule: matched = (rule.search(line) is not None)
 
-					# 移動 Cache 指標
-					cache_idx += 1
-					if cache_idx < cache_len:
-						next_cached_raw_idx = self.filtered_cache[cache_idx][2]
+					if matched:
+						local_hit_count += 1
+						tags = list(item[1])
+						if tag_name not in tags: tags.append(tag_name)
+						new_cache.append((line, tags, raw_idx))
 					else:
-						next_cached_raw_idx = -1 # End of cache
+						new_cache.append(item)
 
-					continue # <--- 這裡就是您要的優化：跳過比對
+					cache_idx += 1
+					if cache_idx < cache_len: next_cached_raw_idx = current_cache[cache_idx][2]
+					else: next_cached_raw_idx = -1
+				else:
+					matched = False
+					if isinstance(rule, str): matched = (rule in line)
+					elif rule: matched = (rule.search(line) is not None)
 
-				# --- 如果執行到這裡，代表這一行原本「沒顯示」 ---
-				# 我們檢查它是否符合這個「新 Filter」
+					if matched:
+						is_excluded = False
+						for ex in active_excludes:
+							if isinstance(ex, str):
+								if ex in line: is_excluded = True; break
+							else:
+								if ex.search(line): is_excluded = True; break
 
-				matched = False
-				if isinstance(rule, str):
-					if rule in line: matched = True
-				elif rule:
-					if rule.search(line): matched = True
+						if not is_excluded:
+							local_hit_count += 1
+							new_cache.append((line, [tag_name], raw_idx))
 
-				if matched:
-					# 檢查是否被 Exclude (因為原本沒顯示可能是被 Exclude 或是單純沒命中)
-					# 我們必須確保新命中的行沒有被 Exclude 擋掉
-					is_excluded = False
-					for ex_rule in exclude_rules:
-						if isinstance(ex_rule, str):
-							if ex_rule in line: is_excluded = True; break
-						else:
-							if ex_rule.search(line): is_excluded = True; break
-
-					if not is_excluded:
-						flt.hit_count += 1
-						# 命中！加入 Cache
-						cache_append((line, [tag_name], raw_idx))
-
-			self.filtered_cache = new_cache
-
-		self.refresh_filter_list()
-
-		# 還原視角
-		new_start_index = 0
-		if target_raw_index >= 0:
-			found_idx = -1
-			# 優化：假設順序沒變，我們可以從上次的位置附近找
-			# 但為了安全，線性搜尋即可 (Python List C底層很快)
-			for i, item in enumerate(self.filtered_cache):
-				if item[2] >= target_raw_index: found_idx = i; break
-
-			if found_idx != -1: new_start_index = max(0, found_idx - anchor_offset)
-			else: new_start_index = max(0, len(self.filtered_cache) - self.visible_rows)
-
-		self.view_start_index = new_start_index
-		self.render_viewport(); self.update_scrollbar_thumb()
+		final_counts = [f.hit_count for f in self.filters]
+		final_counts[idx] = local_hit_count
 
 		t_end = time.time()
-		self.filter_duration_str = f"{t_end - t_start:.4f}s (Smart)"
-		mode_text = "Filtered" if show_only else "Full View"
-		self.update_status(f"[{mode_text}] Showing {len(self.filtered_cache)} lines")
+		self.msg_queue.put(('filter_complete', new_cache, t_end - t_start, final_counts, None, show_only))
 
-	# --- [Core] Full Recalc (Populates Cache) ---
 	def recalc_filtered_data(self):
-		target_raw_index = -1; anchor_offset = 0
-		if self.selected_raw_index != -1:
-			target_raw_index = self.selected_raw_index; anchor_offset = self.selection_offset
-		elif self.filtered_cache and self.view_start_index < len(self.filtered_cache):
-			target_raw_index = self.filtered_cache[self.view_start_index][2]; anchor_offset = 0
+		if self.is_processing: return
+		self.set_ui_busy(True)
 
+		# Snapshot filters
+		filters_snapshot = []
+		for f in self.filters:
+			filters_snapshot.append({
+				'text': f.text,
+				'is_regex': f.is_regex,
+				'is_exclude': f.is_exclude,
+				'enabled': f.enabled
+			})
+
+		t = threading.Thread(target=self._worker_recalc_jit, args=(filters_snapshot, self.show_only_filtered_var.get()))
+		t.daemon = True
+		t.start()
+
+	# --- [OPTIMIZATION V2.6] JIT / Unrolled Loop ---
+	def _worker_recalc_jit(self, filters_data, show_only_filtered):
 		t_start = time.time()
-		self.update_status("Calculating filters...")
 
-		for f in self.filters: f.hit_count = 0
+		has_active_filters = any(f['enabled'] for f in filters_data)
 
-		self.text_area.config(state=tk.NORMAL); self.text_area.delete("1.0", tk.END)
-		self.line_number_area.config(state=tk.NORMAL); self.line_number_area.delete("1.0", tk.END)
-
-		for i, flt in enumerate(self.filters):
-			tag_name = f"filter_{i}"
-			self.text_area.tag_config(tag_name, foreground=flt.fore_color, background=flt.back_color)
-		self.text_area.tag_config("current_line", background="#0078D7", foreground="#FFFFFF")
-
-		show_only_filtered = self.show_only_filtered_var.get()
-		has_active_filters = any(f.enabled for f in self.filters)
-
+		# Fast path: No filters
 		if not has_active_filters:
-			self.filtered_cache = None
-		else:
-			self.filtered_cache = []
-			txt_excludes = []
-			reg_excludes = []
-			txt_includes = []
-			reg_includes = []
-			has_active_includes = False
-			filter_counts = [0] * len(self.filters)
+			t_end = time.time()
+			self.msg_queue.put(('filter_complete', None, t_end - t_start, [0]*len(filters_data), {}, False))
+			return
 
-			# [New] Prepare temp match lists for active filters
-			# We will populate these lists as we scan
-			temp_matches = {i: [] for i in range(len(self.filters)) if self.filters[i].enabled}
+		# Separate filters
+		txt_excludes = []
+		reg_excludes = []
+		txt_includes = []
+		reg_includes = []
+		has_active_includes = False
 
-			for idx, f in enumerate(self.filters):
-				if not f.enabled: continue
-				if f.is_exclude:
-					if f.is_regex:
-						try: reg_excludes.append((re.compile(f.text, re.IGNORECASE), idx))
-						except: pass
-					else: txt_excludes.append((f.text, idx))
-				else:
-					has_active_includes = True
-					tag = f"filter_{idx}"
-					if f.is_regex:
-						try: reg_includes.append((re.compile(f.text, re.IGNORECASE), tag, idx))
-						except: pass
-					else: txt_includes.append((f.text, tag, idx))
-
-			cache_append = self.filtered_cache.append
-
-			for raw_idx, line in enumerate(self.raw_lines):
-				skip = False
-				for text, idx in txt_excludes:
-					if text in line:
-						filter_counts[idx] += 1
-						# [Cache] Store hit
-						temp_matches[idx].append(raw_idx)
-						skip = True; break
-				if skip: continue
-				for rule, idx in reg_excludes:
-					if rule.search(line):
-						filter_counts[idx] += 1
-						# [Cache] Store hit
-						temp_matches[idx].append(raw_idx)
-						skip = True; break
-				if skip: continue
-
-				matched_tags = []
-				is_match = False
-
-				if not has_active_includes: is_match = True
-				else:
-					# Note: With 'break', we only capture the first match for display
-					# But for caching purposes, if we want to cache ALL matches for future use,
-					# we technically should scan all.
-					# Trade-off: We stick to "First Match Wins" logic for speed.
-					# So only the first matching filter gets the cache entry for this line.
-
-					for text, tag, idx in txt_includes:
-						if text in line:
-							is_match = True; matched_tags.append(tag); filter_counts[idx] += 1
-							temp_matches[idx].append(raw_idx) # [Cache]
-							break
-					if not is_match:
-						for rule, tag, idx in reg_includes:
-							if rule.search(line):
-								is_match = True; matched_tags.append(tag); filter_counts[idx] += 1
-								temp_matches[idx].append(raw_idx) # [Cache]
-								break
-
-				if show_only_filtered:
-					if is_match: cache_append((line, matched_tags, raw_idx))
-				else:
-					final_tags = matched_tags if is_match else []
-					cache_append((line, final_tags, raw_idx))
-
-			for i, count in enumerate(filter_counts): self.filters[i].hit_count = count
-
-			# [New] Update the persistent cache
-			self.filter_matches.update(temp_matches)
-
-		self.refresh_filter_list()
-
-		new_start_index = 0
-		new_total = self.get_total_count()
-		if target_raw_index >= 0:
-			if self.filtered_cache is None: found_idx = target_raw_index
+		for idx, f in enumerate(filters_data):
+			if not f['enabled']: continue
+			if f['is_exclude']:
+				if f['is_regex']:
+					try: reg_excludes.append((re.compile(f['text'], re.IGNORECASE), idx))
+					except: pass
+				else: txt_excludes.append((f['text'], idx))
 			else:
-				found_idx = -1
-				for i, item in enumerate(self.filtered_cache):
-					if item[2] >= target_raw_index: found_idx = i; break
-			if found_idx != -1: new_start_index = max(0, found_idx - anchor_offset)
-			else: new_start_index = max(0, new_total - self.visible_rows)
+				has_active_includes = True
+				tag = f"filter_{idx}"
+				if f['is_regex']:
+					try: reg_includes.append((re.compile(f['text'], re.IGNORECASE), tag, idx))
+					except: pass
+				else: txt_includes.append((f['text'], tag, idx))
 
-		self.view_start_index = new_start_index
-		self.render_viewport(); self.update_scrollbar_thumb()
-		t_end = time.time()
-		self.filter_duration_str = f"{t_end - t_start:.4f}s"
-		mode_text = "Filtered" if show_only_filtered else "Full View"
-		self.update_status(f"[{mode_text}] Showing {new_total} lines (Total {len(self.raw_lines)} lines)")
+		# --- Dynamic Code Generation ---
+		# We construct a python function string that unrolls the loop
+		# This avoids the overhead of iterating through filters for every line.
+
+		code_lines = []
+		code_lines.append("def fast_filter_worker(raw_lines, new_cache, filter_counts, temp_matches, update_prog):")
+		code_lines.append("    total = len(raw_lines)")
+		code_lines.append("    report_interval = max(1, total // 50)")
+		code_lines.append("    cache_append = new_cache.append")
+		code_lines.append("    ")
+		code_lines.append("    for raw_idx, line in enumerate(raw_lines):")
+		code_lines.append("        if raw_idx % report_interval == 0: update_prog(raw_idx, total)")
+		code_lines.append("        ")
+
+		# 1. Excludes (Text)
+		# Use simple if checks. If match, continue (skip line)
+		for text, idx in txt_excludes:
+			safe_text = repr(text) # Automatically escapes quotes/backslashes
+			code_lines.append(f"        if {safe_text} in line:")
+			code_lines.append(f"            filter_counts[{idx}] += 1")
+			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
+			code_lines.append(f"            continue")
+
+		# 2. Excludes (Regex)
+		# We need to access regex objects from local context.
+		# We'll pass them in 'context' dict and name them reg_ex_{idx}
+		for _, idx in reg_excludes:
+			code_lines.append(f"        if reg_ex_{idx}.search(line):")
+			code_lines.append(f"            filter_counts[{idx}] += 1")
+			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
+			code_lines.append(f"            continue")
+
+		code_lines.append("        ")
+
+		# 3. Includes
+		if not has_active_includes:
+			# If only exclude filters, and we passed them, then it's a match
+			if show_only_filtered:
+				code_lines.append("        cache_append((line, [], raw_idx))")
+			else:
+				code_lines.append("        cache_append((line, [], raw_idx))")
+		else:
+			code_lines.append("        # Include Checks")
+			# We use an if/elif chain to emulate the "first match wins" logic of V2.3
+			# Note: V2.3 used 'break', effectively making it an if/elif chain.
+
+			first_include = True
+
+			# Text Includes
+			for text, tag, idx in txt_includes:
+				safe_text = repr(text)
+				prefix = "if" if first_include else "elif"
+				code_lines.append(f"        {prefix} {safe_text} in line:")
+				code_lines.append(f"            filter_counts[{idx}] += 1")
+				code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
+				if show_only_filtered:
+					code_lines.append(f"            cache_append((line, ['{tag}'], raw_idx))")
+				else:
+					code_lines.append(f"            cache_append((line, ['{tag}'], raw_idx))")
+				first_include = False
+
+			# Regex Includes
+			for _, tag, idx in reg_includes:
+				prefix = "if" if first_include else "elif"
+				code_lines.append(f"        {prefix} reg_inc_{idx}.search(line):")
+				code_lines.append(f"            filter_counts[{idx}] += 1")
+				code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
+				if show_only_filtered:
+					code_lines.append(f"            cache_append((line, ['{tag}'], raw_idx))")
+				else:
+					code_lines.append(f"            cache_append((line, ['{tag}'], raw_idx))")
+				first_include = False
+
+			# Else case (No include matched)
+			if not show_only_filtered:
+				code_lines.append("        else:")
+				code_lines.append("            cache_append((line, [], raw_idx))")
+
+		# Compile the code
+		full_code = "\n".join(code_lines)
+
+		# Prepare Context
+		context = {}
+		# Add regex objects
+		for rule, idx in reg_excludes: context[f"reg_ex_{idx}"] = rule
+		for rule, _, idx in reg_includes: context[f"reg_inc_{idx}"] = rule
+
+		# Execute to define function
+		try:
+			exec(full_code, context)
+			worker_func = context['fast_filter_worker']
+
+			# Prepare Data Containers
+			new_cache = []
+			filter_counts = [0] * len(filters_data)
+			temp_matches = {i: [] for i in range(len(filters_data)) if filters_data[i]['enabled']}
+
+			def update_prog_callback(curr, total):
+				self.msg_queue.put(('progress', curr, total, f"Filtering line {curr}/{total}..."))
+
+			# Run the generated function
+			worker_func(self.raw_lines, new_cache, filter_counts, temp_matches, update_prog_callback)
+
+			t_end = time.time()
+			self.msg_queue.put(('filter_complete', new_cache, t_end - t_start, filter_counts, temp_matches, show_only_filtered))
+
+		except Exception as e:
+			print(f"JIT Compilation Failed: {e}")
+			# Fallback to slow legacy method if needed, or just crash explicitly for debug
+			# Since we control the code gen, it should be safe.
+			self.msg_queue.put(('load_error', f"Optimization Error: {e}"))
+
 
 	def toggle_show_filtered(self, event=None):
+		if self.is_processing: return
 		current = self.show_only_filtered_var.get()
 		self.show_only_filtered_var.set(not current)
 		self.recalc_filtered_data()
 
-	# --- Filter Navigation (Ctrl+Left/Right) ---
+	# --- Filter Navigation ---
 	def get_current_cache_index(self):
 		if self.selected_raw_index == -1: return self.view_start_index
 		if self.filtered_cache is None: return self.selected_raw_index
@@ -549,6 +711,7 @@ class LogAnalyzerApp:
 		return self.view_start_index
 
 	def navigate_to_match(self, direction):
+		if self.is_processing: return
 		if self.filtered_cache is None:
 			self.update_status("No active filters to navigate")
 			return
@@ -723,6 +886,7 @@ class LogAnalyzerApp:
 			self.tree.tag_configure(tag_name, foreground=flt.fore_color, background=flt.back_color)
 
 	def on_tree_click(self, event):
+		if self.is_processing: return
 		region = self.tree.identify("region", event.x, event.y)
 		if region == "cell":
 			column = self.tree.identify_column(event.x)
@@ -731,7 +895,6 @@ class LogAnalyzerApp:
 				if item_id:
 					idx = self.tree.index(item_id)
 					self.filters[idx].enabled = not self.filters[idx].enabled
-					# [Modified] Use Smart Update instead of Full Recalc
 					self.smart_update_filter(idx, self.filters[idx].enabled)
 					return "break"
 			else:
@@ -739,6 +902,7 @@ class LogAnalyzerApp:
 				if item_id: self.drag_start_index = self.tree.index(item_id)
 
 	def on_tree_release(self, event):
+		if self.is_processing: return
 		if self.drag_start_index is None: return
 		target_id = self.tree.identify_row(event.y)
 		if target_id:
@@ -762,30 +926,33 @@ class LogAnalyzerApp:
 		self.context_menu.post(event.x_root, event.y_root)
 
 	def edit_selected_filter(self):
+		if self.is_processing: return
 		selected = self.tree.selection()
 		if not selected: return
 		item_id = selected[0]; idx = self.tree.index(item_id)
 		self.open_filter_dialog(self.filters[idx], idx)
 
 	def on_filter_toggle(self, event):
+		if self.is_processing: return
 		selected_item = self.tree.selection()
 		if not selected_item: return
 		for item_id in selected_item:
 			idx = self.tree.index(item_id)
 			self.filters[idx].enabled = not self.filters[idx].enabled
-			# Use Smart Update
 			self.smart_update_filter(idx, self.filters[idx].enabled)
 
 	def on_filter_delete(self, event=None):
+		if self.is_processing: return
 		selected_items = self.tree.selection()
 		if not selected_items: return
 		indices_to_delete = sorted([self.tree.index(item) for item in selected_items], reverse=True)
 		for idx in indices_to_delete:
 			del self.filters[idx]
-			if idx in self.filter_matches: del self.filter_matches[idx] # [New] Remove from cache
+			if idx in self.filter_matches: del self.filter_matches[idx]
 		self.recalc_filtered_data()
 
 	def on_filter_double_click(self, event):
+		if self.is_processing: return
 		item_id = self.tree.identify_row(event.y)
 		if not item_id: return
 		if self.tree.identify_column(event.x) == "#1": return
@@ -793,6 +960,7 @@ class LogAnalyzerApp:
 		self.open_filter_dialog(self.filters[idx], idx)
 
 	def add_filter_dialog(self, initial_text=None):
+		if self.is_processing: return
 		self.open_filter_dialog(None, index=None, initial_text=initial_text)
 
 	def open_filter_dialog(self, filter_obj=None, index=None, initial_text=None):
@@ -824,7 +992,7 @@ class LogAnalyzerApp:
 			if filter_obj:
 				filter_obj.text = text; filter_obj.fore_color = colors["fg"]; filter_obj.back_color = colors["bg"]
 				filter_obj.is_regex = var_regex.get(); filter_obj.is_exclude = var_exclude.get()
-				if index in self.filter_matches: del self.filter_matches[index] # [New] Invalidate cache
+				if index in self.filter_matches: del self.filter_matches[index]
 				self.recalc_filtered_data()
 			else:
 				new_filter = Filter(text, colors["fg"], colors["bg"], enabled=True, is_regex=var_regex.get(), is_exclude=var_exclude.get())
@@ -857,11 +1025,13 @@ class LogAnalyzerApp:
 		except Exception as e: messagebox.showerror("Write Error", str(e)); return False
 
 	def quick_save_tat(self):
+		if self.is_processing: return
 		if self.current_tat_path:
 			if self._write_tat_file(self.current_tat_path): messagebox.showinfo("Save", "Saved successfully")
 		else: self.save_as_tat_filters()
 
 	def save_as_tat_filters(self):
+		if self.is_processing: return
 		init_dir = self.config.get("last_filter_dir", ".")
 		filepath = filedialog.asksaveasfilename(initialdir=init_dir, defaultextension=".tat", filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")])
 		if not filepath: return
@@ -871,6 +1041,7 @@ class LogAnalyzerApp:
 			messagebox.showinfo("Success", "File saved")
 
 	def import_tat_filters(self):
+		if self.is_processing: return
 		init_dir = self.config.get("last_filter_dir", ".")
 		filepath = filedialog.askopenfilename(initialdir=init_dir, filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")])
 		if not filepath: return
@@ -889,13 +1060,14 @@ class LogAnalyzerApp:
 				if text: new_filters.append(Filter(text, fore, back, enabled, is_regex, is_exclude))
 			self.filters = new_filters
 			self.current_tat_path = filepath; self.update_title()
-			self.filter_matches = {} # [New] Invalidate all cache on new import
+			self.filter_matches = {}
 			self.recalc_filtered_data()
 			messagebox.showinfo("Success", f"Imported {len(new_filters)} filters")
 		except Exception as e: messagebox.showerror("Import Error", str(e))
 
 	# JSON methods
 	def export_filters(self):
+		if self.is_processing: return
 		init_dir = self.config.get("last_filter_dir", ".")
 		filepath = filedialog.asksaveasfilename(initialdir=init_dir, defaultextension=".json", filetypes=[("JSON", "*.json")])
 		if not filepath: return
@@ -904,6 +1076,7 @@ class LogAnalyzerApp:
 		with open(filepath, 'w') as f: json.dump(data, f, indent=4)
 
 	def import_json_filters(self):
+		if self.is_processing: return
 		init_dir = self.config.get("last_filter_dir", ".")
 		filepath = filedialog.askopenfilename(initialdir=init_dir, filetypes=[("JSON", "*.json")])
 		if not filepath: return
@@ -912,7 +1085,7 @@ class LogAnalyzerApp:
 			with open(filepath, 'r') as f:
 				data = json.load(f)
 				self.filters = [Filter(**item) for item in data]
-			self.filter_matches = {} # [New] Invalidate cache
+			self.filter_matches = {}
 			self.recalc_filtered_data()
 		except Exception as e: messagebox.showerror("Error", f"JSON Import Failed: {e}")
 
