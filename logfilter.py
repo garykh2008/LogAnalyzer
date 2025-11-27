@@ -60,10 +60,11 @@ class LogAnalyzerApp:
 
 		self.view_start_index = 0
 		self.visible_rows = 50
+		self.font_size = 10 # [新增] 預設字體大小
 
 		# --- 介面佈局 ---
 		
-		# 1. 頂部工具列 (固定高度)
+		# 1. 頂部工具列
 		toolbar = tk.Frame(root, bd=1, relief=tk.RAISED)
 		toolbar.pack(side=tk.TOP, fill=tk.X)
 		
@@ -77,44 +78,43 @@ class LogAnalyzerApp:
 		tk.Button(toolbar, text="JSON 匯出", command=self.export_filters).pack(side=tk.RIGHT, padx=2, pady=2)
 		tk.Button(toolbar, text="JSON 匯入", command=self.import_json_filters).pack(side=tk.RIGHT, padx=2, pady=2)
 
-		# 2. 底部狀態列 (固定高度)
+		# 2. 底部狀態列
 		self.status_bar = tk.Label(root, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
 		self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
 		# 3. 中間可調整區域 (PanedWindow)
-		# orient=tk.VERTICAL 代表上下分割
-		# sashwidth=4 設定拖拉條的寬度
-		# sashrelief=tk.RAISED 設定拖拉條樣式為凸起，比較好抓
 		self.paned_window = tk.PanedWindow(root, orient=tk.VERTICAL, sashwidth=4, sashrelief=tk.RAISED, bg="#d9d9d9")
 		self.paned_window.pack(fill=tk.BOTH, expand=True)
 
 		# --- 上半部：Log 顯示區 ---
 		content_frame = tk.Frame(self.paned_window)
-		# 不再需要 pack，改由 paned_window 管理
 
 		self.scrollbar_y = tk.Scrollbar(content_frame, command=self.on_scroll_y)
 		self.scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
 
-		self.text_area = tk.Text(content_frame, wrap="none", font=("Consolas", 10))
+		# [修改] 初始化時使用變數 font_size
+		self.text_area = tk.Text(content_frame, wrap="none", font=("Consolas", self.font_size))
 		self.scrollbar_x = tk.Scrollbar(content_frame, orient="horizontal", command=self.text_area.xview)
 		self.text_area.configure(xscrollcommand=self.scrollbar_x.set)
 		
 		self.scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
 		self.text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+		# 綁定滑鼠滾輪 (捲動)
 		self.text_area.bind("<MouseWheel>", self.on_mousewheel)
 		self.text_area.bind("<Button-4>", self.on_mousewheel)
 		self.text_area.bind("<Button-5>", self.on_mousewheel)
+		
+		# [新增] 綁定 Ctrl + 滑鼠滾輪 (縮放)
+		self.text_area.bind("<Control-MouseWheel>", self.on_zoom)
+		self.text_area.bind("<Control-Button-4>", self.on_zoom)
+		self.text_area.bind("<Control-Button-5>", self.on_zoom)
 
-		# 將 Log 區加入 PanedWindow (上半部)
-		# height=400 是初始高度建議值
 		self.paned_window.add(content_frame, height=450, minsize=100)
 
 		# --- 下半部：Filter 列表區 ---
 		filter_frame = tk.LabelFrame(self.paned_window, text="Active Filters (空白鍵: 開關 | 雙擊: 編輯 | Delete: 刪除)")
-		# 不再需要 pack
 
-		# Treeview 設定
 		cols = ("enabled", "type", "pattern", "hits")
 		self.tree = ttk.Treeview(filter_frame, columns=cols, show="headings")
 		
@@ -140,7 +140,6 @@ class LogAnalyzerApp:
 		self.tree.bind("<space>", self.on_filter_toggle)
 		self.tree.bind("<Delete>", self.on_filter_delete)
 
-		# 將 Filter 區加入 PanedWindow (下半部)
 		self.paned_window.add(filter_frame, minsize=100)
 
 	# --- 標題更新邏輯 ---
@@ -313,6 +312,27 @@ class LogAnalyzerApp:
 			self.render_viewport()
 			self.update_scrollbar_thumb()
 		return "break"
+
+	# --- [新增] Ctrl+滾輪 縮放字體 ---
+	def on_zoom(self, event):
+		# 判斷滾輪方向
+		delta = 0
+		if event.num == 5 or event.delta < 0:
+			delta = -1 # 縮小
+		elif event.num == 4 or event.delta > 0:
+			delta = 1  # 放大
+		
+		if delta != 0:
+			new_size = self.font_size + delta
+			# 限制字體大小範圍 (6 ~ 50)
+			new_size = max(6, min(new_size, 50))
+			
+			if new_size != self.font_size:
+				self.font_size = new_size
+				# 更新 Text Widget 的字體
+				self.text_area.configure(font=("Consolas", self.font_size))
+				
+		return "break" # 防止觸發其他預設行為
 
 	# --- Filter 列表與編輯 ---
 	def refresh_filter_list(self):
