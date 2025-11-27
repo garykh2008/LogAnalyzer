@@ -49,25 +49,29 @@ class LogAnalyzerApp:
 		self.root = root
 		self.root.geometry("1000x700")
 
+		# 設定檔相關
+		self.config_file = "app_config.json"
+		self.config = self.load_config()
+
 		self.filters = []
 		self.raw_lines = []
 		self.filtered_cache = []
-		
+
 		self.current_log_path = None
 		self.current_tat_path = None
-		
+
 		self.update_title()
 
 		self.view_start_index = 0
 		self.visible_rows = 50
-		self.font_size = 10 # [新增] 預設字體大小
+		self.font_size = 10
 
 		# --- 介面佈局 ---
-		
+
 		# 1. 頂部工具列
 		toolbar = tk.Frame(root, bd=1, relief=tk.RAISED)
 		toolbar.pack(side=tk.TOP, fill=tk.X)
-		
+
 		tk.Button(toolbar, text="開啟 Log", command=self.load_log).pack(side=tk.LEFT, padx=2, pady=2)
 		tk.Frame(toolbar, width=10).pack(side=tk.LEFT)
 		tk.Button(toolbar, text="新增 Filter", command=self.add_filter_dialog).pack(side=tk.LEFT, padx=2, pady=2)
@@ -92,20 +96,16 @@ class LogAnalyzerApp:
 		self.scrollbar_y = tk.Scrollbar(content_frame, command=self.on_scroll_y)
 		self.scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
 
-		# [修改] 初始化時使用變數 font_size
 		self.text_area = tk.Text(content_frame, wrap="none", font=("Consolas", self.font_size))
 		self.scrollbar_x = tk.Scrollbar(content_frame, orient="horizontal", command=self.text_area.xview)
 		self.text_area.configure(xscrollcommand=self.scrollbar_x.set)
-		
+
 		self.scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
 		self.text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-		# 綁定滑鼠滾輪 (捲動)
 		self.text_area.bind("<MouseWheel>", self.on_mousewheel)
 		self.text_area.bind("<Button-4>", self.on_mousewheel)
 		self.text_area.bind("<Button-5>", self.on_mousewheel)
-		
-		# [新增] 綁定 Ctrl + 滑鼠滾輪 (縮放)
 		self.text_area.bind("<Control-MouseWheel>", self.on_zoom)
 		self.text_area.bind("<Control-Button-4>", self.on_zoom)
 		self.text_area.bind("<Control-Button-5>", self.on_zoom)
@@ -117,22 +117,22 @@ class LogAnalyzerApp:
 
 		cols = ("enabled", "type", "pattern", "hits")
 		self.tree = ttk.Treeview(filter_frame, columns=cols, show="headings")
-		
+
 		self.tree.heading("enabled", text="En")
 		self.tree.column("enabled", width=40, anchor="center")
-		
+
 		self.tree.heading("type", text="Type")
 		self.tree.column("type", width=60, anchor="center")
-		
+
 		self.tree.heading("pattern", text="Pattern / Regex")
 		self.tree.column("pattern", width=600, anchor="w")
-		
+
 		self.tree.heading("hits", text="Hits")
 		self.tree.column("hits", width=80, anchor="e")
 
 		tree_scroll = tk.Scrollbar(filter_frame, orient="vertical", command=self.tree.yview)
 		self.tree.configure(yscrollcommand=tree_scroll.set)
-		
+
 		tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 		self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -141,6 +141,23 @@ class LogAnalyzerApp:
 		self.tree.bind("<Delete>", self.on_filter_delete)
 
 		self.paned_window.add(filter_frame, minsize=100)
+
+	# --- 設定檔管理 (新功能) ---
+	def load_config(self):
+		if os.path.exists(self.config_file):
+			try:
+				with open(self.config_file, 'r') as f:
+					return json.load(f)
+			except:
+				pass
+		return {}
+
+	def save_config(self):
+		try:
+			with open(self.config_file, 'w') as f:
+				json.dump(self.config, f)
+		except:
+			pass
 
 	# --- 標題更新邏輯 ---
 	def update_title(self):
@@ -154,20 +171,30 @@ class LogAnalyzerApp:
 
 	# --- 檔案讀取 ---
 	def load_log(self):
-		filepath = filedialog.askopenfilename(filetypes=[("Log Files", "*.log *.txt"), ("All Files", "*.*")])
+		# 讀取上次的路徑
+		init_dir = self.config.get("last_log_dir", ".")
+
+		filepath = filedialog.askopenfilename(
+			initialdir=init_dir,
+			filetypes=[("Log Files", "*.log *.txt"), ("All Files", "*.*")]
+		)
 		if not filepath: return
-		
+
+		# 儲存本次的路徑
+		self.config["last_log_dir"] = os.path.dirname(filepath)
+		self.save_config()
+
 		self.update_status(f"正在讀取檔案: {filepath} ...")
 		try:
 			with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
 				self.raw_lines = f.readlines()
-			
+
 			self.current_log_path = filepath
 			self.update_title()
-			
+
 			self.update_status(f"讀取完成，共 {len(self.raw_lines)} 行。正在建立索引...")
 			self.recalc_filtered_data()
-			
+
 		except Exception as e:
 			messagebox.showerror("讀取錯誤", str(e))
 			self.update_status("讀取失敗")
@@ -175,7 +202,7 @@ class LogAnalyzerApp:
 	# --- 核心過濾與顯示邏輯 ---
 	def recalc_filtered_data(self):
 		self.update_status("正在套用過濾器...")
-		
+
 		for f in self.filters:
 			f.hit_count = 0
 
@@ -184,9 +211,9 @@ class LogAnalyzerApp:
 		for i, flt in enumerate(self.filters):
 			tag_name = f"filter_{i}"
 			self.text_area.tag_config(tag_name, foreground=flt.fore_color, background=flt.back_color)
-		
+
 		self.filtered_cache = []
-		
+
 		compiled_excludes = []
 		for idx, f in enumerate(self.filters):
 			if f.enabled and f.is_exclude:
@@ -215,7 +242,7 @@ class LogAnalyzerApp:
 					if rule.search(line): matched = True
 				else:
 					if rule in line: matched = True
-				
+
 				if matched:
 					self.filters[idx].hit_count += 1
 					skip = True
@@ -224,7 +251,7 @@ class LogAnalyzerApp:
 
 			matched_tags = []
 			is_match = False
-			
+
 			if not active_has_includes:
 				is_match = True
 			else:
@@ -234,12 +261,12 @@ class LogAnalyzerApp:
 						if rule.search(line): matched = True
 					else:
 						if rule in line: matched = True
-					
+
 					if matched:
 						is_match = True
 						matched_tags.append(tag)
 						self.filters[idx].hit_count += 1
-			
+
 			if is_match:
 				self.filtered_cache.append((line, matched_tags))
 
@@ -259,10 +286,10 @@ class LogAnalyzerApp:
 
 		end_index = min(self.view_start_index + self.visible_rows, total)
 		lines_to_render = self.filtered_cache[self.view_start_index : end_index]
-		
+
 		full_text = "".join([item[0] for item in lines_to_render])
 		self.text_area.insert("1.0", full_text)
-		
+
 		for i, (line, tags) in enumerate(lines_to_render):
 			if tags:
 				line_idx = i + 1
@@ -291,7 +318,7 @@ class LogAnalyzerApp:
 		elif op == "moveto":
 			fraction = float(args[1])
 			new_start = int(total * fraction)
-		
+
 		new_start = max(0, min(new_start, total - self.visible_rows))
 		if new_start != self.view_start_index:
 			self.view_start_index = int(new_start)
@@ -313,26 +340,18 @@ class LogAnalyzerApp:
 			self.update_scrollbar_thumb()
 		return "break"
 
-	# --- [新增] Ctrl+滾輪 縮放字體 ---
 	def on_zoom(self, event):
-		# 判斷滾輪方向
 		delta = 0
-		if event.num == 5 or event.delta < 0:
-			delta = -1 # 縮小
-		elif event.num == 4 or event.delta > 0:
-			delta = 1  # 放大
-		
+		if event.num == 5 or event.delta < 0: delta = -1
+		elif event.num == 4 or event.delta > 0: delta = 1
+
 		if delta != 0:
 			new_size = self.font_size + delta
-			# 限制字體大小範圍 (6 ~ 50)
 			new_size = max(6, min(new_size, 50))
-			
 			if new_size != self.font_size:
 				self.font_size = new_size
-				# 更新 Text Widget 的字體
 				self.text_area.configure(font=("Consolas", self.font_size))
-				
-		return "break" # 防止觸發其他預設行為
+		return "break"
 
 	# --- Filter 列表與編輯 ---
 	def refresh_filter_list(self):
@@ -377,7 +396,7 @@ class LogAnalyzerApp:
 	def open_filter_dialog(self, filter_obj=None, index=None):
 		dialog = tk.Toplevel(self.root)
 		dialog.title("Edit Filter" if filter_obj else "Add Filter")
-		
+
 		tk.Label(dialog, text="Pattern:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
 		entry_text = tk.Entry(dialog, width=40)
 		entry_text.grid(row=0, column=1, columnspan=2, padx=5, pady=5)
@@ -385,7 +404,7 @@ class LogAnalyzerApp:
 
 		var_regex = tk.BooleanVar(value=filter_obj.is_regex if filter_obj else False)
 		var_exclude = tk.BooleanVar(value=filter_obj.is_exclude if filter_obj else False)
-		
+
 		tk.Checkbutton(dialog, text="Regex", variable=var_regex).grid(row=1, column=1, sticky="w")
 		tk.Checkbutton(dialog, text="Exclude", variable=var_exclude).grid(row=1, column=2, sticky="w")
 
@@ -393,13 +412,13 @@ class LogAnalyzerApp:
 			"fg": filter_obj.fore_color if filter_obj else "#000000",
 			"bg": filter_obj.back_color if filter_obj else "#FFFFFF"
 		}
-		
+
 		def pick_fg():
 			c = colorchooser.askcolor(color=colors["fg"])[1]
-			if c: 
+			if c:
 				colors["fg"] = c
 				btn_fg.config(bg=c)
-		
+
 		def pick_bg():
 			c = colorchooser.askcolor(color=colors["bg"])[1]
 			if c:
@@ -414,7 +433,7 @@ class LogAnalyzerApp:
 		def save():
 			text = entry_text.get()
 			if not text: return
-			
+
 			if filter_obj:
 				filter_obj.text = text
 				filter_obj.fore_color = colors["fg"]
@@ -422,9 +441,9 @@ class LogAnalyzerApp:
 				filter_obj.is_regex = var_regex.get()
 				filter_obj.is_exclude = var_exclude.get()
 			else:
-				new_filter = Filter(text, colors["fg"], colors["bg"], 
-									enabled=True, 
-									is_regex=var_regex.get(), 
+				new_filter = Filter(text, colors["fg"], colors["bg"],
+									enabled=True,
+									is_regex=var_regex.get(),
 									is_exclude=var_exclude.get())
 				self.filters.append(new_filter)
 
@@ -463,15 +482,36 @@ class LogAnalyzerApp:
 		else: self.save_as_tat_filters()
 
 	def save_as_tat_filters(self):
-		filepath = filedialog.asksaveasfilename(defaultextension=".tat", filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")])
+		# 使用 last_filter_dir
+		init_dir = self.config.get("last_filter_dir", ".")
+		filepath = filedialog.asksaveasfilename(
+			initialdir=init_dir,
+			defaultextension=".tat",
+			filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")]
+		)
 		if not filepath: return
+
+		# 儲存 Filter 目錄
+		self.config["last_filter_dir"] = os.path.dirname(filepath)
+		self.save_config()
+
 		if self._write_tat_file(filepath):
 			self.current_tat_path = filepath; self.update_title()
 			messagebox.showinfo("成功", "已另存新檔")
 
 	def import_tat_filters(self):
-		filepath = filedialog.askopenfilename(filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")])
+		# 使用 last_filter_dir
+		init_dir = self.config.get("last_filter_dir", ".")
+		filepath = filedialog.askopenfilename(
+			initialdir=init_dir,
+			filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")]
+		)
 		if not filepath: return
+
+		# 儲存 Filter 目錄
+		self.config["last_filter_dir"] = os.path.dirname(filepath)
+		self.save_config()
+
 		try:
 			tree = ET.parse(filepath); root = tree.getroot()
 			filters_node = root.findall('.//filter')
@@ -491,14 +531,18 @@ class LogAnalyzerApp:
 		except Exception as e: messagebox.showerror("匯入失敗", str(e))
 
 	def export_filters(self):
-		filepath = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")])
+		init_dir = self.config.get("last_filter_dir", ".")
+		filepath = filedialog.asksaveasfilename(initialdir=init_dir, defaultextension=".json", filetypes=[("JSON", "*.json")])
 		if not filepath: return
+		self.config["last_filter_dir"] = os.path.dirname(filepath); self.save_config()
 		data = [f.to_dict() for f in self.filters]
 		with open(filepath, 'w') as f: json.dump(data, f, indent=4)
 
 	def import_json_filters(self):
-		filepath = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
+		init_dir = self.config.get("last_filter_dir", ".")
+		filepath = filedialog.askopenfilename(initialdir=init_dir, filetypes=[("JSON", "*.json")])
 		if not filepath: return
+		self.config["last_filter_dir"] = os.path.dirname(filepath); self.save_config()
 		try:
 			with open(filepath, 'r') as f:
 				data = json.load(f)
