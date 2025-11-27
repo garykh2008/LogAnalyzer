@@ -4,6 +4,7 @@ import re
 import json
 import xml.etree.ElementTree as ET
 import os
+import time
 
 # --- Helper Functions ---
 
@@ -57,7 +58,12 @@ class LogAnalyzerApp:
 		self.raw_lines = []
 
 		# Cache structure: [(line_content, tags, raw_index), ...]
-		self.filtered_cache = []
+		# If None, it means "Raw Mode"
+		self.filtered_cache = None
+
+		# [New] Filter Match Cache: { filter_index: [raw_idx1, raw_idx2, ...] }
+		# Stores raw indices of lines matched by specific filters
+		self.filter_matches = {}
 
 		self.current_log_path = None
 		self.current_tat_path = None
@@ -74,6 +80,12 @@ class LogAnalyzerApp:
 		self.selection_offset = 0
 
 		self.show_only_filtered_var = tk.BooleanVar(value=True)
+
+		# Duration strings
+		self.load_duration_str = "0.000s"
+		self.filter_duration_str = "0.000s"
+
+		self.drag_start_index = None
 
 		# --- UI Layout ---
 
@@ -94,10 +106,6 @@ class LogAnalyzerApp:
 		tk.Button(toolbar, text="Import TAT", command=self.import_tat_filters).pack(side=tk.LEFT, padx=2, pady=2)
 		tk.Button(toolbar, text="Save TAT", command=self.quick_save_tat).pack(side=tk.LEFT, padx=2, pady=2)
 		tk.Button(toolbar, text="Save TAT As", command=self.save_as_tat_filters).pack(side=tk.LEFT, padx=2, pady=2)
-
-		# JSON buttons hidden but methods preserved
-		# tk.Button(toolbar, text="Export JSON", command=self.export_filters).pack(side=tk.RIGHT, padx=2, pady=2)
-		# tk.Button(toolbar, text="Import JSON", command=self.import_json_filters).pack(side=tk.RIGHT, padx=2, pady=2)
 
 		# 2. Status Bar
 		self.status_bar = tk.Label(root, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
@@ -144,14 +152,13 @@ class LogAnalyzerApp:
 		self.root.bind("<Control-h>", self.toggle_show_filtered)
 		self.root.bind("<Control-H>", self.toggle_show_filtered)
 
-		# [Changed] Bindings for Filter Navigation (Ctrl + Left/Right)
 		self.root.bind("<Control-Left>", self.on_nav_prev_match)
 		self.root.bind("<Control-Right>", self.on_nav_next_match)
 
 		self.paned_window.add(content_frame, height=450, minsize=100)
 
 		# --- Lower: Filter View ---
-		filter_frame = tk.LabelFrame(self.paned_window, text="Filters")
+		filter_frame = tk.LabelFrame(self.paned_window, text="Filters (Drag to Reorder)")
 
 		cols = ("enabled", "type", "pattern", "hits")
 		self.tree = ttk.Treeview(filter_frame, columns=cols, show="headings")
@@ -174,8 +181,9 @@ class LogAnalyzerApp:
 		self.tree.bind("<Double-1>", self.on_filter_double_click)
 		self.tree.bind("<space>", self.on_filter_toggle)
 		self.tree.bind("<Delete>", self.on_filter_delete)
-		self.tree.bind("<Button-1>", self.on_tree_click)
 		self.tree.bind("<Button-3>", self.on_tree_right_click)
+		self.tree.bind("<Button-1>", self.on_tree_click)
+		self.tree.bind("<ButtonRelease-1>", self.on_tree_release)
 
 		# Context Menu
 		self.context_menu = tk.Menu(self.root, tearoff=0)
@@ -206,8 +214,25 @@ class LogAnalyzerApp:
 		self.root.title(f"[{log_name}] - [{filter_name}] - Log Analyzer")
 
 	def update_status(self, msg):
-		self.status_bar.config(text=msg)
+		full_text = f"{msg}    |    Load Time: {self.load_duration_str}    |    Filter Time: {self.filter_duration_str}"
+		self.status_bar.config(text=full_text)
 		self.root.update_idletasks()
+
+	# --- [Data Access Helpers] ---
+	def get_total_count(self):
+		if self.filtered_cache is None:
+			return len(self.raw_lines)
+		return len(self.filtered_cache)
+
+	def get_view_item(self, index):
+		if self.filtered_cache is None:
+			if 0 <= index < len(self.raw_lines):
+				return (self.raw_lines[index], [], index)
+			return ("", [], -1)
+		else:
+			if 0 <= index < len(self.filtered_cache):
+				return self.filtered_cache[index]
+			return ("", [], -1)
 
 	# --- File Loading ---
 	def load_log(self):
@@ -218,16 +243,172 @@ class LogAnalyzerApp:
 		self.config["last_log_dir"] = os.path.dirname(filepath); self.save_config()
 		self.update_status(f"Loading file: {filepath} ...")
 		try:
+			t_start = time.time()
 			with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
 				self.raw_lines = f.readlines()
+			t_end = time.time()
+			self.load_duration_str = f"{t_end - t_start:.4f}s"
+
 			self.current_log_path = filepath; self.update_title()
 			self.selected_raw_index = -1; self.selection_offset = 0
+			self.filter_matches = {} # [New] Clear cache on new file
 			self.update_status(f"Loaded {len(self.raw_lines)} lines. Indexing...")
 			self.recalc_filtered_data()
 		except Exception as e:
 			messagebox.showerror("Load Error", str(e)); self.update_status("Load failed")
 
-	# --- Core Filtering Logic ---
+	# --- [NEW] Smart Update (Uses Cache for Instant Re-enable) ---
+	# --- Smart Update (Optimized: Skip Hit Lines) ---
+	def smart_update_filter(self, idx, is_enabling):
+		flt = self.filters[idx]
+
+		# 複雜情況回退到多執行緒全量重算
+		if (not is_enabling and flt.is_exclude) or (self.filtered_cache is None and is_enabling):
+			self.recalc_filtered_data(); return
+
+		t_start = time.time()
+		self.update_status("Smart updating...")
+
+		# 保存視角
+		target_raw_index = -1; anchor_offset = 0
+		if self.selected_raw_index != -1:
+			target_raw_index = self.selected_raw_index; anchor_offset = self.selection_offset
+		elif self.filtered_cache and self.view_start_index < len(self.filtered_cache):
+			target_raw_index = self.filtered_cache[self.view_start_index][2]; anchor_offset = 0
+
+		tag_name = f"filter_{idx}"
+		self.text_area.tag_config(tag_name, foreground=flt.fore_color, background=flt.back_color)
+
+		new_cache = []
+		show_only = self.show_only_filtered_var.get()
+
+		# --- Logic A: Shrinking (關閉 Include / 開啟 Exclude) ---
+		# 這裡邏輯不變，因為是在縮減資料，只處理 cache 即可
+		if (not is_enabling and not flt.is_exclude) or (is_enabling and flt.is_exclude):
+			rule = None
+			if flt.is_regex:
+				try: rule = re.compile(flt.text, re.IGNORECASE)
+				except: pass
+			else: rule = flt.text
+
+			flt.hit_count = 0
+
+			for line, tags, raw_idx in self.filtered_cache:
+				matched = False
+				if isinstance(rule, str): matched = (rule in line)
+				elif rule: matched = (rule.search(line) is not None)
+
+				# Disable Include
+				if not is_enabling and not flt.is_exclude:
+					if matched and tag_name in tags: tags.remove(tag_name)
+					active_inc = any(f.enabled and not f.is_exclude for f in self.filters)
+					if show_only and active_inc and not tags: continue
+
+				# Enable Exclude
+				if is_enabling and flt.is_exclude:
+					if matched: flt.hit_count += 1; continue
+
+				new_cache.append((line, tags, raw_idx))
+			self.filtered_cache = new_cache
+
+		# --- Logic B: Expanding (開啟 Include) [極致優化：跳過已命中] ---
+		elif is_enabling and not flt.is_exclude:
+
+			# 預編譯規則
+			rule = None
+			if flt.is_regex:
+				try: rule = re.compile(flt.text, re.IGNORECASE)
+				except: pass
+			else: rule = flt.text
+
+			flt.hit_count = 0
+
+			# 準備 Exclude 規則 (用來檢查新命中的行是否該被排除)
+			active_excludes = [f for f in self.filters if f.enabled and f.is_exclude]
+			exclude_rules = []
+			for f in active_excludes:
+				if f.is_regex:
+					try: exclude_rules.append(re.compile(f.text, re.IGNORECASE))
+					except: pass
+				else: exclude_rules.append(f.text)
+
+			# 雙指針遍歷：同時掃描 raw_lines 和 old_cache
+			# 利用 cache 是按順序排列的特性
+			cache_idx = 0
+			cache_len = len(self.filtered_cache)
+
+			# 提取下一筆已存在的行號 (Sentinel)
+			next_cached_raw_idx = self.filtered_cache[0][2] if cache_len > 0 else -1
+
+			# 快取 append 方法加速
+			cache_append = new_cache.append
+
+			for raw_idx, line in enumerate(self.raw_lines):
+
+				# 檢查：這一行是否已經被前面的 Filter 抓到了?
+				if raw_idx == next_cached_raw_idx:
+					# [Hit Skipped!] 已經在 Cache 裡，直接複製，不跑 Regex！
+					cache_item = self.filtered_cache[cache_idx]
+					cache_append(cache_item) # 原封不動搬過去，甚至不加新 Tag (因為 break 邏輯)
+
+					# 移動 Cache 指標
+					cache_idx += 1
+					if cache_idx < cache_len:
+						next_cached_raw_idx = self.filtered_cache[cache_idx][2]
+					else:
+						next_cached_raw_idx = -1 # End of cache
+
+					continue # <--- 這裡就是您要的優化：跳過比對
+
+				# --- 如果執行到這裡，代表這一行原本「沒顯示」 ---
+				# 我們檢查它是否符合這個「新 Filter」
+
+				matched = False
+				if isinstance(rule, str):
+					if rule in line: matched = True
+				elif rule:
+					if rule.search(line): matched = True
+
+				if matched:
+					# 檢查是否被 Exclude (因為原本沒顯示可能是被 Exclude 或是單純沒命中)
+					# 我們必須確保新命中的行沒有被 Exclude 擋掉
+					is_excluded = False
+					for ex_rule in exclude_rules:
+						if isinstance(ex_rule, str):
+							if ex_rule in line: is_excluded = True; break
+						else:
+							if ex_rule.search(line): is_excluded = True; break
+
+					if not is_excluded:
+						flt.hit_count += 1
+						# 命中！加入 Cache
+						cache_append((line, [tag_name], raw_idx))
+
+			self.filtered_cache = new_cache
+
+		self.refresh_filter_list()
+
+		# 還原視角
+		new_start_index = 0
+		if target_raw_index >= 0:
+			found_idx = -1
+			# 優化：假設順序沒變，我們可以從上次的位置附近找
+			# 但為了安全，線性搜尋即可 (Python List C底層很快)
+			for i, item in enumerate(self.filtered_cache):
+				if item[2] >= target_raw_index: found_idx = i; break
+
+			if found_idx != -1: new_start_index = max(0, found_idx - anchor_offset)
+			else: new_start_index = max(0, len(self.filtered_cache) - self.visible_rows)
+
+		self.view_start_index = new_start_index
+		self.render_viewport(); self.update_scrollbar_thumb()
+
+		t_end = time.time()
+		self.filter_duration_str = f"{t_end - t_start:.4f}s (Smart)"
+		mode_text = "Filtered" if show_only else "Full View"
+		self.update_status(f"[{mode_text}] Showing {len(self.filtered_cache)} lines")
+
+	# --- [Core] Full Recalc (Populates Cache) ---
 	def recalc_filtered_data(self):
 		target_raw_index = -1; anchor_offset = 0
 		if self.selected_raw_index != -1:
@@ -235,7 +416,9 @@ class LogAnalyzerApp:
 		elif self.filtered_cache and self.view_start_index < len(self.filtered_cache):
 			target_raw_index = self.filtered_cache[self.view_start_index][2]; anchor_offset = 0
 
-		self.update_status("Applying filters...")
+		t_start = time.time()
+		self.update_status("Calculating filters...")
+
 		for f in self.filters: f.hit_count = 0
 
 		self.text_area.config(state=tk.NORMAL); self.text_area.delete("1.0", tk.END)
@@ -244,87 +427,113 @@ class LogAnalyzerApp:
 		for i, flt in enumerate(self.filters):
 			tag_name = f"filter_{i}"
 			self.text_area.tag_config(tag_name, foreground=flt.fore_color, background=flt.back_color)
-
 		self.text_area.tag_config("current_line", background="#0078D7", foreground="#FFFFFF")
 
-		self.filtered_cache = []
 		show_only_filtered = self.show_only_filtered_var.get()
+		has_active_filters = any(f.enabled for f in self.filters)
 
-		compiled_excludes = []
-		for idx, f in enumerate(self.filters):
-			if f.enabled and f.is_exclude:
-				if f.is_regex:
-					try: compiled_excludes.append((re.compile(f.text, re.IGNORECASE), idx, True))
-					except: pass
+		if not has_active_filters:
+			self.filtered_cache = None
+		else:
+			self.filtered_cache = []
+			txt_excludes = []
+			reg_excludes = []
+			txt_includes = []
+			reg_includes = []
+			has_active_includes = False
+			filter_counts = [0] * len(self.filters)
+
+			# [New] Prepare temp match lists for active filters
+			# We will populate these lists as we scan
+			temp_matches = {i: [] for i in range(len(self.filters)) if self.filters[i].enabled}
+
+			for idx, f in enumerate(self.filters):
+				if not f.enabled: continue
+				if f.is_exclude:
+					if f.is_regex:
+						try: reg_excludes.append((re.compile(f.text, re.IGNORECASE), idx))
+						except: pass
+					else: txt_excludes.append((f.text, idx))
 				else:
-					compiled_excludes.append((f.text, idx, False))
+					has_active_includes = True
+					tag = f"filter_{idx}"
+					if f.is_regex:
+						try: reg_includes.append((re.compile(f.text, re.IGNORECASE), tag, idx))
+						except: pass
+					else: txt_includes.append((f.text, tag, idx))
 
-		active_has_includes = any(f.enabled and not f.is_exclude for f in self.filters)
-		compiled_includes = []
-		for idx, flt in enumerate(self.filters):
-			if flt.enabled and not flt.is_exclude:
-				tag = f"filter_{idx}"
-				if flt.is_regex:
-					try: compiled_includes.append((re.compile(flt.text, re.IGNORECASE), tag, idx, True))
-					except: pass
+			cache_append = self.filtered_cache.append
+
+			for raw_idx, line in enumerate(self.raw_lines):
+				skip = False
+				for text, idx in txt_excludes:
+					if text in line:
+						filter_counts[idx] += 1
+						# [Cache] Store hit
+						temp_matches[idx].append(raw_idx)
+						skip = True; break
+				if skip: continue
+				for rule, idx in reg_excludes:
+					if rule.search(line):
+						filter_counts[idx] += 1
+						# [Cache] Store hit
+						temp_matches[idx].append(raw_idx)
+						skip = True; break
+				if skip: continue
+
+				matched_tags = []
+				is_match = False
+
+				if not has_active_includes: is_match = True
 				else:
-					compiled_includes.append((flt.text, tag, idx, False))
+					# Note: With 'break', we only capture the first match for display
+					# But for caching purposes, if we want to cache ALL matches for future use,
+					# we technically should scan all.
+					# Trade-off: We stick to "First Match Wins" logic for speed.
+					# So only the first matching filter gets the cache entry for this line.
 
-		for raw_idx, line in enumerate(self.raw_lines):
-			skip = False
-			for rule, idx, is_re in compiled_excludes:
-				matched = False
-				if is_re:
-					if rule.search(line): matched = True
+					for text, tag, idx in txt_includes:
+						if text in line:
+							is_match = True; matched_tags.append(tag); filter_counts[idx] += 1
+							temp_matches[idx].append(raw_idx) # [Cache]
+							break
+					if not is_match:
+						for rule, tag, idx in reg_includes:
+							if rule.search(line):
+								is_match = True; matched_tags.append(tag); filter_counts[idx] += 1
+								temp_matches[idx].append(raw_idx) # [Cache]
+								break
+
+				if show_only_filtered:
+					if is_match: cache_append((line, matched_tags, raw_idx))
 				else:
-					if rule in line: matched = True
-				if matched:
-					self.filters[idx].hit_count += 1; skip = True; break
+					final_tags = matched_tags if is_match else []
+					cache_append((line, final_tags, raw_idx))
 
-			matched_tags = []
-			is_match = False
+			for i, count in enumerate(filter_counts): self.filters[i].hit_count = count
 
-			if not skip:
-				if not active_has_includes:
-					is_match = True
-				else:
-					for rule, tag, idx, is_re in compiled_includes:
-						matched = False
-						if is_re:
-							if rule.search(line): matched = True
-						else:
-							if rule in line: matched = True
-						if matched:
-							is_match = True; matched_tags.append(tag); self.filters[idx].hit_count += 1
-
-			if show_only_filtered:
-				if not skip and is_match:
-					self.filtered_cache.append((line, matched_tags, raw_idx))
-			else:
-				final_tags = matched_tags if (not skip and is_match) else []
-				self.filtered_cache.append((line, final_tags, raw_idx))
+			# [New] Update the persistent cache
+			self.filter_matches.update(temp_matches)
 
 		self.refresh_filter_list()
 
 		new_start_index = 0
+		new_total = self.get_total_count()
 		if target_raw_index >= 0:
-			found_idx = -1
-			for i, item in enumerate(self.filtered_cache):
-				if item[2] >= target_raw_index:
-					found_idx = i
-					break
-			if found_idx != -1:
-				new_start_index = max(0, found_idx - anchor_offset)
+			if self.filtered_cache is None: found_idx = target_raw_index
 			else:
-				new_start_index = max(0, len(self.filtered_cache) - self.visible_rows)
+				found_idx = -1
+				for i, item in enumerate(self.filtered_cache):
+					if item[2] >= target_raw_index: found_idx = i; break
+			if found_idx != -1: new_start_index = max(0, found_idx - anchor_offset)
+			else: new_start_index = max(0, new_total - self.visible_rows)
 
 		self.view_start_index = new_start_index
-
-		self.render_viewport()
-		self.update_scrollbar_thumb()
-
+		self.render_viewport(); self.update_scrollbar_thumb()
+		t_end = time.time()
+		self.filter_duration_str = f"{t_end - t_start:.4f}s"
 		mode_text = "Filtered" if show_only_filtered else "Full View"
-		self.update_status(f"[{mode_text}] Showing {len(self.filtered_cache)} lines (Total {len(self.raw_lines)} lines)")
+		self.update_status(f"[{mode_text}] Showing {new_total} lines (Total {len(self.raw_lines)} lines)")
 
 	def toggle_show_filtered(self, event=None):
 		current = self.show_only_filtered_var.get()
@@ -332,17 +541,18 @@ class LogAnalyzerApp:
 		self.recalc_filtered_data()
 
 	# --- Filter Navigation (Ctrl+Left/Right) ---
-
 	def get_current_cache_index(self):
-		if self.selected_raw_index == -1:
-			return self.view_start_index
-
+		if self.selected_raw_index == -1: return self.view_start_index
+		if self.filtered_cache is None: return self.selected_raw_index
 		for i, item in enumerate(self.filtered_cache):
-			if item[2] == self.selected_raw_index:
-				return i
+			if item[2] == self.selected_raw_index: return i
 		return self.view_start_index
 
 	def navigate_to_match(self, direction):
+		if self.filtered_cache is None:
+			self.update_status("No active filters to navigate")
+			return
+
 		selected_items = self.tree.selection()
 		if not selected_items:
 			self.update_status("No filter selected for navigation")
@@ -359,40 +569,28 @@ class LogAnalyzerApp:
 		total = len(self.filtered_cache)
 		found_idx = -1
 
-		if direction == 1: # Next (Down / Right)
+		if direction == 1: # Next
 			for i in range(current_idx + 1, total):
 				line_tags = self.filtered_cache[i][1]
-				if any(t in target_tags for t in line_tags):
-					found_idx = i
-					break
-		else: # Prev (Up / Left)
+				if any(t in target_tags for t in line_tags): found_idx = i; break
+		else: # Prev
 			for i in range(current_idx - 1, -1, -1):
 				line_tags = self.filtered_cache[i][1]
-				if any(t in target_tags for t in line_tags):
-					found_idx = i
-					break
+				if any(t in target_tags for t in line_tags): found_idx = i; break
 
 		if found_idx != -1:
 			self.selected_raw_index = self.filtered_cache[found_idx][2]
-
 			half_view = self.visible_rows // 2
 			new_start = max(0, found_idx - half_view)
 			new_start = min(new_start, max(0, total - self.visible_rows))
-
 			self.view_start_index = new_start
 			self.selection_offset = found_idx - new_start
-
-			self.render_viewport()
-			self.update_scrollbar_thumb()
+			self.render_viewport(); self.update_scrollbar_thumb()
 			self.update_status(f"Jumped to line {self.selected_raw_index + 1}")
-		else:
-			self.update_status("No more matches found in that direction")
+		else: self.update_status("No more matches found in that direction")
 
-	def on_nav_next_match(self, event):
-		self.navigate_to_match(1)
-
-	def on_nav_prev_match(self, event):
-		self.navigate_to_match(-1)
+	def on_nav_next_match(self, event): self.navigate_to_match(1)
+	def on_nav_prev_match(self, event): self.navigate_to_match(-1)
 
 	# --- Log Interaction ---
 	def on_log_single_click(self, event):
@@ -405,14 +603,14 @@ class LogAnalyzerApp:
 			self.text_area.tag_raise("current_line")
 
 			cache_index = self.view_start_index + (ui_row - 1)
-			if 0 <= cache_index < len(self.filtered_cache):
-				self.selected_raw_index = self.filtered_cache[cache_index][2]
+			total = self.get_total_count()
+			if 0 <= cache_index < total:
+				_, _, raw_idx = self.get_view_item(cache_index)
+				self.selected_raw_index = raw_idx
 				self.selection_offset = ui_row - 1
 			else:
-				self.selected_raw_index = -1
-				self.selection_offset = 0
-		except Exception as e:
-			print(e)
+				self.selected_raw_index = -1; self.selection_offset = 0
+		except Exception as e: print(e)
 
 	def on_log_double_click(self, event):
 		try:
@@ -430,35 +628,41 @@ class LogAnalyzerApp:
 	def render_viewport(self):
 		self.text_area.config(state=tk.NORMAL); self.text_area.delete("1.0", tk.END)
 		self.line_number_area.config(state=tk.NORMAL); self.line_number_area.delete("1.0", tk.END)
-		total = len(self.filtered_cache)
+		total = self.get_total_count()
 		if total == 0:
 			self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED); return
 
 		end_index = min(self.view_start_index + self.visible_rows, total)
-		lines_to_render = self.filtered_cache[self.view_start_index : end_index]
 
-		full_text = "".join([item[0] for item in lines_to_render])
+		display_buffer = []
+		line_nums_buffer = []
+		tag_buffer = []
+
+		for i in range(self.view_start_index, end_index):
+			line, tags, raw_idx = self.get_view_item(i)
+			display_buffer.append(line)
+			line_nums_buffer.append(str(raw_idx + 1))
+
+			relative_idx = i - self.view_start_index + 1
+			if tags: tag_buffer.append((relative_idx, tags))
+			if raw_idx == self.selected_raw_index:
+				tag_buffer.append((relative_idx, ["current_line"]))
+
+		full_text = "".join(display_buffer)
 		self.text_area.insert("1.0", full_text)
 
-		line_nums_text = "\n".join([str(item[2] + 1) for item in lines_to_render])
+		line_nums_text = "\n".join(line_nums_buffer)
 		self.line_number_area.insert("1.0", line_nums_text)
 		self.line_number_area.tag_add("right_align", "1.0", "end")
 
-		for i, (line, tags, raw_idx) in enumerate(lines_to_render):
-			line_idx = i + 1
-			if tags:
-				for tag in tags: self.text_area.tag_add(tag, f"{line_idx}.0", f"{line_idx}.end")
-
-			if raw_idx == self.selected_raw_index:
-				self.text_area.tag_add("current_line", f"{line_idx}.0", f"{line_idx}.end")
+		for rel_idx, tags in tag_buffer:
+			for tag in tags: self.text_area.tag_add(tag, f"{rel_idx}.0", f"{rel_idx}.end")
 
 		self.text_area.tag_raise("current_line")
-
-		self.text_area.config(state=tk.DISABLED)
-		self.line_number_area.config(state=tk.DISABLED)
+		self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED)
 
 	def update_scrollbar_thumb(self):
-		total = len(self.filtered_cache)
+		total = self.get_total_count()
 		if total == 0: self.scrollbar_y.set(0, 1)
 		else:
 			page_size = self.visible_rows / total
@@ -467,7 +671,7 @@ class LogAnalyzerApp:
 			self.scrollbar_y.set(start, end)
 
 	def on_scroll_y(self, *args):
-		total = len(self.filtered_cache)
+		total = self.get_total_count()
 		if total == 0: return
 		op = args[0]
 		if op == "scroll":
@@ -479,11 +683,10 @@ class LogAnalyzerApp:
 		new_start = max(0, min(new_start, total - self.visible_rows))
 		if new_start != self.view_start_index:
 			self.view_start_index = int(new_start)
-			self.render_viewport()
-			self.update_scrollbar_thumb()
+			self.render_viewport(); self.update_scrollbar_thumb()
 
 	def on_mousewheel(self, event):
-		total = len(self.filtered_cache);
+		total = self.get_total_count();
 		if total == 0: return
 		scroll_dir = 0
 		if event.num == 5 or event.delta < 0: scroll_dir = 1
@@ -499,17 +702,13 @@ class LogAnalyzerApp:
 		delta = 0
 		if event.num == 5 or event.delta < 0: delta = -1
 		elif event.num == 4 or event.delta > 0: delta = 1
-
 		if delta != 0:
-			new_size = self.font_size + delta
-			new_size = max(6, min(new_size, 50))
-
+			new_size = self.font_size + delta; new_size = max(6, min(new_size, 50))
 			if new_size != self.font_size:
 				self.font_size = new_size
 				self.text_area.configure(font=("Consolas", self.font_size))
 				self.line_number_area.configure(font=("Consolas", self.font_size))
-				self.config["font_size"] = self.font_size
-				self.save_config()
+				self.config["font_size"] = self.font_size; self.save_config()
 		return "break"
 
 	# --- Filter List & Editing ---
@@ -532,8 +731,23 @@ class LogAnalyzerApp:
 				if item_id:
 					idx = self.tree.index(item_id)
 					self.filters[idx].enabled = not self.filters[idx].enabled
-					self.refresh_filter_list(); self.recalc_filtered_data()
+					# [Modified] Use Smart Update instead of Full Recalc
+					self.smart_update_filter(idx, self.filters[idx].enabled)
 					return "break"
+			else:
+				item_id = self.tree.identify_row(event.y)
+				if item_id: self.drag_start_index = self.tree.index(item_id)
+
+	def on_tree_release(self, event):
+		if self.drag_start_index is None: return
+		target_id = self.tree.identify_row(event.y)
+		if target_id:
+			target_index = self.tree.index(target_id)
+			if target_index != self.drag_start_index:
+				item = self.filters.pop(self.drag_start_index)
+				self.filters.insert(target_index, item)
+				self.recalc_filtered_data() # Order changed, must full recalc
+		self.drag_start_index = None
 
 	def on_tree_right_click(self, event):
 		item_id = self.tree.identify_row(event.y)
@@ -550,8 +764,7 @@ class LogAnalyzerApp:
 	def edit_selected_filter(self):
 		selected = self.tree.selection()
 		if not selected: return
-		item_id = selected[0]
-		idx = self.tree.index(item_id)
+		item_id = selected[0]; idx = self.tree.index(item_id)
 		self.open_filter_dialog(self.filters[idx], idx)
 
 	def on_filter_toggle(self, event):
@@ -560,14 +773,17 @@ class LogAnalyzerApp:
 		for item_id in selected_item:
 			idx = self.tree.index(item_id)
 			self.filters[idx].enabled = not self.filters[idx].enabled
-		self.refresh_filter_list(); self.recalc_filtered_data()
+			# Use Smart Update
+			self.smart_update_filter(idx, self.filters[idx].enabled)
 
 	def on_filter_delete(self, event=None):
 		selected_items = self.tree.selection()
 		if not selected_items: return
 		indices_to_delete = sorted([self.tree.index(item) for item in selected_items], reverse=True)
-		for idx in indices_to_delete: del self.filters[idx]
-		self.refresh_filter_list(); self.recalc_filtered_data()
+		for idx in indices_to_delete:
+			del self.filters[idx]
+			if idx in self.filter_matches: del self.filter_matches[idx] # [New] Remove from cache
+		self.recalc_filtered_data()
 
 	def on_filter_double_click(self, event):
 		item_id = self.tree.identify_row(event.y)
@@ -608,10 +824,13 @@ class LogAnalyzerApp:
 			if filter_obj:
 				filter_obj.text = text; filter_obj.fore_color = colors["fg"]; filter_obj.back_color = colors["bg"]
 				filter_obj.is_regex = var_regex.get(); filter_obj.is_exclude = var_exclude.get()
+				if index in self.filter_matches: del self.filter_matches[index] # [New] Invalidate cache
+				self.recalc_filtered_data()
 			else:
 				new_filter = Filter(text, colors["fg"], colors["bg"], enabled=True, is_regex=var_regex.get(), is_exclude=var_exclude.get())
 				self.filters.append(new_filter)
-			dialog.destroy(); self.recalc_filtered_data()
+				self.recalc_filtered_data()
+			dialog.destroy()
 		tk.Button(dialog, text="Save", command=save, width=15).grid(row=3, column=0, columnspan=3, pady=10)
 
 	# --- File I/O ---
@@ -670,10 +889,12 @@ class LogAnalyzerApp:
 				if text: new_filters.append(Filter(text, fore, back, enabled, is_regex, is_exclude))
 			self.filters = new_filters
 			self.current_tat_path = filepath; self.update_title()
+			self.filter_matches = {} # [New] Invalidate all cache on new import
 			self.recalc_filtered_data()
 			messagebox.showinfo("Success", f"Imported {len(new_filters)} filters")
 		except Exception as e: messagebox.showerror("Import Error", str(e))
 
+	# JSON methods
 	def export_filters(self):
 		init_dir = self.config.get("last_filter_dir", ".")
 		filepath = filedialog.asksaveasfilename(initialdir=init_dir, defaultextension=".json", filetypes=[("JSON", "*.json")])
@@ -691,6 +912,7 @@ class LogAnalyzerApp:
 			with open(filepath, 'r') as f:
 				data = json.load(f)
 				self.filters = [Filter(**item) for item in data]
+			self.filter_matches = {} # [New] Invalidate cache
 			self.recalc_filtered_data()
 		except Exception as e: messagebox.showerror("Error", f"JSON Import Failed: {e}")
 
