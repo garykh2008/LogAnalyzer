@@ -55,6 +55,8 @@ class LogAnalyzerApp:
 
 		self.filters = []
 		self.raw_lines = []
+
+		# 快取結構: [(line_content, tags, raw_index), ...]
 		self.filtered_cache = []
 
 		self.current_log_path = None
@@ -66,7 +68,10 @@ class LogAnalyzerApp:
 		self.visible_rows = 50
 		self.font_size = 10
 
-		# 控制是否只顯示過濾後的行
+		# [新增] 記錄選取狀態
+		self.selected_raw_index = -1  # 目前選取的原始行號
+		self.selection_offset = 0     # 選取的行距離視窗頂部幾行 (用於保持視角)
+
 		self.show_only_filtered_var = tk.BooleanVar(value=True)
 
 		# --- 介面佈局 ---
@@ -81,7 +86,6 @@ class LogAnalyzerApp:
 		tk.Button(toolbar, text="新增 Filter", command=self.add_filter_dialog).pack(side=tk.LEFT, padx=2, pady=2)
 		tk.Frame(toolbar, width=10).pack(side=tk.LEFT)
 
-		# [修改] 快速切換 Checkbox 文字改為 Ctrl+H
 		chk_show = tk.Checkbutton(toolbar, text="只顯示過濾結果 (Ctrl+H)", variable=self.show_only_filtered_var, command=self.recalc_filtered_data)
 		chk_show.pack(side=tk.LEFT, padx=5, pady=2)
 
@@ -122,7 +126,9 @@ class LogAnalyzerApp:
 		self.text_area.bind("<Control-Button-4>", self.on_zoom)
 		self.text_area.bind("<Control-Button-5>", self.on_zoom)
 
-		# [修改] 綁定 Ctrl+H 快速切換
+		self.text_area.bind("<Double-Button-1>", self.on_log_double_click)
+		self.text_area.bind("<Button-1>", self.on_log_single_click)
+
 		self.root.bind("<Control-h>", self.toggle_show_filtered)
 		self.root.bind("<Control-H>", self.toggle_show_filtered)
 
@@ -190,27 +196,50 @@ class LogAnalyzerApp:
 			with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
 				self.raw_lines = f.readlines()
 			self.current_log_path = filepath; self.update_title()
+
+			# 重置選取狀態
+			self.selected_raw_index = -1
+			self.selection_offset = 0
+
 			self.update_status(f"讀取完成，共 {len(self.raw_lines)} 行。正在建立索引...")
 			self.recalc_filtered_data()
 		except Exception as e:
 			messagebox.showerror("讀取錯誤", str(e)); self.update_status("讀取失敗")
 
-	# --- 核心過濾邏輯 ---
+	# --- [核心] 過濾邏輯 (視角與焦點還原) ---
 	def recalc_filtered_data(self):
+		# 1. 準備視角還原資訊
+		# 如果有選取行，優先鎖定選取行；否則鎖定視窗第一行
+		anchor_raw_index = -1
+		anchor_offset = 0
+
+		if self.selected_raw_index != -1:
+			# 鎖定選取行
+			anchor_raw_index = self.selected_raw_index
+			anchor_offset = self.selection_offset
+		elif self.filtered_cache and self.view_start_index < len(self.filtered_cache):
+			# 鎖定頂端行
+			anchor_raw_index = self.filtered_cache[self.view_start_index][2]
+			anchor_offset = 0
+
 		self.update_status("正在套用過濾器...")
 
 		for f in self.filters: f.hit_count = 0
 
 		self.text_area.config(state=tk.NORMAL)
 		self.text_area.delete("1.0", tk.END)
+
 		for i, flt in enumerate(self.filters):
 			tag_name = f"filter_{i}"
 			self.text_area.tag_config(tag_name, foreground=flt.fore_color, background=flt.back_color)
 
+		# [重要] 設定選取高亮的 Tag (確保它比其他 Filter 顏色優先)
+		# background: 深藍, foreground: 白
+		self.text_area.tag_config("current_line", background="#0078D7", foreground="#FFFFFF")
+
 		self.filtered_cache = []
 		show_only_filtered = self.show_only_filtered_var.get()
 
-		# 預編譯 Regex
 		compiled_excludes = []
 		for idx, f in enumerate(self.filters):
 			if f.enabled and f.is_exclude:
@@ -231,9 +260,7 @@ class LogAnalyzerApp:
 				else:
 					compiled_includes.append((flt.text, tag, idx, False))
 
-		# 執行過濾
-		for line in self.raw_lines:
-			# 1. 檢查 Exclude
+		for raw_idx, line in enumerate(self.raw_lines):
 			skip = False
 			for rule, idx, is_re in compiled_excludes:
 				matched = False
@@ -241,13 +268,11 @@ class LogAnalyzerApp:
 					if rule.search(line): matched = True
 				else:
 					if rule in line: matched = True
-
 				if matched:
 					self.filters[idx].hit_count += 1
 					skip = True
 					break
 
-			# 2. 檢查 Include
 			matched_tags = []
 			is_match = False
 
@@ -261,22 +286,39 @@ class LogAnalyzerApp:
 							if rule.search(line): matched = True
 						else:
 							if rule in line: matched = True
-
 						if matched:
 							is_match = True
 							matched_tags.append(tag)
 							self.filters[idx].hit_count += 1
 
-			# 3. 決定顯示
 			if show_only_filtered:
 				if not skip and is_match:
-					self.filtered_cache.append((line, matched_tags))
+					self.filtered_cache.append((line, matched_tags, raw_idx))
 			else:
 				final_tags = matched_tags if (not skip and is_match) else []
-				self.filtered_cache.append((line, final_tags))
+				self.filtered_cache.append((line, final_tags, raw_idx))
 
 		self.refresh_filter_list()
-		self.view_start_index = 0
+
+		# 2. 執行視角還原
+		new_start_index = 0
+		if anchor_raw_index >= 0:
+			# 在新的 cache 中尋找 >= anchor_raw_index 的行
+			found_idx = -1
+			for i, item in enumerate(self.filtered_cache):
+				if item[2] >= anchor_raw_index:
+					found_idx = i
+					break
+
+			if found_idx != -1:
+				# 找到了，嘗試恢復相對位置 (offset)
+				new_start_index = max(0, found_idx - anchor_offset)
+			else:
+				# 沒找到 (可能在最後)，停在尾部
+				new_start_index = max(0, len(self.filtered_cache) - self.visible_rows)
+
+		self.view_start_index = new_start_index
+
 		self.render_viewport()
 		self.update_scrollbar_thumb()
 
@@ -284,12 +326,61 @@ class LogAnalyzerApp:
 		self.update_status(f"[{mode_text}] 顯示 {len(self.filtered_cache)} 行 (原始 {len(self.raw_lines)} 行)")
 
 	def toggle_show_filtered(self, event=None):
-		"""Ctrl+H 快捷鍵處理"""
 		current = self.show_only_filtered_var.get()
 		self.show_only_filtered_var.set(not current)
 		self.recalc_filtered_data()
 
-	# --- 虛擬捲動與 UI 邏輯 ---
+	# --- [修改] 單擊 Log 行：記錄選取資訊 ---
+	def on_log_single_click(self, event):
+		# 移除舊高亮
+		self.text_area.tag_remove("current_line", "1.0", tk.END)
+
+		# 取得點擊位置的 UI 行號 (1-based)
+		try:
+			index = self.text_area.index(f"@{event.x},{event.y}")
+			ui_row = int(index.split('.')[0])
+
+			# 加高亮
+			self.text_area.tag_add("current_line", f"{ui_row}.0", f"{ui_row}.end")
+			# 確保高亮顯示在最上層
+			self.text_area.tag_raise("current_line")
+
+			# [重要] 記錄選取資訊供下次 recalc 使用
+			# 換算回 cache index
+			cache_index = self.view_start_index + (ui_row - 1)
+			if 0 <= cache_index < len(self.filtered_cache):
+				# 記住原始檔案行號
+				self.selected_raw_index = self.filtered_cache[cache_index][2]
+				# 記住它距離視窗頂部幾行 (Offset)
+				self.selection_offset = ui_row - 1
+			else:
+				self.selected_raw_index = -1
+				self.selection_offset = 0
+
+		except Exception as e:
+			print(e)
+
+	def on_log_double_click(self, event):
+		try:
+			try:
+				selected_text = self.text_area.get(tk.SEL_FIRST, tk.SEL_LAST)
+			except tk.TclError:
+				selected_text = ""
+
+			if not selected_text:
+				cursor_index = self.text_area.index(f"@{event.x},{event.y}")
+				line_start = cursor_index.split('.')[0] + ".0"
+				line_end = cursor_index.split('.')[0] + ".end"
+				selected_text = self.text_area.get(line_start, line_end)
+				selected_text = selected_text.strip()
+
+			if selected_text:
+				self.add_filter_dialog(initial_text=selected_text)
+
+		except Exception as e:
+			print(f"Double click error: {e}")
+
+	# --- 虛擬捲動與 UI 邏輯 (含高亮還原) ---
 	def render_viewport(self):
 		self.text_area.config(state=tk.NORMAL)
 		self.text_area.delete("1.0", tk.END)
@@ -299,12 +390,23 @@ class LogAnalyzerApp:
 			return
 		end_index = min(self.view_start_index + self.visible_rows, total)
 		lines_to_render = self.filtered_cache[self.view_start_index : end_index]
+
 		full_text = "".join([item[0] for item in lines_to_render])
 		self.text_area.insert("1.0", full_text)
-		for i, (line, tags) in enumerate(lines_to_render):
+
+		for i, (line, tags, raw_idx) in enumerate(lines_to_render):
+			line_idx = i + 1
+			# 1. 套用 Filter 顏色
 			if tags:
-				line_idx = i + 1
 				for tag in tags: self.text_area.tag_add(tag, f"{line_idx}.0", f"{line_idx}.end")
+
+			# 2. [重要] 檢查是否為選取行，是則套用高亮
+			if raw_idx == self.selected_raw_index:
+				self.text_area.tag_add("current_line", f"{line_idx}.0", f"{line_idx}.end")
+
+		# 確保選取高亮在所有 Filter 顏色之上
+		self.text_area.tag_raise("current_line")
+
 		self.text_area.config(state=tk.DISABLED)
 
 	def update_scrollbar_thumb(self):
@@ -393,15 +495,17 @@ class LogAnalyzerApp:
 		idx = self.tree.index(item_id)
 		self.open_filter_dialog(self.filters[idx], idx)
 
-	def add_filter_dialog(self): self.open_filter_dialog(None)
+	def add_filter_dialog(self, initial_text=None):
+		self.open_filter_dialog(None, index=None, initial_text=initial_text)
 
-	def open_filter_dialog(self, filter_obj=None, index=None):
+	def open_filter_dialog(self, filter_obj=None, index=None, initial_text=None):
 		dialog = tk.Toplevel(self.root)
 		dialog.title("Edit Filter" if filter_obj else "Add Filter")
 		tk.Label(dialog, text="Pattern:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
 		entry_text = tk.Entry(dialog, width=40)
 		entry_text.grid(row=0, column=1, columnspan=2, padx=5, pady=5)
 		if filter_obj: entry_text.insert(0, filter_obj.text)
+		elif initial_text: entry_text.insert(0, initial_text)
 		var_regex = tk.BooleanVar(value=filter_obj.is_regex if filter_obj else False)
 		var_exclude = tk.BooleanVar(value=filter_obj.is_exclude if filter_obj else False)
 		tk.Checkbutton(dialog, text="Regex", variable=var_regex).grid(row=1, column=1, sticky="w")
