@@ -144,10 +144,14 @@ class LogAnalyzerApp:
 		self.root.bind("<Control-h>", self.toggle_show_filtered)
 		self.root.bind("<Control-H>", self.toggle_show_filtered)
 
+		# [Changed] Bindings for Filter Navigation (Ctrl + Left/Right)
+		self.root.bind("<Control-Left>", self.on_nav_prev_match)
+		self.root.bind("<Control-Right>", self.on_nav_next_match)
+
 		self.paned_window.add(content_frame, height=450, minsize=100)
 
 		# --- Lower: Filter View ---
-		filter_frame = tk.LabelFrame(self.paned_window, text="Filters") # Simplified Title
+		filter_frame = tk.LabelFrame(self.paned_window, text="Filters")
 
 		cols = ("enabled", "type", "pattern", "hits")
 		self.tree = ttk.Treeview(filter_frame, columns=cols, show="headings")
@@ -327,7 +331,70 @@ class LogAnalyzerApp:
 		self.show_only_filtered_var.set(not current)
 		self.recalc_filtered_data()
 
-	# --- Interaction ---
+	# --- Filter Navigation (Ctrl+Left/Right) ---
+
+	def get_current_cache_index(self):
+		if self.selected_raw_index == -1:
+			return self.view_start_index
+
+		for i, item in enumerate(self.filtered_cache):
+			if item[2] == self.selected_raw_index:
+				return i
+		return self.view_start_index
+
+	def navigate_to_match(self, direction):
+		selected_items = self.tree.selection()
+		if not selected_items:
+			self.update_status("No filter selected for navigation")
+			return
+
+		target_tags = set()
+		for item_id in selected_items:
+			idx = self.tree.index(item_id)
+			target_tags.add(f"filter_{idx}")
+
+		if not target_tags: return
+
+		current_idx = self.get_current_cache_index()
+		total = len(self.filtered_cache)
+		found_idx = -1
+
+		if direction == 1: # Next (Down / Right)
+			for i in range(current_idx + 1, total):
+				line_tags = self.filtered_cache[i][1]
+				if any(t in target_tags for t in line_tags):
+					found_idx = i
+					break
+		else: # Prev (Up / Left)
+			for i in range(current_idx - 1, -1, -1):
+				line_tags = self.filtered_cache[i][1]
+				if any(t in target_tags for t in line_tags):
+					found_idx = i
+					break
+
+		if found_idx != -1:
+			self.selected_raw_index = self.filtered_cache[found_idx][2]
+
+			half_view = self.visible_rows // 2
+			new_start = max(0, found_idx - half_view)
+			new_start = min(new_start, max(0, total - self.visible_rows))
+
+			self.view_start_index = new_start
+			self.selection_offset = found_idx - new_start
+
+			self.render_viewport()
+			self.update_scrollbar_thumb()
+			self.update_status(f"Jumped to line {self.selected_raw_index + 1}")
+		else:
+			self.update_status("No more matches found in that direction")
+
+	def on_nav_next_match(self, event):
+		self.navigate_to_match(1)
+
+	def on_nav_prev_match(self, event):
+		self.navigate_to_match(-1)
+
+	# --- Log Interaction ---
 	def on_log_single_click(self, event):
 		self.text_area.tag_remove("current_line", "1.0", tk.END)
 		try:
@@ -421,13 +488,11 @@ class LogAnalyzerApp:
 		scroll_dir = 0
 		if event.num == 5 or event.delta < 0: scroll_dir = 1
 		elif event.num == 4 or event.delta > 0: scroll_dir = -1
-		step = 3
-		new_start = self.view_start_index + (scroll_dir * step)
+		step = 3; new_start = self.view_start_index + (scroll_dir * step)
 		new_start = max(0, min(new_start, total - self.visible_rows))
 		if new_start != self.view_start_index:
 			self.view_start_index = int(new_start)
-			self.render_viewport()
-			self.update_scrollbar_thumb()
+			self.render_viewport(); self.update_scrollbar_thumb()
 		return "break"
 
 	def on_zoom(self, event):
