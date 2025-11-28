@@ -56,7 +56,7 @@ class LogAnalyzerApp:
 
 		# App Info
 		self.APP_NAME = "Log Analyzer"
-		self.VERSION = "v1.0"
+		self.VERSION = "v1.1"
 
 		# Threading & Queue
 		self.msg_queue = queue.Queue()
@@ -256,9 +256,9 @@ class LogAnalyzerApp:
 
 	# --- Documentation & About ---
 	def open_documentation(self):
-		doc_path = self.resource_path(os.path.join("Doc", "Log_Analyzer_v1.0_Docs_EN.html"))
+		doc_path = self.resource_path(os.path.join("Doc", "Log_Analyzer_v1.1_Docs_EN.html"))
 		if not os.path.exists(doc_path):
-			doc_path = os.path.join(os.path.abspath("."), "Doc", "Log_Analyzer_v1.0_Docs_EN.html")
+			doc_path = os.path.join(os.path.abspath("."), "Doc", "Log_Analyzer_v1.1_Docs_EN.html")
 		if not os.path.exists(doc_path):
 			messagebox.showerror("Error", f"Documentation file not found at:\n{doc_path}\n\nPlease ensure the 'Doc' folder is in the application directory.")
 			return
