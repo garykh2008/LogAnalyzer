@@ -1,25 +1,27 @@
 import re
 import os
 
-# 目標檔案
 PYTHON_FILE = 'loganalyzer.py'
 
-def main():
+def get_version():
+	"""
+	Reads the version from the main python file.
+	Returns the version string (e.g., "v1.2") or "Unknown".
+	"""
 	if not os.path.exists(PYTHON_FILE):
-		print("Unknown")
-		return
+		return "Unknown"
 
 	try:
 		with open(PYTHON_FILE, 'r', encoding='utf-8') as f:
 			content = f.read()
-			# 尋找 self.VERSION = "..."
+			# Find self.VERSION = "..."
 			m = re.search(r'self\.VERSION\s*=\s*["\']([^"\']+)["\']', content)
 			if m:
-				print(m.group(1))
+				return m.group(1)
 			else:
-				print("Unknown")
+				return "Unknown"
 	except Exception:
-		print("Unknown")
+		return "Unknown"
 
 if __name__ == "__main__":
-	main()
+	print(get_version())
