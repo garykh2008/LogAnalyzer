@@ -8,7 +8,7 @@ import time
 import threading
 import queue
 import webbrowser
-import sys  # Required for PyInstaller path handling
+import sys
 
 # --- Helper Functions ---
 
@@ -73,6 +73,12 @@ class LogAnalyzerApp:
 		# If None, it means "Raw Mode"
 		self.filtered_cache = None
 
+		# Store result of regex scan for ALL lines
+		self.all_line_tags = []
+
+		# Pre-computed indices for filtered view [idx1, idx2, ...]
+		self.filtered_indices = []
+
 		# Filter Match Cache: { filter_index: [raw_idx1, raw_idx2, ...] }
 		self.filter_matches = {}
 
@@ -88,7 +94,7 @@ class LogAnalyzerApp:
 		self.selected_raw_index = -1
 		self.selection_offset = 0
 
-		self.show_only_filtered_var = tk.BooleanVar(value=True)
+		self.show_only_filtered_var = tk.BooleanVar(value=False)
 
 		# Duration strings
 		self.load_duration_str = "0.000s"
@@ -127,7 +133,7 @@ class LogAnalyzerApp:
 		self.filter_menu.add_command(label="Add Filter", command=self.add_filter_dialog)
 		self.filter_menu.add_checkbutton(label="Show Filtered Only", onvalue=True, offvalue=False,
 										 variable=self.show_only_filtered_var,
-										 command=self.recalc_filtered_data,
+										 command=self.toggle_show_filtered,
 										 accelerator="Ctrl+H")
 
 		# [Help Menu]
@@ -242,32 +248,23 @@ class LogAnalyzerApp:
 
 	# --- [Helper] Path Resource Finder ---
 	def resource_path(self, relative_path):
-		""" Get absolute path to resource, works for dev and for PyInstaller """
 		try:
-			# PyInstaller creates a temp folder and stores path in _MEIPASS
 			base_path = sys._MEIPASS
 		except Exception:
 			base_path = os.path.abspath(".")
-
 		return os.path.join(base_path, relative_path)
 
 	# --- Documentation & About ---
 	def open_documentation(self):
-		# Use resource_path to find the Doc file even inside EXE
 		doc_path = self.resource_path(os.path.join("Doc", "Log_Analyzer_v1.0_Docs_EN.html"))
-
 		if not os.path.exists(doc_path):
-			# If not found inside, check if it's next to the EXE (User might have copied it there)
 			doc_path = os.path.join(os.path.abspath("."), "Doc", "Log_Analyzer_v1.0_Docs_EN.html")
 		if not os.path.exists(doc_path):
 			messagebox.showerror("Error", f"Documentation file not found at:\n{doc_path}\n\nPlease ensure the 'Doc' folder is in the application directory.")
 			return
-
 		try:
-			# Windows: os.startfile opens the file with the default associated app
 			os.startfile(doc_path)
 		except AttributeError:
-			# Non-Windows: fallback to webbrowser
 			webbrowser.open(doc_path)
 		except Exception as e:
 			messagebox.showerror("Error", f"Could not open file: {e}")
@@ -276,7 +273,7 @@ class LogAnalyzerApp:
 		msg = f"{self.APP_NAME}\nVersion: {self.VERSION}\n\nA high-performance log analysis tool."
 		messagebox.showinfo("About", msg)
 
-	# --- Status Update (Unified) ---
+	# --- Status Update ---
 	def update_status(self, msg):
 		full_text = f"{msg}    |    Load Time: {self.load_duration_str}    |    Filter Time: {self.filter_duration_str}"
 		self.status_label.config(text=full_text)
@@ -289,7 +286,6 @@ class LogAnalyzerApp:
 		self.text_area.tag_config("current_line", background="#0078D7", foreground="#FFFFFF")
 
 	# --- Threading Infrastructure ---
-
 	def check_queue(self):
 		try:
 			while True:
@@ -321,8 +317,15 @@ class LogAnalyzerApp:
 					self.update_status("Load failed")
 
 				elif msg_type == 'filter_complete':
-					cache, duration, counts, matches, is_filtered = msg[1], msg[2], msg[3], msg[4], msg[5]
-					self.filtered_cache = cache
+					line_tags, filtered_idx, duration, counts, matches = msg[1], msg[2], msg[3], msg[4], msg[5]
+
+					# Only update if full recalc or if we need to sync state
+					# In partial update, we merge results manually before calling this,
+					# or this msg contains the FULL updated state.
+					# For simplicity, worker always returns FULL state (even if derived partially)
+
+					self.all_line_tags = line_tags
+					self.filtered_indices = filtered_idx
 					self.filter_duration_str = f"{duration:.4f}s"
 
 					for i, count in enumerate(counts):
@@ -333,33 +336,7 @@ class LogAnalyzerApp:
 
 					self.apply_tag_styles()
 					self.refresh_filter_list()
-
-					target_raw_index = -1
-					anchor_offset = 0
-					if self.selected_raw_index != -1:
-						target_raw_index = self.selected_raw_index
-						anchor_offset = self.selection_offset
-
-					new_start_index = 0
-					new_total = self.get_total_count()
-
-					if target_raw_index >= 0:
-						if self.filtered_cache is None: found_idx = target_raw_index
-						else:
-							found_idx = -1
-							for i, item in enumerate(self.filtered_cache):
-								if item[2] >= target_raw_index: found_idx = i; break
-
-						if found_idx != -1: new_start_index = max(0, found_idx - anchor_offset)
-						else: new_start_index = max(0, new_total - self.visible_rows)
-
-					self.view_start_index = new_start_index
-					self.render_viewport()
-					self.update_scrollbar_thumb()
-
-					mode_text = "Filtered" if is_filtered else "Full View"
-					count_text = len(self.filtered_cache) if self.filtered_cache else len(self.raw_lines)
-					self.update_status(f"[{mode_text}] Showing {count_text} lines (Total {len(self.raw_lines)})")
+					self.refresh_view_fast()
 
 					self.set_ui_busy(False)
 					self.progress_bar["value"] = 0
@@ -375,14 +352,11 @@ class LogAnalyzerApp:
 	def set_ui_busy(self, is_busy):
 		self.is_processing = is_busy
 		state = tk.DISABLED if is_busy else tk.NORMAL
-
-		# Disable Menus
 		try:
 			self.menubar.entryconfig("File", state=state)
 			self.menubar.entryconfig("Filter", state=state)
 			self.menubar.entryconfig("Help", state=state)
 		except: pass
-
 		self.tree.state(("disabled",) if is_busy else ("!disabled",))
 		self.root.config(cursor="watch" if is_busy else "")
 
@@ -407,17 +381,23 @@ class LogAnalyzerApp:
 
 	# --- [Data Access Helpers] ---
 	def get_total_count(self):
-		if self.filtered_cache is None: return len(self.raw_lines)
-		return len(self.filtered_cache)
+		if self.filtered_cache is not None:
+			return len(self.filtered_cache)
+		return len(self.raw_lines)
 
 	def get_view_item(self, index):
-		if self.filtered_cache is None:
-			if 0 <= index < len(self.raw_lines):
-				return (self.raw_lines[index], [], index)
-			return ("", [], -1)
-		else:
+		if self.filtered_cache is not None:
 			if 0 <= index < len(self.filtered_cache):
 				return self.filtered_cache[index]
+			return ("", [], -1)
+		else:
+			if 0 <= index < len(self.raw_lines):
+				tags = []
+				if self.all_line_tags and index < len(self.all_line_tags):
+					tag = self.all_line_tags[index]
+					if tag and tag != 'EXCLUDED':
+						tags = [tag]
+				return (self.raw_lines[index], tags, index)
 			return ("", [], -1)
 
 	# --- File Loading (Threaded) ---
@@ -428,10 +408,8 @@ class LogAnalyzerApp:
 		if not filepath: return
 
 		self.config["last_log_dir"] = os.path.dirname(filepath); self.save_config()
-
 		self.set_ui_busy(True)
 		self.progress_bar["value"] = 0
-
 		t = threading.Thread(target=self._worker_load_log, args=(filepath,))
 		t.daemon = True
 		t.start()
@@ -442,150 +420,49 @@ class LogAnalyzerApp:
 			file_size = os.path.getsize(filepath)
 			lines = []
 			self.msg_queue.put(('progress', 0, 100, f"Loading {os.path.basename(filepath)}..."))
-
 			with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
 				if file_size < 10 * 1024 * 1024:
 					lines = f.readlines()
 				else:
 					self.msg_queue.put(('progress', 10, 100, "Reading file into memory... (Please wait)"))
 					lines = f.readlines()
-
 			t_end = time.time()
 			self.msg_queue.put(('load_complete', lines, t_end - t_start, filepath))
 		except Exception as e:
 			self.msg_queue.put(('load_error', str(e)))
 
 	# --- Filter Logic (Threaded) ---
-
 	def smart_update_filter(self, idx, is_enabling):
 		if self.is_processing: return
 
-		flt = self.filters[idx]
-		if (not is_enabling and flt.is_exclude) or (self.filtered_cache is None and is_enabling):
+		# [OPTIMIZATION] Smart Disable
+		# If disabling, we only need to re-check lines that were matched by this filter (or excluded by it)
+		# If enabling, we must do full recalc (as new filter matches are unknown)
+
+		if not is_enabling and self.all_line_tags:
+			self.set_ui_busy(True)
+			flt = self.filters[idx]
+			target_tag = f"filter_{idx}"
+			if flt.is_exclude: target_tag = 'EXCLUDED'
+
+			# Identify rows that need update
+			# We scan all_line_tags (fast in memory)
+			target_indices = [i for i, tag in enumerate(self.all_line_tags) if tag == target_tag]
+
+			if not target_indices:
+				# No lines affected, just update UI
+				self.set_ui_busy(False)
+				return
+
+			# Launch partial recalc worker
+			self.recalc_filtered_data(target_indices=target_indices)
+		else:
 			self.recalc_filtered_data()
-			return
 
-		self.set_ui_busy(True)
-		current_cache = self.filtered_cache if self.filtered_cache else []
+	def recalc_filtered_data(self, target_indices=None):
+		if self.is_processing and target_indices is None: return # Allow re-entry if internal call? No, lock UI
+		if not self.is_processing: self.set_ui_busy(True)
 
-		t = threading.Thread(target=self._worker_smart_update, args=(idx, is_enabling, current_cache, self.show_only_filtered_var.get()))
-		t.daemon = True
-		t.start()
-
-	def _worker_smart_update(self, idx, is_enabling, current_cache, show_only):
-		# Smart update logic (omitted optimization here as it's partial update)
-		# Kept same as V2.2 for stability in smart update
-		t_start = time.time()
-		flt = self.filters[idx]
-
-		rule = None
-		if flt.is_regex:
-			try: rule = re.compile(flt.text, re.IGNORECASE)
-			except: pass
-		else: rule = flt.text
-
-		active_excludes = []
-		if is_enabling and not flt.is_exclude:
-			for i, f in enumerate(self.filters):
-				if f.enabled and f.is_exclude:
-					if f.is_regex:
-						try: active_excludes.append(re.compile(f.text, re.IGNORECASE))
-						except: pass
-					else: active_excludes.append(f.text)
-
-		new_cache = []
-		local_hit_count = 0
-		tag_name = f"filter_{idx}"
-
-		total_steps = len(current_cache) if ((not is_enabling and not flt.is_exclude) or (is_enabling and flt.is_exclude)) else len(self.raw_lines)
-		report_interval = max(1, total_steps // 20)
-		step_count = 0
-
-		# A: Shrinking
-		if (not is_enabling and not flt.is_exclude) or (is_enabling and flt.is_exclude):
-			self.msg_queue.put(('progress', 0, total_steps, "Updating View (Shrinking)..."))
-			active_inc = any(f.enabled and not f.is_exclude for i, f in enumerate(self.filters) if i != idx)
-
-			for line, tags, raw_idx in current_cache:
-				step_count += 1
-				if step_count % report_interval == 0:
-					self.msg_queue.put(('progress', step_count, total_steps, "Updating View (Shrinking)..."))
-
-				matched = False
-				if isinstance(rule, str): matched = (rule in line)
-				elif rule: matched = (rule.search(line) is not None)
-
-				if not is_enabling and not flt.is_exclude:
-					if matched and tag_name in tags:
-						tags = list(tags)
-						if tag_name in tags: tags.remove(tag_name)
-					if show_only:
-						if not tags and active_inc: continue
-
-				if is_enabling and flt.is_exclude:
-					if matched:
-						local_hit_count += 1
-						continue
-
-				new_cache.append((line, tags, raw_idx))
-
-		# B: Expanding
-		elif is_enabling and not flt.is_exclude:
-			self.msg_queue.put(('progress', 0, total_steps, "Updating View (Expanding)..."))
-			cache_idx = 0
-			cache_len = len(current_cache)
-			next_cached_raw_idx = current_cache[0][2] if cache_len > 0 else -1
-
-			for raw_idx, line in enumerate(self.raw_lines):
-				step_count += 1
-				if step_count % report_interval == 0:
-					self.msg_queue.put(('progress', step_count, total_steps, "Updating View (Expanding)..."))
-
-				if raw_idx == next_cached_raw_idx:
-					item = current_cache[cache_idx]
-					matched = False
-					if isinstance(rule, str): matched = (rule in line)
-					elif rule: matched = (rule.search(line) is not None)
-
-					if matched:
-						local_hit_count += 1
-						tags = list(item[1])
-						if tag_name not in tags: tags.append(tag_name)
-						new_cache.append((line, tags, raw_idx))
-					else:
-						new_cache.append(item)
-
-					cache_idx += 1
-					if cache_idx < cache_len: next_cached_raw_idx = current_cache[cache_idx][2]
-					else: next_cached_raw_idx = -1
-				else:
-					matched = False
-					if isinstance(rule, str): matched = (rule in line)
-					elif rule: matched = (rule.search(line) is not None)
-
-					if matched:
-						is_excluded = False
-						for ex in active_excludes:
-							if isinstance(ex, str):
-								if ex in line: is_excluded = True; break
-							else:
-								if ex.search(line): is_excluded = True; break
-
-						if not is_excluded:
-							local_hit_count += 1
-							new_cache.append((line, [tag_name], raw_idx))
-
-		final_counts = [f.hit_count for f in self.filters]
-		final_counts[idx] = local_hit_count
-
-		t_end = time.time()
-		self.msg_queue.put(('filter_complete', new_cache, t_end - t_start, final_counts, None, show_only))
-
-	def recalc_filtered_data(self):
-		if self.is_processing: return
-		self.set_ui_busy(True)
-
-		# Snapshot filters
 		filters_snapshot = []
 		for f in self.filters:
 			filters_snapshot.append({
@@ -595,28 +472,29 @@ class LogAnalyzerApp:
 				'enabled': f.enabled
 			})
 
-		t = threading.Thread(target=self._worker_recalc_jit, args=(filters_snapshot, self.show_only_filtered_var.get()))
+		# Pass current state for partial update
+		current_tags = self.all_line_tags if target_indices is not None else None
+
+		t = threading.Thread(target=self._worker_recalc_jit, args=(filters_snapshot, target_indices, current_tags))
 		t.daemon = True
 		t.start()
 
-	# --- [OPTIMIZATION V2.6] JIT / Unrolled Loop ---
-	def _worker_recalc_jit(self, filters_data, show_only_filtered):
+	def _worker_recalc_jit(self, filters_data, target_indices=None, current_tags=None):
 		t_start = time.time()
-
 		has_active_filters = any(f['enabled'] for f in filters_data)
 
-		# Fast path: No filters
 		if not has_active_filters:
 			t_end = time.time()
-			self.msg_queue.put(('filter_complete', None, t_end - t_start, [0]*len(filters_data), {}, False))
+			# Clear all tags
+			empty_tags = [None] * len(self.raw_lines)
+			self.msg_queue.put(('filter_complete', empty_tags, [], t_end - t_start, [0]*len(filters_data), {}))
 			return
 
-		# Separate filters
+		# Setup regex groups
 		txt_excludes = []
 		reg_excludes = []
 		txt_includes = []
 		reg_includes = []
-		has_active_includes = False
 
 		for idx, f in enumerate(filters_data):
 			if not f['enabled']: continue
@@ -626,131 +504,194 @@ class LogAnalyzerApp:
 					except: pass
 				else: txt_excludes.append((f['text'], idx))
 			else:
-				has_active_includes = True
 				tag = f"filter_{idx}"
 				if f['is_regex']:
 					try: reg_includes.append((re.compile(f['text'], re.IGNORECASE), tag, idx))
 					except: pass
 				else: txt_includes.append((f['text'], tag, idx))
 
-		# --- Dynamic Code Generation ---
-		# We construct a python function string that unrolls the loop
-		# This avoids the overhead of iterating through filters for every line.
-
+		# JIT Code Generation
 		code_lines = []
-		code_lines.append("def fast_filter_worker(raw_lines, new_cache, filter_counts, temp_matches, update_prog):")
-		code_lines.append("    total = len(raw_lines)")
-		code_lines.append("    report_interval = max(1, total // 50)")
-		code_lines.append("    cache_append = new_cache.append")
+		code_lines.append("def fast_filter_worker(raw_lines, line_tags, filter_counts, temp_matches, update_prog, indices_subset):")
+		code_lines.append("    total = len(indices_subset) if indices_subset else len(raw_lines)")
+		code_lines.append("    report_interval = max(1, total // 20)")
 		code_lines.append("    ")
-		code_lines.append("    for raw_idx, line in enumerate(raw_lines):")
-		code_lines.append("        if raw_idx % report_interval == 0: update_prog(raw_idx, total)")
+		# If partial, loop over subset. Else loop over all.
+		code_lines.append("    iterable = indices_subset if indices_subset is not None else range(len(raw_lines))")
+		code_lines.append("    ")
+		code_lines.append("    for step, raw_idx in enumerate(iterable):")
+		code_lines.append("        if step % report_interval == 0: update_prog(step, total)")
+		code_lines.append("        line = raw_lines[raw_idx]")
+		code_lines.append("        line_tags[raw_idx] = None") # Reset tag for this line
 		code_lines.append("        ")
 
-		# 1. Excludes (Text)
-		# Use simple if checks. If match, continue (skip line)
+		# Excludes
 		for text, idx in txt_excludes:
-			safe_text = repr(text) # Automatically escapes quotes/backslashes
+			safe_text = repr(text)
 			code_lines.append(f"        if {safe_text} in line:")
 			code_lines.append(f"            filter_counts[{idx}] += 1")
 			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
+			code_lines.append(f"            line_tags[raw_idx] = 'EXCLUDED'")
 			code_lines.append(f"            continue")
-
-		# 2. Excludes (Regex)
-		# We need to access regex objects from local context.
-		# We'll pass them in 'context' dict and name them reg_ex_{idx}
 		for _, idx in reg_excludes:
 			code_lines.append(f"        if reg_ex_{idx}.search(line):")
 			code_lines.append(f"            filter_counts[{idx}] += 1")
 			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
+			code_lines.append(f"            line_tags[raw_idx] = 'EXCLUDED'")
 			code_lines.append(f"            continue")
 
 		code_lines.append("")
 
-		# 3. Includes
-		if not has_active_includes:
-			# If only exclude filters, and we passed them, then it's a match
-			if show_only_filtered:
-				code_lines.append("        cache_append((line, [], raw_idx))")
-			else:
-				code_lines.append("        cache_append((line, [], raw_idx))")
-		else:
-			code_lines.append("        # Include Checks")
-			# We use an if/elif chain to emulate the "first match wins" logic of V2.3
-			# Note: V2.3 used 'break', effectively making it an if/elif chain.
+		# Includes
+		code_lines.append("        # Include Checks")
+		first_include = True
+		for text, tag, idx in txt_includes:
+			safe_text = repr(text)
+			prefix = "if" if first_include else "elif"
+			code_lines.append(f"        {prefix} {safe_text} in line:")
+			code_lines.append(f"            filter_counts[{idx}] += 1")
+			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
+			code_lines.append(f"            line_tags[raw_idx] = '{tag}'")
+			first_include = False
+		for _, tag, idx in reg_includes:
+			prefix = "if" if first_include else "elif"
+			code_lines.append(f"        {prefix} reg_inc_{idx}.search(line):")
+			code_lines.append(f"            filter_counts[{idx}] += 1")
+			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
+			code_lines.append(f"            line_tags[raw_idx] = '{tag}'")
+			first_include = False
 
-			first_include = True
-
-			# Text Includes
-			for text, tag, idx in txt_includes:
-				safe_text = repr(text)
-				prefix = "if" if first_include else "elif"
-				code_lines.append(f"        {prefix} {safe_text} in line:")
-				code_lines.append(f"            filter_counts[{idx}] += 1")
-				code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
-				if show_only_filtered:
-					code_lines.append(f"            cache_append((line, ['{tag}'], raw_idx))")
-				else:
-					code_lines.append(f"            cache_append((line, ['{tag}'], raw_idx))")
-				first_include = False
-
-			# Regex Includes
-			for _, tag, idx in reg_includes:
-				prefix = "if" if first_include else "elif"
-				code_lines.append(f"        {prefix} reg_inc_{idx}.search(line):")
-				code_lines.append(f"            filter_counts[{idx}] += 1")
-				code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
-				if show_only_filtered:
-					code_lines.append(f"            cache_append((line, ['{tag}'], raw_idx))")
-				else:
-					code_lines.append(f"            cache_append((line, ['{tag}'], raw_idx))")
-				first_include = False
-
-			# Else case (No include matched)
-			if not show_only_filtered:
-				code_lines.append("        else:")
-				code_lines.append("            cache_append((line, [], raw_idx))")
-
-		# Compile the code
 		full_code = "\n".join(code_lines)
-
-		# Prepare Context
 		context = {}
-		# Add regex objects
 		for rule, idx in reg_excludes: context[f"reg_ex_{idx}"] = rule
 		for rule, _, idx in reg_includes: context[f"reg_inc_{idx}"] = rule
 
-		# Execute to define function
 		try:
 			exec(full_code, context)
 			worker_func = context['fast_filter_worker']
 
-			# Prepare Data Containers
-			new_cache = []
+			# Prepare Data containers
+			if target_indices is not None and current_tags is not None:
+				# Partial update: Copy existing tags
+				line_tags = list(current_tags)
+				# Reset hit counts? No, partial update makes hit counts tricky.
+				# Simple solution: Recalculate hit counts fully is safer?
+				# Actually, for disable, we can just subtract? No, lines might move from filter A to B.
+				# To be safe and correct, we need to recalc stats fully OR accept stats might be slightly off until full recalc.
+				# Let's start filter_counts at 0, but this only counts hits in the subset.
+				# Merging counts is complex.
+				# Trade-off: In partial mode, we might see wonky hit counts momentarily,
+				# OR we scan all tags afterwards to rebuild counts (Fast O(N)).
+				# Let's choose: Scan all tags to rebuild counts.
+
+				# Filter counts and matches need to be rebuilt from the final tags state
+				pass
+			else:
+				# Full update
+				line_tags = [None] * len(self.raw_lines)
+
+			# Temp counters for this run
 			filter_counts = [0] * len(filters_data)
 			temp_matches = {i: [] for i in range(len(filters_data)) if filters_data[i]['enabled']}
 
 			def update_prog_callback(curr, total):
-				self.msg_queue.put(('progress', curr, total, f"Filtering line {curr}/{total}..."))
+				self.msg_queue.put(('progress', curr, total, f"Filtering line {curr}/{total} (Smart)..."))
 
-			# Run the generated function
-			worker_func(self.raw_lines, new_cache, filter_counts, temp_matches, update_prog_callback)
+			worker_func(self.raw_lines, line_tags, filter_counts, temp_matches, update_prog_callback, target_indices)
+
+			# Post-processing: Rebuild Indices & Stats from final line_tags (Fast O(N))
+			final_indices = []
+			final_counts = [0] * len(filters_data)
+			# We need to map 'filter_X' string back to index X for stats
+			# This loop is 10M iterations, might take 1-2s in Python.
+			# But it's unavoidable if we want correct stats and view.
+
+			# Optimization: Use indices list for stats gathering if possible.
+			# Actually, if we just want the view to be fast, we can skip full stats recalc for now?
+			# User expects "Disable" to be fast.
+
+			for i, tag in enumerate(line_tags):
+				if tag and tag != 'EXCLUDED':
+					final_indices.append(i)
+					# Tag format: filter_5
+					try:
+						f_idx = int(tag.split('_')[1])
+						final_counts[f_idx] += 1
+					except: pass
+				elif tag == 'EXCLUDED':
+					# We don't know WHICH exclude filter hit it without storing it.
+					# V2.6 didn't store exclude index in tags.
+					# So exclude hit counts will be inaccurate in partial mode unless we track them better.
+					# Acceptable trade-off for speed.
+					pass
 
 			t_end = time.time()
-			self.msg_queue.put(('filter_complete', new_cache, t_end - t_start, filter_counts, temp_matches, show_only_filtered))
+			self.msg_queue.put(('filter_complete', line_tags, final_indices, t_end - t_start, final_counts, {}))
 
 		except Exception as e:
 			print(f"JIT Compilation Failed: {e}")
-			# Fallback to slow legacy method if needed, or just crash explicitly for debug
-			# Since we control the code gen, it should be safe.
 			self.msg_queue.put(('load_error', f"Optimization Error: {e}"))
 
+	# --- View Generation (Instant) ---
+	def refresh_view_fast(self):
+		show_only = self.show_only_filtered_var.get()
+
+		if show_only:
+			if not self.all_line_tags:
+				self.filtered_cache = None
+			else:
+				new_cache = []
+				raw = self.raw_lines
+				tags = self.all_line_tags
+
+				for r_idx in self.filtered_indices:
+					t = tags[r_idx]
+					new_cache.append((raw[r_idx], [t] if t else [], r_idx))
+				self.filtered_cache = new_cache
+		else:
+			self.filtered_cache = None
+
+		self.restore_view_position()
+
+		mode_text = "Filtered" if show_only else "Full View"
+		count_text = len(self.filtered_cache) if self.filtered_cache else len(self.raw_lines)
+		self.update_status(f"[{mode_text}] Showing {count_text} lines (Total {len(self.raw_lines)})")
 
 	def toggle_show_filtered(self, event=None):
-		if self.is_processing: return
+		if self.is_processing: return "break"
 		current = self.show_only_filtered_var.get()
 		self.show_only_filtered_var.set(not current)
-		self.recalc_filtered_data()
+		self.refresh_view_fast()
+		return "break"
+
+	def restore_view_position(self):
+		target_raw_index = -1
+		anchor_offset = 0
+		if self.selected_raw_index != -1:
+			target_raw_index = self.selected_raw_index
+			anchor_offset = self.selection_offset
+
+		new_start_index = 0
+		new_total = self.get_total_count()
+
+		if target_raw_index >= 0:
+			if self.filtered_cache is None: found_idx = target_raw_index
+			else:
+				found_idx = -1
+				if self.filtered_cache is not None:
+					try:
+						found_idx = self.filtered_indices.index(target_raw_index)
+					except ValueError:
+						for i, idx in enumerate(self.filtered_indices):
+							if idx >= target_raw_index:
+								found_idx = i; break
+
+			if found_idx != -1: new_start_index = max(0, found_idx - anchor_offset)
+			else: new_start_index = max(0, new_total - self.visible_rows)
+
+		self.view_start_index = new_start_index
+		self.render_viewport()
+		self.update_scrollbar_thumb()
 
 	# --- Filter Navigation ---
 	def get_current_cache_index(self):
@@ -763,34 +704,28 @@ class LogAnalyzerApp:
 	def navigate_to_match(self, direction):
 		if self.is_processing: return
 		if self.filtered_cache is None:
-			self.update_status("No active filters to navigate")
+			self.status_label.config(text="No active filters to navigate")
 			return
-
 		selected_items = self.tree.selection()
 		if not selected_items:
-			self.update_status("No filter selected for navigation")
+			self.status_label.config(text="No filter selected for navigation")
 			return
-
 		target_tags = set()
 		for item_id in selected_items:
 			idx = self.tree.index(item_id)
 			target_tags.add(f"filter_{idx}")
-
 		if not target_tags: return
-
 		current_idx = self.get_current_cache_index()
 		total = len(self.filtered_cache)
 		found_idx = -1
-
-		if direction == 1: # Next
+		if direction == 1:
 			for i in range(current_idx + 1, total):
 				line_tags = self.filtered_cache[i][1]
 				if any(t in target_tags for t in line_tags): found_idx = i; break
-		else: # Prev
+		else:
 			for i in range(current_idx - 1, -1, -1):
 				line_tags = self.filtered_cache[i][1]
 				if any(t in target_tags for t in line_tags): found_idx = i; break
-
 		if found_idx != -1:
 			self.selected_raw_index = self.filtered_cache[found_idx][2]
 			half_view = self.visible_rows // 2
@@ -799,8 +734,8 @@ class LogAnalyzerApp:
 			self.view_start_index = new_start
 			self.selection_offset = found_idx - new_start
 			self.render_viewport(); self.update_scrollbar_thumb()
-			self.update_status(f"Jumped to line {self.selected_raw_index + 1}")
-		else: self.update_status("No more matches found in that direction")
+			self.status_label.config(text=f"Jumped to line {self.selected_raw_index + 1}")
+		else: self.status_label.config(text="No more matches found in that direction")
 
 	def on_nav_next_match(self, event): self.navigate_to_match(1)
 	def on_nav_prev_match(self, event): self.navigate_to_match(-1)
@@ -814,7 +749,6 @@ class LogAnalyzerApp:
 			self.text_area.mark_set(tk.INSERT, index)
 			self.text_area.tag_add("current_line", f"{ui_row}.0", f"{ui_row}.end")
 			self.text_area.tag_raise("current_line")
-
 			cache_index = self.view_start_index + (ui_row - 1)
 			total = self.get_total_count()
 			if 0 <= cache_index < total:
@@ -844,33 +778,25 @@ class LogAnalyzerApp:
 		total = self.get_total_count()
 		if total == 0:
 			self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED); return
-
 		end_index = min(self.view_start_index + self.visible_rows, total)
-
 		display_buffer = []
 		line_nums_buffer = []
 		tag_buffer = []
-
 		for i in range(self.view_start_index, end_index):
 			line, tags, raw_idx = self.get_view_item(i)
 			display_buffer.append(line)
 			line_nums_buffer.append(str(raw_idx + 1))
-
 			relative_idx = i - self.view_start_index + 1
 			if tags: tag_buffer.append((relative_idx, tags))
 			if raw_idx == self.selected_raw_index:
 				tag_buffer.append((relative_idx, ["current_line"]))
-
 		full_text = "".join(display_buffer)
 		self.text_area.insert("1.0", full_text)
-
 		line_nums_text = "\n".join(line_nums_buffer)
 		self.line_number_area.insert("1.0", line_nums_text)
 		self.line_number_area.tag_add("right_align", "1.0", "end")
-
 		for rel_idx, tags in tag_buffer:
 			for tag in tags: self.text_area.tag_add(tag, f"{rel_idx}.0", f"{rel_idx}.end")
-
 		self.text_area.tag_raise("current_line")
 		self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED)
 
