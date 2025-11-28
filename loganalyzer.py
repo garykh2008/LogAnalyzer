@@ -256,18 +256,25 @@ class LogAnalyzerApp:
 
 	# --- Documentation & About ---
 	def open_documentation(self):
-		doc_path = self.resource_path(os.path.join("Doc", "Log_Analyzer_v1.1_Docs_EN.html"))
+		doc_filename = f"Log_Analyzer_{self.VERSION}_Docs_EN.html"
+		doc_path = self.resource_path(os.path.join("Doc", doc_filename))
+
 		if not os.path.exists(doc_path):
-			doc_path = os.path.join(os.path.abspath("."), "Doc", "Log_Analyzer_v1.1_Docs_EN.html")
-		if not os.path.exists(doc_path):
-			messagebox.showerror("Error", f"Documentation file not found at:\n{doc_path}\n\nPlease ensure the 'Doc' folder is in the application directory.")
-			return
+			# Fallback for development environment
+			alt_doc_path = os.path.join(os.path.abspath("."), "Doc", doc_filename)
+			if not os.path.exists(alt_doc_path):
+				messagebox.showerror("Error", f"Documentation file not found at:\n{doc_path}\n(or {alt_doc_path})\n\nPlease ensure the 'Doc' folder is in the application directory.")
+				return
+			doc_path = alt_doc_path
+
 		try:
+			# os.startfile is preferred on Windows
 			os.startfile(doc_path)
 		except AttributeError:
-			webbrowser.open(doc_path)
+			# fallback for non-Windows
+			webbrowser.open('file://' + os.path.realpath(doc_path))
 		except Exception as e:
-			messagebox.showerror("Error", f"Could not open file: {e}")
+			messagebox.showerror("Error", f"Could not open documentation file: {e}")
 
 	def show_about(self):
 		msg = f"{self.APP_NAME}\nVersion: {self.VERSION}\n\nA high-performance log analysis tool."

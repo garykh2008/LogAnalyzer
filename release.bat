@@ -70,11 +70,6 @@ echo       Target Version: %VERSION%
 echo [2/5] Building documentation...
 if exist "%DOC_SCRIPT%" (
 	python "%DOC_SCRIPT%"
-	if not exist "%DOC_DIR%" mkdir "%DOC_DIR%"
-	if exist "%DOC_FILENAME%" (
-		move /Y "%DOC_FILENAME%" "%DOC_DIR%\" >nul
-		echo       Moved documentation to %DOC_DIR% folder.
-	)
 )
 
 :: 4. Windows 打包 (PyInstaller)

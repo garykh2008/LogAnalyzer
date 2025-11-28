@@ -1,10 +1,16 @@
 import markdown
 import os
+from get_ver import get_version
 
-# 設定輸入與輸出檔案
-input_md_file = "Doc\Log_Analyzer_v1.1_Docs_EN.md"  # 您的 Markdown 檔案名稱
-output_html_file = "Doc\Log_Analyzer_v1.1_Docs_EN.html"
+# --- 動態設定 ---
+# 取得目前版本
+version = get_version()
+# 通用輸入檔名 (注意：您需要手動將 .md 檔名修改為此)
+input_md_file = "Doc\\Log_Analyzer_Docs_EN.md"
+# 根據版本動態產生輸出檔名
+output_html_file = f"Doc\\Log_Analyzer_{version}_Docs_EN.html"
 
+# --- 樣式與轉換邏輯 (不變) ---
 # 定義 CSS 樣式 (讓 HTML 看起來像 GitHub 風格般漂亮)
 css_style = """
 <style>
@@ -31,8 +37,13 @@ css_style = """
 """
 
 def convert_md_to_html():
+	if version == "Unknown":
+		print("錯誤: 無法從 get_ver.py 取得版本號。")
+		return
+
 	if not os.path.exists(input_md_file):
-		print(f"錯誤: 找不到檔案 {input_md_file}")
+		print(f"錯誤: 找不到文件檔案 {input_md_file}")
+		print("提醒：您是否已將 .md 檔案重新命名為不包含版本號的通用名稱？")
 		return
 
 	print(f"正在讀取 {input_md_file}...")
@@ -52,7 +63,7 @@ def convert_md_to_html():
 	<head>
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>Log Analyzer Documentation</title>
+		<title>Log Analyzer Documentation ( {version} )</title>
 		{css_style}
 	</head>
 	<body>
@@ -65,7 +76,7 @@ def convert_md_to_html():
 	with open(output_html_file, "w", encoding="utf-8") as f:
 		f.write(full_html)
 
-	print("轉換完成！")
+	print(f"轉換完成！已產生 {output_html_file}")
 
 if __name__ == "__main__":
 	convert_md_to_html()
