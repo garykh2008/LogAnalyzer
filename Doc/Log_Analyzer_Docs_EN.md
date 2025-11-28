@@ -1,8 +1,8 @@
-# Log Analyzer v1.1 User Manual
+# Log Analyzer User Manual
 
 ## Table of Contents
 
-- [Log Analyzer v1.1 User Manual](#log-analyzer-v11-user-manual)
+- [Log Analyzer User Manual](#log-analyzer-user-manual)
   - [Table of Contents](#table-of-contents)
   - [1. Introduction](#1-introduction)
   - [2. Key Features](#2-key-features)
@@ -17,11 +17,13 @@
       - [Help](#help)
     - [Shortcuts \& Operations](#shortcuts--operations)
   - [4. Release Notes](#4-release-notes)
+    - [Version 1.2 (2025-11-28)](#version-12-2025-11-28)
+      - [✨ New Features](#-new-features)
     - [Version 1.1 (2025-11-28)](#version-11-2025-11-28)
       - [⚡ Performance \& Logic](#-performance--logic)
       - [🛠 Fixes \& Changes](#-fixes--changes)
     - [Version 1.0 (2025-11-27)](#version-10-2025-11-27)
-      - [✨ New Features](#-new-features)
+      - [✨ New Features](#-new-features-1)
       - [⚡ Performance Improvements](#-performance-improvements)
       - [🐛 Bug Fixes](#-bug-fixes)
   - [5. System Requirements](#5-system-requirements)
@@ -116,6 +118,18 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 * **Ctrl + Left/Right Arrow**: Jumps to the previous/next match in the filtered results.
 
 ## 4. Release Notes
+
+### Version 1.2 (2025-11-28)
+
+**✨ New Feature Update**
+
+This release introduces a major usability feature for a more intuitive workflow.
+
+#### ✨ New Features
+
+*   **Drag and Drop to Open**: Users can now drag a log file (`.log`, `.txt`, etc.) directly onto the application window to open it.
+
+---
 
 ### Version 1.1 (2025-11-28)
 
