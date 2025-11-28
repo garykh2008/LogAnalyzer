@@ -8,4 +8,4 @@ Welcome to the Log Analyzer repository.
 
 All extensive documentation has been compiled into a separate file.
 
-➡️ Please see the **[Complete Project Guide](Log_Analyzer_Docs_EN.md)** for more details.
+➡️ Please see the **[Complete Project Guide](Doc/Log_Analyzer_Docs_EN.md)** for more details.
