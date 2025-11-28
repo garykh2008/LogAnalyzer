@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, colorchooser, messagebox, ttk
+from tkinterdnd2 import DND_FILES, TkinterDnD
 import re
 import json
 import xml.etree.ElementTree as ET
@@ -246,6 +247,10 @@ class LogAnalyzerApp:
 		# Start Queue Checker
 		self.check_queue()
 
+		# --- Drag and Drop ---
+		self.root.drop_target_register(DND_FILES)
+		self.root.dnd_bind('<<Drop>>', self.on_drop)
+
 	# --- [Helper] Path Resource Finder ---
 	def resource_path(self, relative_path):
 		try:
@@ -437,6 +442,27 @@ class LogAnalyzerApp:
 			self.msg_queue.put(('load_complete', lines, t_end - t_start, filepath))
 		except Exception as e:
 			self.msg_queue.put(('load_error', str(e)))
+
+	def _load_log_from_path(self, filepath):
+		if self.is_processing: return
+		if not filepath or not os.path.exists(filepath): return
+
+		self.config["last_log_dir"] = os.path.dirname(filepath); self.save_config()
+		self.set_ui_busy(True)
+		self.progress_bar["value"] = 0
+		t = threading.Thread(target=self._worker_load_log, args=(filepath,))
+		t.daemon = True
+		t.start()
+
+	def on_drop(self, event):
+		try:
+			# The root.tk.splitlist handles paths with spaces (they are wrapped in {})
+			files = self.root.tk.splitlist(event.data)
+			if files:
+				# We only process the first file dropped
+				self._load_log_from_path(files[0])
+		except Exception as e:
+			messagebox.showerror("Drag & Drop Error", f"Could not open dropped file:\n{e}")
 
 	# --- Filter Logic (Threaded) ---
 	def smart_update_filter(self, idx, is_enabling):
@@ -1073,6 +1099,6 @@ class LogAnalyzerApp:
 		except Exception as e: messagebox.showerror("Error", f"JSON Import Failed: {e}")
 
 if __name__ == "__main__":
-	root = tk.Tk()
+	root = TkinterDnD.Tk()
 	app = LogAnalyzerApp(root)
 	root.mainloop()

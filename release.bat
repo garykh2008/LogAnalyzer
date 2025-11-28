@@ -28,12 +28,22 @@ if %errorlevel% neq 0 (
 )
 
 echo       Installing/Updating required packages...
-pip install pyinstaller markdown
+pip install pyinstaller markdown tkinterdnd2
 if %errorlevel% neq 0 (
 	echo [Error] Failed to install dependencies.
 	pause
 	exit /b 1
 )
+
+echo       Finding tkinterdnd2 path...
+for /f "delims=" %%i in ('python -c "import os, tkinterdnd2; print(os.path.dirname(tkinterdnd2.__file__))"') do set "TKINTERDND2_PATH=%%i"
+
+if not defined TKINTERDND2_PATH (
+    echo [Error] Could not find tkinterdnd2 path. Please ensure it is installed via 'pip install tkinterdnd2'.
+    pause
+    exit /b 1
+)
+echo       tkinterdnd2 found at: !TKINTERDND2_PATH!
 
 :: 1. 檢查必要檔案
 if not exist "%PYTHON_FILE%" (
@@ -85,6 +95,7 @@ pyinstaller --noconsole --onefile --clean ^
 	--workpath "build" ^
 	--specpath "build" ^
 	--add-data "%ABS_DOC_SRC%;%DOC_DIR%" ^
+	--add-data "!TKINTERDND2_PATH!;tkinterdnd2" ^
 	--name "LogAnalyzer_%VERSION%" ^
 	"%PYTHON_FILE%"
 
