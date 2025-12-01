@@ -17,6 +17,8 @@
       - [Help](#help)
     - [Shortcuts \& Operations](#shortcuts--operations)
   - [4. Release Notes](#4-release-notes)
+    - [Version 1.3 (2025-12-01)](#version-13-2025-12-01)
+      - [🎨 UI & UX Overhaul](#-ui--ux-overhaul)
     - [Version 1.2 (2025-11-28)](#version-12-2025-11-28)
       - [✨ New Features](#-new-features)
     - [Version 1.1 (2025-11-28)](#version-11-2025-11-28)
@@ -118,6 +120,26 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 * **Ctrl + Left/Right Arrow**: Jumps to the previous/next match in the filtered results.
 
 ## 4. Release Notes
+
+### Version 1.3 (2025-12-01)
+
+**🎨 UI & User Experience Overhaul**
+
+This release brings a modernized look and feel to the application with a complete UI refresh.
+
+#### ✨ New Features & Changes
+
+*   **Modernized UI Theme**:
+    *   Adopted the **'clam'** theme for a cleaner, more professional appearance.
+    *   Replaced standard Tkinter widgets with **ttk widgets** (Buttons, Labels, Scrollbars, Frames) for better consistency and style.
+    *   Updated the default font to **Segoe UI** for improved readability on Windows.
+
+*   **Enhanced Filter Dialog**:
+    *   Refactored the "Add/Edit Filter" dialog to use modern widgets.
+    *   Improved layout and spacing for better usability.
+    *   Added a **Cancel** button and made the dialog **modal** to prevent state issues.
+
+---
 
 ### Version 1.2 (2025-11-28)
 
