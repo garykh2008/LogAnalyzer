@@ -55,6 +55,17 @@ class LogAnalyzerApp:
 		self.root = root
 		self.root.geometry("1000x750")
 
+		# --- UI Theme ---
+		style = ttk.Style(self.root)
+		style.theme_use("clam")
+		style.configure("Treeview", rowheight=25, font=("Segoe UI", 9))
+		style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
+		style.map("Treeview", background=[("selected", "#0078D7")])
+		style.configure("TLabelFrame", padding=5)
+		style.configure("TLabelFrame.Label", font=("Segoe UI", 10, "bold"))
+		style.configure("TButton", padding=5, font=("Segoe UI", 9))
+		style.configure("TProgressbar", thickness=15)
+
 		# App Info
 		self.APP_NAME = "Log Analyzer"
 		self.VERSION = "v1.2"
@@ -145,36 +156,36 @@ class LogAnalyzerApp:
 		self.help_menu.add_command(label="About", command=self.show_about)
 
 		# 2. Status Bar & Progress Bar Area
-		status_frame = tk.Frame(root, bd=1, relief=tk.SUNKEN)
+		status_frame = ttk.Frame(root, relief=tk.SUNKEN)
 		status_frame.pack(side=tk.BOTTOM, fill=tk.X)
 
 		self.progress_bar = ttk.Progressbar(status_frame, orient="horizontal", mode="determinate", length=200)
-		self.progress_bar.pack(side=tk.RIGHT, padx=5, pady=2)
+		self.progress_bar.pack(side=tk.RIGHT, padx=5, pady=5)
 
-		self.status_label = tk.Label(status_frame, text="Ready", anchor=tk.W)
-		self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+		self.status_label = ttk.Label(status_frame, text="Ready", anchor=tk.W)
+		self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
 		# Update initial title and status
 		self.update_title()
 		self.update_status("Ready")
 
 		# 3. Main Content Area (PanedWindow)
-		self.paned_window = tk.PanedWindow(root, orient=tk.VERTICAL, sashwidth=4, sashrelief=tk.RAISED, bg="#d9d9d9")
-		self.paned_window.pack(fill=tk.BOTH, expand=True)
+		self.paned_window = tk.PanedWindow(root, orient=tk.VERTICAL, sashwidth=6, sashrelief=tk.RAISED, bg="#d9d9d9")
+		self.paned_window.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
 		# --- Upper: Log View ---
-		content_frame = tk.Frame(self.paned_window)
+		content_frame = ttk.Frame(self.paned_window)
 
-		self.scrollbar_y = tk.Scrollbar(content_frame, command=self.on_scroll_y)
+		self.scrollbar_y = ttk.Scrollbar(content_frame, command=self.on_scroll_y)
 		self.scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
 
-		self.line_number_area = tk.Text(content_frame, width=7, wrap="none", font=("Consolas", self.font_size),
+		self.line_number_area = tk.Text(content_frame, width=7, wrap="none", font=("Segoe UI", self.font_size),
 										state="disabled", bg="#f0f0f0", bd=0, highlightthickness=0, takefocus=0)
 		self.line_number_area.pack(side=tk.LEFT, fill=tk.Y)
 		self.line_number_area.tag_configure("right_align", justify="right")
 
-		self.text_area = tk.Text(content_frame, wrap="none", font=("Consolas", self.font_size))
-		self.scrollbar_x = tk.Scrollbar(content_frame, orient="horizontal", command=self.text_area.xview)
+		self.text_area = tk.Text(content_frame, wrap="none", font=("Segoe UI", self.font_size))
+		self.scrollbar_x = ttk.Scrollbar(content_frame, orient="horizontal", command=self.text_area.xview)
 		self.text_area.configure(xscrollcommand=self.scrollbar_x.set)
 
 		self.scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
@@ -208,7 +219,7 @@ class LogAnalyzerApp:
 		self.paned_window.add(content_frame, height=450, minsize=100)
 
 		# --- Lower: Filter View ---
-		filter_frame = tk.LabelFrame(self.paned_window, text="Filters (Drag to Reorder)")
+		filter_frame = ttk.LabelFrame(self.paned_window, text="Filters (Drag to Reorder)")
 
 		cols = ("enabled", "type", "pattern", "hits")
 		self.tree = ttk.Treeview(filter_frame, columns=cols, show="headings")
@@ -222,7 +233,7 @@ class LogAnalyzerApp:
 		self.tree.heading("hits", text="Hits")
 		self.tree.column("hits", width=80, anchor="e")
 
-		tree_scroll = tk.Scrollbar(filter_frame, orient="vertical", command=self.tree.yview)
+		tree_scroll = ttk.Scrollbar(filter_frame, orient="vertical", command=self.tree.yview)
 		self.tree.configure(yscrollcommand=tree_scroll.set)
 
 		tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
@@ -878,8 +889,8 @@ class LogAnalyzerApp:
 			new_size = self.font_size + delta; new_size = max(6, min(new_size, 50))
 			if new_size != self.font_size:
 				self.font_size = new_size
-				self.text_area.configure(font=("Consolas", self.font_size))
-				self.line_number_area.configure(font=("Consolas", self.font_size))
+				self.text_area.configure(font=("Segoe UI", self.font_size))
+				self.line_number_area.configure(font=("Segoe UI", self.font_size))
 				self.config["font_size"] = self.font_size; self.save_config()
 		return "break"
 
@@ -975,26 +986,52 @@ class LogAnalyzerApp:
 	def open_filter_dialog(self, filter_obj=None, index=None, initial_text=None):
 		dialog = tk.Toplevel(self.root)
 		dialog.title("Edit Filter" if filter_obj else "Add Filter")
-		tk.Label(dialog, text="Pattern:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
-		entry_text = tk.Entry(dialog, width=40)
-		entry_text.grid(row=0, column=1, columnspan=2, padx=5, pady=5)
+		dialog.transient(self.root)
+		dialog.grab_set()
+		dialog.geometry("400x200")
+
+		main_frame = ttk.Frame(dialog, padding=10)
+		main_frame.pack(fill=tk.BOTH, expand=True)
+
+		pattern_frame = ttk.Frame(main_frame)
+		pattern_frame.pack(fill=tk.X, expand=True)
+		ttk.Label(pattern_frame, text="Pattern:", width=10).pack(side=tk.LEFT, padx=(0, 5))
+		entry_text = ttk.Entry(pattern_frame)
+		entry_text.pack(fill=tk.X, expand=True)
 		if filter_obj: entry_text.insert(0, filter_obj.text)
 		elif initial_text: entry_text.insert(0, initial_text)
+
+		options_frame = ttk.Frame(main_frame, padding=(0, 10, 0, 10))
+		options_frame.pack(fill=tk.X, expand=True)
 		var_regex = tk.BooleanVar(value=filter_obj.is_regex if filter_obj else False)
 		var_exclude = tk.BooleanVar(value=filter_obj.is_exclude if filter_obj else False)
-		tk.Checkbutton(dialog, text="Regex", variable=var_regex).grid(row=1, column=1, sticky="w")
-		tk.Checkbutton(dialog, text="Exclude", variable=var_exclude).grid(row=1, column=2, sticky="w")
+		ttk.Checkbutton(options_frame, text="Regex", variable=var_regex).pack(side=tk.LEFT)
+		ttk.Checkbutton(options_frame, text="Exclude", variable=var_exclude).pack(side=tk.LEFT, padx=10)
+
 		colors = {"fg": filter_obj.fore_color if filter_obj else "#000000", "bg": filter_obj.back_color if filter_obj else "#FFFFFF"}
+
+		color_frame = ttk.Frame(main_frame)
+		color_frame.pack(fill=tk.BOTH, expand=True)
+
 		def pick_fg():
 			c = colorchooser.askcolor(color=colors["fg"])[1]
-			if c: colors["fg"] = c; btn_fg.config(bg=c)
+			if c: colors["fg"] = c; btn_fg.config(style="FG.TButton")
 		def pick_bg():
 			c = colorchooser.askcolor(color=colors["bg"])[1]
-			if c: colors["bg"] = c; btn_bg.config(bg=c)
-		btn_fg = tk.Button(dialog, text="Text Color", bg=colors["fg"], command=pick_fg)
-		btn_fg.grid(row=2, column=1, sticky="ew", padx=2)
-		btn_bg = tk.Button(dialog, text="Back Color", bg=colors["bg"], command=pick_bg)
-		btn_bg.grid(row=2, column=2, sticky="ew", padx=2)
+			if c: colors["bg"] = c; btn_bg.config(style="BG.TButton")
+
+		style = ttk.Style(dialog)
+		style.configure("FG.TButton", foreground=colors["fg"], background=colors["fg"])
+		style.configure("BG.TButton", foreground=colors["bg"], background=colors["bg"])
+
+		btn_fg = ttk.Button(color_frame, text="Text Color", command=pick_fg, style="FG.TButton")
+		btn_fg.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+		btn_bg = ttk.Button(color_frame, text="Back Color", command=pick_bg, style="BG.TButton")
+		btn_bg.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+
+		button_frame = ttk.Frame(main_frame, padding=(0, 10, 0, 0))
+		button_frame.pack(fill=tk.X)
+
 		def save():
 			text = entry_text.get()
 			if not text: return
@@ -1008,7 +1045,11 @@ class LogAnalyzerApp:
 				self.filters.append(new_filter)
 				self.recalc_filtered_data()
 			dialog.destroy()
-		tk.Button(dialog, text="Save", command=save, width=15).grid(row=3, column=0, columnspan=3, pady=10)
+
+		ttk.Button(button_frame, text="Save", command=save).pack(side=tk.RIGHT)
+		ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
+		entry_text.focus_set()
+		dialog.wait_window()
 
 	# --- File I/O ---
 	def _write_tat_file(self, filepath):
