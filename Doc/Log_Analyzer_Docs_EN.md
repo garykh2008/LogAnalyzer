@@ -111,6 +111,7 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 #### Help
 
+* **Keyboard Shortcuts**: Displays a window with a summary of all keyboard shortcuts.
 * **Documentation**: Opens this user manual.
 * **About**: Displays application version information.
 

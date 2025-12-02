@@ -172,6 +172,7 @@ class LogAnalyzerApp:
 		# [Help Menu]
 		self.help_menu = tk.Menu(self.menubar, tearoff=0)
 		self.menubar.add_cascade(label="Help", menu=self.help_menu)
+		self.help_menu.add_command(label="Keyboard Shortcuts", command=self.show_keyboard_shortcuts)
 		self.help_menu.add_command(label="Documentation", command=self.open_documentation)
 		self.help_menu.add_separator()
 		self.help_menu.add_command(label="About", command=self.show_about)
@@ -369,6 +370,40 @@ class LogAnalyzerApp:
 	def show_about(self):
 		msg = f"{self.APP_NAME}\nVersion: {self.VERSION}\n\nA high-performance log analysis tool."
 		messagebox.showinfo("About", msg)
+
+	def show_keyboard_shortcuts(self):
+		"""Displays a window with a summary of keyboard shortcuts."""
+		shortcuts = [
+			("General", ""),
+			("Ctrl + H", "Toggle between 'Show Filtered Only' and 'Show All'"),
+			("Ctrl + Scroll", "Adjust font size in the log view"),
+			("Ctrl + Left/Right", "Jump to previous/next match for the selected filter"),
+			("", ""),
+			("In Log View", ""),
+			("Double-Click", "Select text to quickly add a new filter"),
+			("'c' key", "Add or edit a note for the selected line"),
+			("", ""),
+			("In Filter List", ""),
+			("Double-Click", "Edit the selected filter"),
+			("Spacebar", "Enable or disable the selected filter"),
+			("Delete key", "Remove the selected filter(s)"),
+		]
+
+		win = tk.Toplevel(self.root)
+		win.title("Keyboard Shortcuts")
+		win.transient(self.root)
+		win.grab_set()
+		win.geometry("450x300")
+
+		frame = ttk.Frame(win, padding=15)
+		frame.pack(fill=tk.BOTH, expand=True)
+
+		for i, (key, desc) in enumerate(shortcuts):
+			if not key and not desc:
+				ttk.Separator(frame, orient='horizontal').grid(row=i, columnspan=2, sticky='ew', pady=5)
+				continue
+			ttk.Label(frame, text=key, font=("Segoe UI", 9, "bold")).grid(row=i, column=0, sticky='w', padx=(0, 10))
+			ttk.Label(frame, text=desc).grid(row=i, column=1, sticky='w')
 
 	# --- Status Update ---
 	def update_status(self, msg):
