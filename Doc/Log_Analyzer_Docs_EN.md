@@ -14,11 +14,13 @@
     - [Menu Bar](#menu-bar)
       - [File](#file)
       - [Filter](#filter)
+      - [Notes](#notes)
       - [Help](#help)
     - [Shortcuts \& Operations](#shortcuts--operations)
   - [4. Release Notes](#4-release-notes)
-    - [Version 1.3 (2025-12-01)](#version-13-2025-12-01)
-      - [🎨 UI & UX Overhaul](#-ui--ux-overhaul)
+    - [Version 1.3 (2025-12-02)](#version-13-2025-12-02)
+      - [✨ Comprehensive Notes System](#-comprehensive-notes-system)
+      - [🎨 UI \& User Experience Overhaul](#-ui--user-experience-overhaul)
     - [Version 1.2 (2025-11-28)](#version-12-2025-11-28)
       - [✨ New Features](#-new-features)
     - [Version 1.1 (2025-11-28)](#version-11-2025-11-28)
@@ -98,6 +100,15 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
   * **Unchecked**: Displays all original log lines, but keeps keyword highlighting (Raw Mode).
 
+#### Notes
+
+*   **Show Notes**: Toggles the visibility of the Notes View panel.
+
+*   **Show in Separate Window**: When "Show Notes" is active, this toggles the Notes View between being docked in the main window or appearing as a separate, floating window.
+
+*   **Save Notes to Text file**: Exports all current notes to a human-readable `.txt` file, formatted as `Line <Tab> Timestamp <Tab> Note Content`.
+
+
 #### Help
 
 * **Documentation**: Opens this user manual.
@@ -106,6 +117,8 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 ### Shortcuts & Operations
 
 * **Double-click Log Content**: Selects text and quickly adds it as a new Filter.
+
+*   **`c` key on Log View**: After selecting a line, press `c` to quickly add or edit a note for that line.
 
 * **Double-click Filter List**: Edits the selected filter rule.
 
@@ -121,13 +134,22 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 ## 4. Release Notes
 
-### Version 1.3 (2025-12-01)
+### Version 1.3 (2025-12-02)
 
-**🎨 UI & User Experience Overhaul**
+#### ✨ Comprehensive Notes System
+
+This release introduces a powerful notes system, allowing users to annotate, save, and share their findings directly within the application.
+
+*   **Integrated Note View**: A new "Notes" panel can be docked to the right of the log view, allowing for simultaneous analysis and note-taking.
+*   **Flexible Layout**: The Notes View can be toggled between a docked panel and a separate floating window via the "Notes" menu to suit any workflow.
+*   **Automatic Save/Load**: Notes can be exported to a `.note` (JSON) file, which is automatically named after the log file. When reloading the same log, the application will detect the note file and ask to import it, preserving your work across sessions.
+*   **Plain Text Export**: Added an option to "Save Notes to Text file," exporting notes in a clean, readable `.txt` format.
+*   **Timestamp Extraction**: The Notes View automatically extracts and displays the timestamp from the corresponding log line, providing crucial context.
+*   **Quick-Add Shortcut**: In the log view, simply select a line and press the `c` key to instantly add or edit a note.
+
+#### 🎨 UI & User Experience Overhaul
 
 This release brings a modernized look and feel to the application with a complete UI refresh.
-
-#### ✨ New Features & Changes
 
 *   **Modernized UI Theme**:
     *   Adopted the **'clam'** theme for a cleaner, more professional appearance.
