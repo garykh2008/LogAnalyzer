@@ -1,20 +1,33 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-:: =================================================================
-::      Log Analyzer Super Release Script
-:: =================================================================
-:: This script will:
-:: 1. Update the version number in loganalyzer.py
-:: 2. Build the docs, Windows exe, and Linux package
-:: 3. Commit and tag the release in Git
-:: =================================================================
+:: ============================================================================
+::                Log Analyzer Super Release Script
+:: ============================================================================
+::
+::  Modes:
+::  1. Full Release: Updates version, builds, commits, and tags.
+::     Usage: release.bat vX.Y
+::
+::  2. Build Only: Just packages the application using the current version.
+::     No version changes, no git commits.
+::     Usage: release.bat /buildonly
+::
+:: ============================================================================
+
+:: --- Mode Selection ---
+if /I "%~1"=="/buildonly" (
+    goto :build_only_mode
+) else (
+    goto :full_release_mode
+)
 
 :: --- 1. Version Check & Setup ---
+:full_release_mode
 if "%~1"=="" (
     echo [Error] No version number provided.
-    echo Usage: %~nx0 vX.Y
-    echo Example: %~nx0 v1.3
+    echo Usage for full release: %~nx0 vX.Y
+    echo Usage for packaging only: %~nx0 /buildonly
     exit /b 1
 )
 set "NEW_VER=%~1"
@@ -46,49 +59,16 @@ if %errorlevel% neq 0 (
 )
 echo      Successfully updated loganalyzer.py to %NEW_VER%.
 
-:: --- 4. Build Process ---
+:: --- 4. Build, Commit, and Tag ---
 echo.
-echo [Step 3/7] Installing dependencies...
-pip install pyinstaller markdown tkinterdnd2 > nul
+echo [Step 3/7] Starting build process for %NEW_VER%...
+call :build_process %NEW_VER%
 if %errorlevel% neq 0 (
-	echo [Error] Failed to install dependencies.
-	pause
-	exit /b 1
+    echo [Error] Build process failed.
+    exit /b 1
 )
 
-echo.
-echo [Step 4/7] Building...
-:: Call the original build logic, but with the NEW version number
-set "PYTHON_FILE=loganalyzer.py"
-set "DOC_SCRIPT=build_docs.py"
-set "DOC_DIR=Doc"
-set "LINUX_PACKAGER=_linux_packager.py"
-set "REL_WIN=release\windows"
-
-echo      Finding tkinterdnd2 path...
-for /f "delims=" %%i in ('python -c "import os, tkinterdnd2; print(os.path.dirname(tkinterdnd2.__file__))"') do set "TKINTERDND2_PATH=%%i"
-if not defined TKINTERDND2_PATH ( echo [Error] tkinterdnd2 not found. && exit /b 1 )
-
-echo      Building documentation...
-python "%DOC_SCRIPT%"
-
-echo      Building Windows Executable...
-if not exist "%REL_WIN%" mkdir "%REL_WIN%"
-set "ABS_DOC_SRC=%~dp0%DOC_DIR%"
-pyinstaller --noconfirm --noconsole --onefile --clean --distpath "%REL_WIN%" --workpath "build" --specpath "build" --add-data "%ABS_DOC_SRC%;%DOC_DIR%" --add-data "!TKINTERDND2_PATH!;tkinterdnd2" --name "LogAnalyzer_%NEW_VER%" "%PYTHON_FILE%" > build/pyinstaller.log 2>&1
-if %errorlevel% neq 0 (
-	echo [Error] PyInstaller failed. Check build/pyinstaller.log
-	exit /b 1
-)
-
-echo      Packaging for Linux...
-python "%LINUX_PACKAGER%" > build/linux_packager.log 2>&1
-if %errorlevel% neq 0 (
-	echo [Error] Linux packaging failed. Check build/linux_packager.log
-	exit /b 1
-)
-
-echo      Build complete.
+echo      Build complete for %NEW_VER%.
 
 :: --- 5. Git Operations ---
 echo.
@@ -159,3 +139,75 @@ echo   - %NEW_HTML_FILE%
 echo.
 
 endlocal
+goto :eof
+
+
+:: ============================================================================
+::                            BUILD ONLY MODE
+:: ============================================================================
+:build_only_mode
+echo --- Starting Build-Only Mode ---
+echo.
+
+:: 1. Get Current Version
+echo [Step 1/2] Reading current version...
+for /f "delims=" %%i in ('python get_ver.py') do set "CURRENT_VER=%%i"
+if "%CURRENT_VER%"=="Unknown" (
+    echo [Error] Could not determine current version from get_ver.py. Aborting.
+    exit /b 1
+)
+echo      Current version is %CURRENT_VER%.
+
+:: 2. Build
+echo.
+echo [Step 2/2] Starting build process for %CURRENT_VER%...
+call :build_process %CURRENT_VER%
+if %errorlevel% neq 0 (
+    echo [Error] Build process failed.
+    exit /b 1
+)
+
+echo.
+echo ========================================================
+echo  Build-Only process for %CURRENT_VER% completed successfully!
+echo ========================================================
+echo.
+
+endlocal
+goto :eof
+
+
+:: ============================================================================
+::                         SHARED BUILD PROCESS
+:: ============================================================================
+:build_process
+set "BUILD_VER=%~1"
+
+echo      [Build] Installing dependencies...
+pip install pyinstaller markdown tkinterdnd2 > nul
+if %errorlevel% neq 0 ( echo [Error] Failed to install dependencies. && exit /b 1 )
+
+set "PYTHON_FILE=loganalyzer.py"
+set "DOC_SCRIPT=build_docs.py"
+set "DOC_DIR=Doc"
+set "LINUX_PACKAGER=_linux_packager.py"
+set "REL_WIN=release\windows"
+
+echo      [Build] Finding tkinterdnd2 path...
+for /f "delims=" %%i in ('python -c "import os, tkinterdnd2; print(os.path.dirname(tkinterdnd2.__file__))"') do set "TKINTERDND2_PATH=%%i"
+if not defined TKINTERDND2_PATH ( echo [Error] tkinterdnd2 not found. && exit /b 1 )
+
+echo      [Build] Building documentation...
+python "%DOC_SCRIPT%"
+
+echo      [Build] Building Windows Executable...
+if not exist "%REL_WIN%" mkdir "%REL_WIN%"
+set "ABS_DOC_SRC=%~dp0%DOC_DIR%"
+pyinstaller --noconfirm --noconsole --onefile --clean --distpath "%REL_WIN%" --workpath "build" --specpath "build" --add-data "%ABS_DOC_SRC%;%DOC_DIR%" --add-data "!TKINTERDND2_PATH!;tkinterdnd2" --name "LogAnalyzer_%BUILD_VER%" "%PYTHON_FILE%" > build/pyinstaller.log 2>&1
+if %errorlevel% neq 0 ( echo [Error] PyInstaller failed. Check build/pyinstaller.log && exit /b 1 )
+
+echo      [Build] Packaging for Linux...
+python "%LINUX_PACKAGER%" > build/linux_packager.log 2>&1
+if %errorlevel% neq 0 ( echo [Error] Linux packaging failed. Check build/linux_packager.log && exit /b 1 )
+
+goto :eof
