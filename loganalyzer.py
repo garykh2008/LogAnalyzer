@@ -73,6 +73,7 @@ class LogAnalyzerApp:
 		self.APP_NAME = "Log Analyzer"
 		self.VERSION = "V1.3"
 
+
 		# Threading & Queue
 		self.msg_queue = queue.Queue()
 		self.is_processing = False
@@ -80,6 +81,7 @@ class LogAnalyzerApp:
 		# Config
 		self.config_file = "app_config.json"
 		self.config = self.load_config()
+		self.dark_mode = tk.BooleanVar(value=self.config.get("dark_mode", False))
 
 		self.filters = []
 		self.raw_lines = []
@@ -141,8 +143,11 @@ class LogAnalyzerApp:
 		self.file_menu = tk.Menu(self.menubar, tearoff=0)
 		self.menubar.add_cascade(label="File", menu=self.file_menu)
 
-		self.file_menu.add_command(label="Open Log", command=self.load_log)
+		self.file_menu.add_command(label="Open Log...", command=self.load_log)
+		self.recent_files_menu = tk.Menu(self.file_menu, tearoff=0)
+		self.file_menu.add_cascade(label="Open Recent", menu=self.recent_files_menu, state="disabled")
 		self.file_menu.add_separator()
+
 		self.file_menu.add_command(label="Load Filters", command=self.import_tat_filters)
 		self.file_menu.add_command(label="Save Filters", command=self.quick_save_tat)
 		self.file_menu.add_command(label="Save Filters As", command=self.save_as_tat_filters)
@@ -168,6 +173,11 @@ class LogAnalyzerApp:
 		# [View Menu]
 		self.view_menu = tk.Menu(self.menubar, tearoff=0)
 		self.menubar.add_cascade(label="View", menu=self.view_menu)
+		self.view_menu.add_command(label="Find...", accelerator="Ctrl+F", command=self.show_find_bar)
+		self.view_menu.add_command(label="Go to Line...", accelerator="Ctrl+G", command=self.show_goto_dialog)
+		self.view_menu.add_separator()
+		self.view_menu.add_checkbutton(label="Dark Mode", variable=self.dark_mode, command=self.toggle_dark_mode)
+		self.view_menu.add_separator()
 		self.view_menu.add_command(label="Show Timeline", command=self.show_timeline_window, state="disabled")
 
 
@@ -256,6 +266,38 @@ class LogAnalyzerApp:
 		self.root.bind("<Control-h>", self.toggle_show_filtered)
 		self.root.bind("<Control-H>", self.toggle_show_filtered)
 
+		self.root.bind("<Control-f>", self.show_find_bar)
+		self.root.bind("<Control-F>", self.show_find_bar)
+		self.root.bind("<F3>", self.find_next)
+		self.root.bind("<Shift-F3>", self.find_previous)
+		self.root.bind("<Escape>", self.hide_find_bar)
+
+		self.root.bind("<Control-g>", self.show_goto_dialog)
+		self.root.bind("<Control-G>", self.show_goto_dialog)
+
+		# --- Find Bar ---
+		self.find_frame = ttk.Frame(self.content_frame, padding=5)
+		# This frame will be packed later when shown
+
+		self.find_case_var = tk.BooleanVar(value=False)
+		self.find_wrap_var = tk.BooleanVar(value=True)
+
+		ttk.Label(self.find_frame, text="Find:").pack(side=tk.LEFT, padx=(0, 5))
+		self.find_entry = ttk.Entry(self.find_frame)
+		self.find_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+		self.find_entry.bind("<Return>", self.find_next)
+		self.find_entry.bind("<Shift-Return>", self.find_previous)
+
+		self.find_next_btn = ttk.Button(self.find_frame, text="Next", command=self.find_next, width=8)
+		self.find_next_btn.pack(side=tk.LEFT, padx=5)
+		self.find_prev_btn = ttk.Button(self.find_frame, text="Prev", command=self.find_previous, width=8)
+		self.find_prev_btn.pack(side=tk.LEFT)
+
+		ttk.Checkbutton(self.find_frame, text="Case", variable=self.find_case_var).pack(side=tk.LEFT, padx=(10, 0))
+		ttk.Checkbutton(self.find_frame, text="Wrap", variable=self.find_wrap_var).pack(side=tk.LEFT, padx=(5, 10))
+
+		ttk.Button(self.find_frame, text="✕", command=self.hide_find_bar, width=3).pack(side=tk.RIGHT)
+
 		self.root.bind("<Control-Left>", self.on_nav_prev_match)
 		self.root.bind("<Control-Right>", self.on_nav_next_match)
 
@@ -328,6 +370,10 @@ class LogAnalyzerApp:
 		# --- Drag and Drop ---
 		self.root.drop_target_register(DND_FILES)
 		self.root.dnd_bind('<<Drop>>', self.on_drop)
+
+		# Apply initial theme
+		self._apply_theme()
+		self._update_recent_files_menu()
 
 	def _create_notes_view_widgets(self, parent_frame):
 		"""Helper to create all widgets for the notes view inside a given parent."""
@@ -426,6 +472,7 @@ class LogAnalyzerApp:
 	# --- Status Update ---
 	def update_status(self, msg):
 		full_text = f"{msg}    |    Load Time: {self.load_duration_str}    |    Filter Time: {self.filter_duration_str}"
+		if not hasattr(self, 'status_label'): return
 		self.status_label.config(text=full_text)
 
 	# --- Tag Configuration ---
@@ -434,7 +481,12 @@ class LogAnalyzerApp:
 			tag_name = f"filter_{i}"
 			self.text_area.tag_config(tag_name, foreground=flt.fore_color, background=flt.back_color)
 		self.text_area.tag_config("current_line", background="#0078D7", foreground="#FFFFFF")
-		self.text_area.tag_config("note_line", background="#FFFACD", foreground="#000000")
+		if self.dark_mode.get():
+			self.text_area.tag_config("note_line", background="#5a5332", foreground="#FFFFFF")
+		else:
+			self.text_area.tag_config("note_line", background="#FFFACD", foreground="#000000")
+
+		self.text_area.tag_config("find_match", background="#FFA500", foreground="#000000")
 
 	# --- Threading Infrastructure ---
 	def check_queue(self):
@@ -538,6 +590,106 @@ class LogAnalyzerApp:
 			with open(self.config_file, 'w') as f: json.dump(self.config, f)
 		except: pass
 
+	# --- Recent Files ---
+	def _add_to_recent_files(self, filepath):
+		"""Adds a file to the top of the recent files list."""
+		recent_files = self.config.get("recent_files", [])
+
+		# Remove if already exists to move it to the top
+		if filepath in recent_files:
+			recent_files.remove(filepath)
+
+		# Add to the top
+		recent_files.insert(0, filepath)
+
+		# Trim the list to a max size (e.g., 10)
+		self.config["recent_files"] = recent_files[:10]
+		self.save_config()
+		self._update_recent_files_menu()
+
+	def _update_recent_files_menu(self):
+		"""Clears and repopulates the 'Open Recent' menu."""
+		self.recent_files_menu.delete(0, tk.END)
+		recent_files = self.config.get("recent_files", [])
+
+		if not recent_files:
+			self.file_menu.entryconfig("Open Recent", state="disabled")
+			return
+
+		self.file_menu.entryconfig("Open Recent", state="normal")
+		for filepath in recent_files:
+			# Use a lambda with a default argument to capture the filepath correctly
+			self.recent_files_menu.add_command(label=filepath, command=lambda p=filepath: self._load_log_from_path(p))
+
+		self.recent_files_menu.add_separator()
+		self.recent_files_menu.add_command(label="Clear List", command=self._clear_recent_files)
+
+	def _clear_recent_files(self):
+		"""Clears the recent files list from config and updates the menu."""
+		if "recent_files" in self.config and self.config["recent_files"]:
+			self.config["recent_files"] = []
+			self.save_config()
+			self._update_recent_files_menu()
+
+	# --- Theming ---
+	def toggle_dark_mode(self):
+		self.config["dark_mode"] = self.dark_mode.get()
+		self.save_config()
+		self._apply_theme()
+
+	def _apply_theme(self):
+		is_dark = self.dark_mode.get()
+
+		# Define color palettes
+		c = {
+			"bg": "#2e2e2e" if is_dark else "#f0f0f0",
+			"fg": "#dcdcdc" if is_dark else "#000000",
+			"bg_widget": "#3c3c3c" if is_dark else "#ffffff",
+			"fg_widget": "#dcdcdc" if is_dark else "#000000",
+			"bg_disabled": "#505050" if is_dark else "#d9d9d9",
+			"fg_disabled": "#888888" if is_dark else "#a3a3a3",
+			"bg_select": "#0078D7",
+			"fg_select": "#FFFFFF",
+			"bg_pane": "#4a4a4a" if is_dark else "#d9d9d9",
+			"bg_line_num": "#383838" if is_dark else "#f0f0f0",
+		}
+
+		# --- Apply to root and standard tk widgets ---
+		self.root.config(bg=c["bg"])
+		self.paned_window.config(bg=c["bg_pane"])
+		self.top_pane.config(bg=c["bg_pane"])
+
+		# Log View
+		self.text_area.config(bg=c["bg_widget"], fg=c["fg_widget"], insertbackground=c["fg_widget"])
+		self.line_number_area.config(bg=c["bg_line_num"], fg=c["fg_disabled"])
+
+		# --- Apply to ttk Styles ---
+		style = ttk.Style(self.root)
+		style.configure(".", background=c["bg"], foreground=c["fg"], fieldbackground=c["bg_widget"])
+		style.map(".", background=[("disabled", c["bg_disabled"])], foreground=[("disabled", c["fg_disabled"])])
+
+		style.configure("TFrame", background=c["bg"])
+		style.configure("TLabel", background=c["bg"], foreground=c["fg"])
+		style.configure("TButton", background=c["bg_widget"], foreground=c["fg"])
+		style.map("TButton", background=[("active", c["bg_select"])])
+		style.configure("TCheckbutton", background=c["bg"], foreground=c["fg"])
+		style.map("TCheckbutton", background=[("active", c["bg"])])
+
+		# Paned Window Sash
+		style.configure("Sash", background=c["bg_pane"])
+
+		# Treeview
+		style.configure("Treeview", background=c["bg_widget"], foreground=c["fg_widget"], fieldbackground=c["bg_widget"])
+		style.map("Treeview", background=[("selected", c["bg_select"])], foreground=[("selected", c["fg_select"])])
+		style.configure("Treeview.Heading", background=c["bg"], foreground=c["fg"])
+
+		# Status Bar
+		self.status_label.config(background=c["bg"], foreground=c["fg"])
+
+		# Re-apply tag styles to update note color
+		self.apply_tag_styles()
+		self.render_viewport()
+
 	# --- Title Update ---
 	def update_title(self):
 		log_name = os.path.basename(self.current_log_path) if self.current_log_path else "No file load"
@@ -573,7 +725,7 @@ class LogAnalyzerApp:
 		if not filepath: return
 
 		self.config["last_log_dir"] = os.path.dirname(filepath); self.save_config()
-		self.set_ui_busy(True)
+		self._add_to_recent_files(filepath) # Add to recent list
 		self.progress_bar["value"] = 0
 		t = threading.Thread(target=self._worker_load_log, args=(filepath,))
 		t.daemon = True
@@ -600,7 +752,7 @@ class LogAnalyzerApp:
 		if self.is_processing: return
 		if not filepath or not os.path.exists(filepath): return
 
-		self.config["last_log_dir"] = os.path.dirname(filepath); self.save_config()
+		self._add_to_recent_files(filepath) # Add to recent list
 		self.set_ui_busy(True)
 		self.progress_bar["value"] = 0
 		t = threading.Thread(target=self._worker_load_log, args=(filepath,))
@@ -673,7 +825,7 @@ class LogAnalyzerApp:
 		if not has_active_filters:
 			t_end = time.time()
 			# Clear all tags
-			empty_tags = [None] * len(self.raw_lines)			
+			empty_tags = [None] * len(self.raw_lines)
 			self.msg_queue.put(('filter_complete', empty_tags, [], t_end - t_start, [0]*len(filters_data), {}, [], False))
 			return
 
@@ -1125,7 +1277,7 @@ class LogAnalyzerApp:
 					match = re.search(r'(\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,6})?|\b\d{2}:\d{2}:\d{2}(?:[.,]\d{1,6})?\b)', log_line)
 					if match:
 						timestamp_str = match.group(1)
-				
+
 				content = self.notes[idx].replace("\n", " ") # Flatten content
 				lines_to_write.append(f"{line_num}\t{timestamp_str}\t{content}")
 
@@ -1184,7 +1336,7 @@ class LogAnalyzerApp:
 			self.notes_window.title("Notes")
 			self.notes_window.geometry("400x500")
 			self.notes_window.protocol("WM_DELETE_WINDOW", self.on_notes_window_close)
-		
+
 		# Re-create the widgets inside the Toplevel window
 		self._create_notes_view_widgets(self.notes_window)
 		self.refresh_notes_window()
@@ -1291,7 +1443,7 @@ class LogAnalyzerApp:
 						self.notes = {int(k): v for k, v in str_keyed_notes.items()}
 
 					self.update_status(f"Imported {len(self.notes)} notes.")
-					
+
 					# Auto-show notes window on successful import
 					self.note_view_visible_var.set(True)
 					self.toggle_note_view_visibility()
@@ -1339,6 +1491,52 @@ class LogAnalyzerApp:
 		self.render_viewport()
 		self.update_scrollbar_thumb()
 
+	def show_goto_dialog(self, event=None):
+		"""Shows a dialog to jump to a specific line number."""
+		if self.is_processing: return "break"
+
+		total_lines = self.get_total_count()
+		if total_lines == 0:
+			self.update_status("No log file loaded to go to a line.")
+			return "break"
+
+		dialog = tk.Toplevel(self.root)
+		dialog.title("Go to Line")
+		dialog.transient(self.root)
+		dialog.grab_set()
+		dialog.geometry("300x120")
+		dialog.resizable(False, False)
+
+		main_frame = ttk.Frame(dialog, padding=10)
+		main_frame.pack(fill=tk.BOTH, expand=True)
+
+		ttk.Label(main_frame, text=f"Enter line number (1 - {total_lines}):").pack(anchor="w")
+
+		entry = ttk.Entry(main_frame)
+		entry.pack(fill=tk.X, pady=5)
+		entry.focus_set()
+
+		def on_go():
+			try:
+				line_num = int(entry.get())
+				if 1 <= line_num <= total_lines:
+					dialog.destroy()
+					# User input is 1-based, jump_to_line expects 0-based index
+					self.jump_to_line(line_num - 1)
+				else:
+					messagebox.showerror("Invalid Line Number", f"Please enter a number between 1 and {total_lines}.", parent=dialog)
+			except ValueError:
+				messagebox.showerror("Invalid Input", "Please enter a valid number.", parent=dialog)
+
+		button_frame = ttk.Frame(main_frame)
+		button_frame.pack(fill=tk.X, side=tk.BOTTOM)
+		ttk.Button(button_frame, text="Go", command=on_go).pack(side=tk.RIGHT)
+		ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
+
+		entry.bind("<Return>", lambda e: on_go())
+		dialog.bind("<Escape>", lambda e: dialog.destroy())
+		return "break"
+
 	# --- Timeline Window ---
 	def show_timeline_window(self):
 		if not self.timeline_events:
@@ -1353,6 +1551,7 @@ class LogAnalyzerApp:
 		self.timeline_win.title("Event Timeline")
 		self.timeline_win.geometry("800x250")
 		self.timeline_win.protocol("WM_DELETE_WINDOW", self._on_timeline_window_close)
+		self.timeline_win.config(bg=self.root.cget('bg')) # Inherit theme
 
 		# Canvas for drawing
 		canvas = tk.Canvas(self.timeline_win, bg="white")
@@ -1377,7 +1576,7 @@ class LogAnalyzerApp:
 		# --- Aesthetic Tooltip ---
 		tooltip = ttk.Label(
 			self.timeline_win, text="",
-			background="#3C3C3C",      # Dark gray background
+			background="#3C3C3C",      # Fixed dark background for visibility
 			foreground="#FFFFFF",      # White text
 			relief="flat",             # No border
 			padding=(8, 5))            # Horizontal and vertical padding
@@ -1391,7 +1590,7 @@ class LogAnalyzerApp:
 			epsilon = 1e-9
 			if time_since_start < (start_seconds - epsilon) or time_since_start > (start_seconds + duration_seconds + epsilon):
 				return -1 # Not in view, with tolerance
-			
+
 			relative_pos = (time_since_start - start_seconds) / duration_seconds
 			return margin + relative_pos * (width - 2 * margin)
 
@@ -1409,6 +1608,12 @@ class LogAnalyzerApp:
 			margin = 20
 			y_axis = height - 30
 
+			# Adapt canvas to theme
+			is_dark = self.dark_mode.get()
+			canvas_bg = "#2e2e2e" if is_dark else "white"
+			axis_color = "#dcdcdc" if is_dark else "black"
+			canvas.config(bg=canvas_bg)
+
 			# Use data from the window object
 			sorted_events = self.timeline_win.sorted_events
 			first_time = self.timeline_win.first_time
@@ -1422,7 +1627,7 @@ class LogAnalyzerApp:
 			end_time_seconds = start_time_seconds + visible_duration_seconds
 
 			# Draw axis
-			canvas.create_line(margin, y_axis, width - margin, y_axis, fill="black")
+			canvas.create_line(margin, y_axis, width - margin, y_axis, fill=axis_color)
 
 			# Draw labels
 			def format_time_with_ms(dt_obj):
@@ -1432,8 +1637,8 @@ class LogAnalyzerApp:
 					return dt_obj.strftime("%H:%M:%S")
 				else:
 					return ""
-			canvas.create_text(margin, y_axis + 10, text=format_time_with_ms(first_time + datetime.timedelta(seconds=start_time_seconds)), anchor="w")
-			canvas.create_text(width - margin, y_axis + 10, text=format_time_with_ms(first_time + datetime.timedelta(seconds=end_time_seconds)), anchor="e")
+			canvas.create_text(margin, y_axis + 10, text=format_time_with_ms(first_time + datetime.timedelta(seconds=start_time_seconds)), anchor="w", fill=axis_color)
+			canvas.create_text(width - margin, y_axis + 10, text=format_time_with_ms(first_time + datetime.timedelta(seconds=end_time_seconds)), anchor="e", fill=axis_color)
 
 			# Store drawn items for hit-testing
 			canvas.drawn_items = []
@@ -1464,7 +1669,7 @@ class LogAnalyzerApp:
 
 		def on_zoom(event):
 			nonlocal zoom_level, view_offset_seconds
-			
+
 			# --- Zoom logic ---
 			zoom_factor = 1.2 if event.delta > 0 else 1 / 1.2
 			new_zoom_level = max(1.0, zoom_level * zoom_factor) # Don't zoom out past 100%
@@ -1482,9 +1687,9 @@ class LogAnalyzerApp:
 			# We adjust the view_offset to achieve this.
 			visible_duration_after = total_duration / zoom_level
 			cursor_pos_fraction = (event.x - margin) / (width - 2 * margin)
-			
+
 			new_offset = time_at_cursor_before - (cursor_pos_fraction * visible_duration_after)
-			
+
 			# Clamp offset to valid range
 			max_offset = total_duration - visible_duration_after
 			view_offset_seconds = max(0.0, min(new_offset, max_offset))
@@ -1507,7 +1712,7 @@ class LogAnalyzerApp:
 						if drawn["id"] == item:
 							found_item = drawn; break
 				if found_item: break
-			
+
 			if found_item:
 				# 1. Construct tooltip text with timestamp
 				dt_obj = found_item["datetime"]
@@ -1537,7 +1742,7 @@ class LogAnalyzerApp:
 			# Panning drag
 			nonlocal view_offset_seconds
 			dx = event.x - pan_start_x
-			
+
 			width = canvas.winfo_width()
 			margin = 20
 			# Convert pixel delta to time delta
@@ -1575,7 +1780,7 @@ class LogAnalyzerApp:
 				if found_item: self.jump_to_line(found_item["raw_index"])
 
 		canvas.bind("<ButtonRelease-1>", on_pan_release)
-		
+
 		# Store the draw function for external calls
 		self.timeline_draw_func = draw_timeline
 		draw_timeline() # Initial draw
@@ -1672,6 +1877,79 @@ class LogAnalyzerApp:
 			self.render_viewport(); self.update_scrollbar_thumb()
 
 	# --- Filter List & Editing ---
+	def show_find_bar(self, event=None):
+		"""Displays the find bar at the top of the log view."""
+		self.find_frame.pack(side=tk.TOP, fill=tk.X, before=self.scrollbar_x)
+		self.find_entry.focus_set()
+		self.find_entry.select_range(0, tk.END)
+		return "break"
+
+	def hide_find_bar(self, event=None):
+		"""Hides the find bar and removes search highlights."""
+		self.find_frame.pack_forget()
+		self.text_area.tag_remove("find_match", "1.0", tk.END)
+		self.text_area.focus_set() # Return focus to the text area
+		return "break"
+
+	def _find(self, backward=False):
+		"""Core find logic."""
+		query = self.find_entry.get()
+		if not query: return
+
+		self.text_area.tag_remove("find_match", "1.0", tk.END)
+		
+		nocase = self.find_case_var.get()
+		search_query = query if nocase else query.lower()
+
+		total_items = self.get_total_count()
+		if total_items == 0: return
+
+		start_index = self.get_current_cache_index()
+		
+		# Define search range
+		if backward:
+			indices = list(range(start_index - 1, -1, -1))
+			if self.find_wrap_var.get():
+				indices.extend(range(total_items - 1, start_index - 1, -1))
+		else:
+			indices = list(range(start_index + 1, total_items))
+			if self.find_wrap_var.get():
+				indices.extend(range(0, start_index + 1))
+
+		found_view_index = -1
+		for i in indices:
+			line_content, _, _ = self.get_view_item(i)
+			line_to_search = line_content if nocase else line_content.lower()
+			if search_query in line_to_search:
+				found_view_index = i
+				break
+
+		if found_view_index != -1:
+			# A match was found, now jump to it and highlight
+			_, _, raw_idx = self.get_view_item(found_view_index)
+			self.jump_to_line(raw_idx)
+
+			# After jumping, the view is rendered. Now find the match in the text widget.
+			# We need to do this after the mainloop has updated the view.
+			def highlight_match():
+				pos = self.text_area.search(query, "1.0", stopindex=tk.END, nocase=not nocase)
+				if pos:
+					end_pos = f"{pos}+{len(query)}c"
+					self.text_area.tag_add("find_match", pos, end_pos)
+					# The jump_to_line already sets the focus line
+
+			# Schedule the highlight to run after the UI has updated from the jump
+			self.root.after(50, highlight_match)
+
+			self.find_entry.config(foreground="black")
+			self.update_status(f"Found match on line {raw_idx + 1}")
+		else:
+			self.find_entry.config(foreground="red")
+			self.update_status("End of file reached. No more matches found.")
+
+	def find_next(self, event=None): self._find(backward=False); return "break"
+	def find_previous(self, event=None): self._find(backward=True); return "break"
+
 	def refresh_filter_list(self):
 		for item in self.tree.get_children(): self.tree.delete(item)
 		for idx, flt in enumerate(self.filters):

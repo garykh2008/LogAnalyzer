@@ -20,6 +20,7 @@
     - [Shortcuts \& Operations](#shortcuts--operations)
   - [4. Release Notes](#4-release-notes)
     - [Version 1.4 (TBD)](#version-14-tbd)
+      - [🎨 UI \& Navigation Enhancements](#-ui--navigation-enhancements)
       - [✨ Interactive Graphical Event Timeline](#-interactive-graphical-event-timeline)
     - [Version 1.3 (2025-12-02)](#version-13-2025-12-02)
       - [✨ Comprehensive Notes System](#-comprehensive-notes-system)
@@ -83,7 +84,9 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 #### File
 
-* **Open Log**: Open a log file (.log, .txt, *.*).
+* **Open Log...**: Open a log file (.log, .txt, *.*).
+
+* **Open Recent**: Provides a list of the last 10 opened files for quick access. Includes an option to clear the list.
 
 * **Load Filters**: Import filter rule files in `.tat` or `.xml` format.
 
@@ -104,6 +107,12 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
   * **Unchecked**: Displays all original log lines, but keeps keyword highlighting (Raw Mode).
 
 #### View
+
+*   **Find... (Ctrl+F)**: Opens a search bar at the top of the log view to find text within the entire log file.
+
+*   **Go to Line... (Ctrl+G)**: Opens a dialog to jump directly to a specific line number.
+
+*   **Dark Mode**: Toggles a persistent, application-wide dark theme for improved viewing in low-light environments.
 
 *   **Show Timeline**: Opens a new window displaying a graphical timeline of events.
     *   This option is only enabled if the loaded log file contains recognizable timestamps.
@@ -146,6 +155,16 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 ## 4. Release Notes
 
 ### Version 1.4 (TBD)
+
+#### 🎨 UI & Navigation Enhancements
+
+*   **Full Dark Mode**: A new "View" -> "Dark Mode" option toggles a persistent, application-wide dark theme. The theme covers all elements, including the main window, dialogs, timeline, and notes view, for a comfortable experience in low-light environments.
+*   **Recent Files Menu**: The "File" menu now includes an "Open Recent" list, providing one-click access to the last 10 opened log files.
+*   **Find (Ctrl+F)**: A powerful new find bar appears at the top of the log view, allowing full-text search across the *entire* log file (not just the visible portion).
+    *   Features include "Next (F3)" / "Previous (Shift+F3)", case sensitivity, and wrap-around search.
+    *   The found line is automatically centered and set as the new focus line for a seamless workflow.
+    *   The status bar provides clear feedback when a search completes.
+*   **Go to Line (Ctrl+G)**: A new dialog allows you to instantly jump to any specific line number within the current view (filtered or full).
 
 #### ✨ Interactive Graphical Event Timeline
 
