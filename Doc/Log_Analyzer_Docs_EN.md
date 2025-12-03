@@ -14,10 +14,13 @@
     - [Menu Bar](#menu-bar)
       - [File](#file)
       - [Filter](#filter)
+      - [View](#view)
       - [Notes](#notes)
       - [Help](#help)
     - [Shortcuts \& Operations](#shortcuts--operations)
   - [4. Release Notes](#4-release-notes)
+    - [Version 1.4 (TBD)](#version-14-tbd)
+      - [✨ Interactive Graphical Event Timeline](#-interactive-graphical-event-timeline)
     - [Version 1.3 (2025-12-02)](#version-13-2025-12-02)
       - [✨ Comprehensive Notes System](#-comprehensive-notes-system)
       - [🎨 UI \& User Experience Overhaul](#-ui--user-experience-overhaul)
@@ -100,6 +103,13 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
   * **Unchecked**: Displays all original log lines, but keeps keyword highlighting (Raw Mode).
 
+#### View
+
+*   **Show Timeline**: Opens a new window displaying a graphical timeline of events.
+    *   This option is only enabled if the loaded log file contains recognizable timestamps.
+    *   Events are filters that have been marked with the **"As Event"** property. The color of the event point on the timeline corresponds to the filter's background color.
+    *   Hovering over an event point shows its timestamp, line number, and content; clicking it jumps to that line in the log view.
+
 #### Notes
 
 *   **Show Notes**: Toggles the visibility of the Notes View panel.
@@ -134,6 +144,28 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 * **Ctrl + Left/Right Arrow**: Jumps to the previous/next match in the filtered results.
 
 ## 4. Release Notes
+
+### Version 1.4 (TBD)
+
+#### ✨ Interactive Graphical Event Timeline
+
+This release introduces a major new feature: a graphical, interactive timeline to visualize log events over time. This allows users to quickly identify event clusters, correlations, and anomalies.
+
+*   **New Timeline Window**: A new "View" -> "Show Timeline" menu option opens a resizable window that plots events based on their timestamps.
+*   **Interactive Navigation**:
+    *   **Zoom**: Use the mouse wheel to zoom in and out, centered on the cursor's position.
+    *   **Pan**: Click and drag to pan the timeline horizontally.
+*   **Event Configuration & Management**:
+    *   The "Add/Edit Filter" dialog now includes an **"As Event"** checkbox.
+    *   A new "Event" column in the filter list provides at-a-glance status (✓).
+    *   Quickly toggle a filter's event status via the right-click context menu.
+*   **Smart Tooltips & Interaction**:
+    *   Hovering over an event point displays a sleek, dark-themed tooltip with the precise timestamp (including milliseconds), line number, and filter text.
+    *   The tooltip intelligently repositions itself to avoid being clipped by the window edges.
+    *   Clicking an event point jumps directly to that line in the main log view.
+*   **Live Updates & Persistence**:
+    *   The timeline window automatically refreshes when filters are modified or event statuses are changed.
+    *   The "As Event" setting is now saved in the `.tat` filter file, ensuring persistence across sessions while maintaining compatibility with `TextAnalysisTool.NET`.
 
 ### Version 1.3 (2025-12-02)
 

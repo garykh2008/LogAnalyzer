@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 import os
 import time
 import threading
+import datetime
 import queue
 import webbrowser
 import sys
@@ -37,13 +38,14 @@ def color_to_tat(hex_color):
 # --- Core Classes ---
 
 class Filter:
-	def __init__(self, text, fore_color="#000000", back_color="#FFFFFF", enabled=True, is_regex=False, is_exclude=False):
+	def __init__(self, text, fore_color="#000000", back_color="#FFFFFF", enabled=True, is_regex=False, is_exclude=False, is_event=False):
 		self.text = text
 		self.fore_color = fore_color
 		self.back_color = back_color
 		self.enabled = enabled
 		self.is_regex = is_regex
 		self.is_exclude = is_exclude
+		self.is_event = is_event
 		self.hit_count = 0
 
 	def to_dict(self):
@@ -102,6 +104,12 @@ class LogAnalyzerApp:
 		self.notes = {}  # { raw_index (int): note_text (str) }
 		self.notes_window = None
 
+		# Timeline System
+		self.timeline_events = [] # List of (datetime_obj, filter_text, raw_index)
+		self.timestamps_found = False
+		self.timeline_win = None # Reference to the Toplevel timeline window
+		self.timeline_draw_func = None # Reference to the draw_timeline function
+
 		self.view_start_index = 0
 		self.visible_rows = 50
 
@@ -156,6 +164,12 @@ class LogAnalyzerApp:
 										 variable=self.show_only_filtered_var,
 										 command=self.toggle_show_filtered,
 										 accelerator="Ctrl+H")
+
+		# [View Menu]
+		self.view_menu = tk.Menu(self.menubar, tearoff=0)
+		self.menubar.add_cascade(label="View", menu=self.view_menu)
+		self.view_menu.add_command(label="Show Timeline", command=self.show_timeline_window, state="disabled")
+
 
 		# [Notes Menu]
 		self.notes_menu = tk.Menu(self.menubar, tearoff=0)
@@ -270,13 +284,15 @@ class LogAnalyzerApp:
 		# --- Lower: Filter View ---
 		filter_frame = ttk.LabelFrame(self.paned_window, text="Filters (Drag to Reorder)")
 
-		cols = ("enabled", "type", "pattern", "hits")
+		cols = ("enabled", "type", "event", "pattern", "hits")
 		self.tree = ttk.Treeview(filter_frame, columns=cols, show="headings")
 
 		self.tree.heading("enabled", text="En")
 		self.tree.column("enabled", width=40, anchor="center")
 		self.tree.heading("type", text="Type")
 		self.tree.column("type", width=60, anchor="center")
+		self.tree.heading("event", text="Event")
+		self.tree.column("event", width=50, anchor="center")
 		self.tree.heading("pattern", text="Pattern / Regex")
 		self.tree.column("pattern", width=600, anchor="w")
 		self.tree.heading("hits", text="Hits")
@@ -296,10 +312,12 @@ class LogAnalyzerApp:
 		self.tree.bind("<ButtonRelease-1>", self.on_tree_release)
 
 		# Context Menu
+		self.event_menu_var = tk.BooleanVar()
 		self.context_menu = tk.Menu(self.root, tearoff=0)
+		self.context_menu.add_checkbutton(label="Set as Event", variable=self.event_menu_var, command=self.toggle_selected_filters_as_event)
+		self.context_menu.add_separator()
 		self.context_menu.add_command(label="Remove Filter", command=self.on_filter_delete)
 		self.context_menu.add_command(label="Edit Filter", command=self.edit_selected_filter)
-		self.context_menu.add_separator()
 		self.context_menu.add_command(label="Add Filter", command=self.add_filter_dialog)
 
 		self.paned_window.add(filter_frame, minsize=100)
@@ -455,6 +473,7 @@ class LogAnalyzerApp:
 				elif msg_type == 'filter_complete':
 					line_tags, filtered_idx, duration, counts, matches = msg[1], msg[2], msg[3], msg[4], msg[5]
 
+					self.timeline_events, self.timestamps_found = msg[6], msg[7]
 					# Only update if full recalc or if we need to sync state
 					# In partial update, we merge results manually before calling this,
 					# or this msg contains the FULL updated state.
@@ -473,6 +492,15 @@ class LogAnalyzerApp:
 					self.apply_tag_styles()
 					self.refresh_filter_list()
 					self.refresh_view_fast()
+					# Update timeline data before redrawing
+					if self.timeline_win and self.timeline_win.winfo_exists():
+						self.timeline_win.sorted_events = sorted(self.timeline_events, key=lambda x: x[0]) if self.timeline_events else []
+						self.timeline_win.first_time = self.timeline_win.sorted_events[0][0] if self.timeline_win.sorted_events else None
+						self.timeline_win.last_time = self.timeline_win.sorted_events[-1][0] if self.timeline_win.sorted_events else None
+					# If timeline window is open, refresh it
+					if self.timeline_win and self.timeline_win.winfo_exists() and self.timeline_draw_func:
+						self.timeline_draw_func()
+					self.view_menu.entryconfig("Show Timeline", state="normal" if self.timestamps_found else "disabled")
 
 					self.set_ui_busy(False)
 					self.progress_bar["value"] = 0
@@ -491,6 +519,7 @@ class LogAnalyzerApp:
 		try:
 			self.menubar.entryconfig("File", state=state)
 			self.menubar.entryconfig("Filter", state=state)
+			self.menubar.entryconfig("View", state=state)
 			self.menubar.entryconfig("Help", state=state)
 		except: pass
 		self.tree.state(("disabled",) if is_busy else ("!disabled",))
@@ -626,7 +655,8 @@ class LogAnalyzerApp:
 				'text': f.text,
 				'is_regex': f.is_regex,
 				'is_exclude': f.is_exclude,
-				'enabled': f.enabled
+				'enabled': f.enabled,
+				'is_event': f.is_event
 			})
 
 		# Pass current state for partial update
@@ -643,8 +673,8 @@ class LogAnalyzerApp:
 		if not has_active_filters:
 			t_end = time.time()
 			# Clear all tags
-			empty_tags = [None] * len(self.raw_lines)
-			self.msg_queue.put(('filter_complete', empty_tags, [], t_end - t_start, [0]*len(filters_data), {}))
+			empty_tags = [None] * len(self.raw_lines)			
+			self.msg_queue.put(('filter_complete', empty_tags, [], t_end - t_start, [0]*len(filters_data), {}, [], False))
 			return
 
 		# Setup regex groups
@@ -652,6 +682,11 @@ class LogAnalyzerApp:
 		reg_excludes = []
 		txt_includes = []
 		reg_includes = []
+
+		# Timestamp regex - more robust
+		ts_regex_str = r'(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b)'
+		ts_formats = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y-%H:%M:%S.%f", "%I:%M:%S.%f %p", "%H:%M:%S"]
+
 
 		for idx, f in enumerate(filters_data):
 			if not f['enabled']: continue
@@ -669,7 +704,7 @@ class LogAnalyzerApp:
 
 		# JIT Code Generation
 		code_lines = []
-		code_lines.append("def fast_filter_worker(raw_lines, line_tags, filter_counts, temp_matches, update_prog, indices_subset):")
+		code_lines.append("def fast_filter_worker(raw_lines, line_tags, filter_counts, temp_matches, timeline_events, update_prog, indices_subset):")
 		code_lines.append("    total = len(indices_subset) if indices_subset else len(raw_lines)")
 		code_lines.append("    report_interval = max(1, total // 20)")
 		code_lines.append("    ")
@@ -709,6 +744,10 @@ class LogAnalyzerApp:
 			code_lines.append(f"            filter_counts[{idx}] += 1")
 			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
 			code_lines.append(f"            line_tags[raw_idx] = '{tag}'")
+			if filters_data[idx]['is_event']:
+				code_lines.append(f"            match = ts_regex.search(line)")
+				code_lines.append(f"            if match: timeline_events.append((match.group(1), '{filters_data[idx]['text']}', raw_idx))")
+
 			first_include = False
 		for _, tag, idx in reg_includes:
 			prefix = "if" if first_include else "elif"
@@ -716,12 +755,17 @@ class LogAnalyzerApp:
 			code_lines.append(f"            filter_counts[{idx}] += 1")
 			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
 			code_lines.append(f"            line_tags[raw_idx] = '{tag}'")
+			if filters_data[idx]['is_event']:
+				code_lines.append(f"            match = ts_regex.search(line)")
+				code_lines.append(f"            if match: timeline_events.append((match.group(1), '{filters_data[idx]['text']}', raw_idx))")
+
 			first_include = False
 
 		full_code = "\n".join(code_lines)
 		context = {}
 		for rule, idx in reg_excludes: context[f"reg_ex_{idx}"] = rule
 		for rule, _, idx in reg_includes: context[f"reg_inc_{idx}"] = rule
+		context['ts_regex'] = re.compile(ts_regex_str)
 
 		try:
 			exec(full_code, context)
@@ -750,11 +794,32 @@ class LogAnalyzerApp:
 			# Temp counters for this run
 			filter_counts = [0] * len(filters_data)
 			temp_matches = {i: [] for i in range(len(filters_data)) if filters_data[i]['enabled']}
+			timeline_events_raw = [] # (ts_string, filter_text, raw_idx)
 
 			def update_prog_callback(curr, total):
 				self.msg_queue.put(('progress', curr, total, f"Filtering line {curr}/{total} (Smart)..."))
 
-			worker_func(self.raw_lines, line_tags, filter_counts, temp_matches, update_prog_callback, target_indices)
+			worker_func(self.raw_lines, line_tags, filter_counts, temp_matches, timeline_events_raw, update_prog_callback, target_indices)
+
+			# Post-process timeline events
+			timeline_events_processed = []
+			timestamps_found = False
+			for ts_str, f_text, r_idx in timeline_events_raw:
+				dt_obj = None
+				for fmt in ts_formats:
+					try:
+						# If format expects microseconds, parse the full string.
+						# Otherwise, parse only the part before the dot.
+						if "%f" in fmt:
+							dt_obj = datetime.datetime.strptime(ts_str, fmt)
+						else:
+							dt_obj = datetime.datetime.strptime(ts_str.split('.')[0], fmt)
+						break
+					except ValueError:
+						continue
+				if dt_obj:
+					timeline_events_processed.append((dt_obj, f_text, r_idx))
+			if timeline_events_processed: timestamps_found = True
 
 			# Post-processing: Rebuild Indices & Stats from final line_tags (Fast O(N))
 			final_indices = []
@@ -783,7 +848,7 @@ class LogAnalyzerApp:
 					pass
 
 			t_end = time.time()
-			self.msg_queue.put(('filter_complete', line_tags, final_indices, t_end - t_start, final_counts, {}))
+			self.msg_queue.put(('filter_complete', line_tags, final_indices, t_end - t_start, final_counts, {}, timeline_events_processed, timestamps_found))
 
 		except Exception as e:
 			print(f"JIT Compilation Failed: {e}")
@@ -1274,6 +1339,249 @@ class LogAnalyzerApp:
 		self.render_viewport()
 		self.update_scrollbar_thumb()
 
+	# --- Timeline Window ---
+	def show_timeline_window(self):
+		if not self.timeline_events:
+			messagebox.showinfo("Timeline", "No events found to display on the timeline.", parent=self.root)
+			return
+
+		if self.timeline_win and self.timeline_win.winfo_exists():
+			self.timeline_win.lift() # Bring to front if already open
+			return
+
+		self.timeline_win = tk.Toplevel(self.root)
+		self.timeline_win.title("Event Timeline")
+		self.timeline_win.geometry("800x250")
+		self.timeline_win.protocol("WM_DELETE_WINDOW", self._on_timeline_window_close)
+
+		# Canvas for drawing
+		canvas = tk.Canvas(self.timeline_win, bg="white")
+		canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+		# Store data directly on the window object to allow external updates
+		self.timeline_win.sorted_events = sorted(self.timeline_events, key=lambda x: x[0])
+		self.timeline_win.first_time = self.timeline_win.sorted_events[0][0]
+		self.timeline_win.last_time = self.timeline_win.sorted_events[-1][0]
+		total_duration = (self.timeline_win.last_time - self.timeline_win.first_time).total_seconds()
+		if total_duration == 0: total_duration = 1 # Avoid division by zero
+
+		# --- State for Zoom & Pan ---
+		zoom_level = 1.0  # 1.0 = 100% zoom
+		view_offset_seconds = 0.0 # Pan offset from the start
+
+		# --- State for Panning ---
+		pan_start_x = 0
+		pan_start_offset = 0
+
+		# Tooltip
+		# --- Aesthetic Tooltip ---
+		tooltip = ttk.Label(
+			self.timeline_win, text="",
+			background="#3C3C3C",      # Dark gray background
+			foreground="#FFFFFF",      # White text
+			relief="flat",             # No border
+			padding=(8, 5))            # Horizontal and vertical padding
+
+		# Helper functions for coordinate conversion
+		# Helper to convert a datetime object to an X coordinate
+		def time_to_x(dt, width, margin, start_seconds, duration_seconds, first_time):
+			if not dt or not first_time: return -1
+			time_since_start = (dt - first_time).total_seconds()
+			# Use a small tolerance (epsilon) for floating point comparisons at the edges
+			epsilon = 1e-9
+			if time_since_start < (start_seconds - epsilon) or time_since_start > (start_seconds + duration_seconds + epsilon):
+				return -1 # Not in view, with tolerance
+			
+			relative_pos = (time_since_start - start_seconds) / duration_seconds
+			return margin + relative_pos * (width - 2 * margin)
+
+		# Helper to convert an X coordinate back to a time offset in seconds
+		def x_to_time_offset(x_coord, width, margin, start_seconds, duration_seconds):
+			if (width - 2 * margin) <= 0: return start_seconds
+			relative_pos = (x_coord - margin) / (width - 2 * margin)
+			return start_seconds + relative_pos * duration_seconds
+
+		# Main drawing function
+		def draw_timeline():
+			canvas.delete("all")
+			width = canvas.winfo_width()
+			height = canvas.winfo_height()
+			margin = 20
+			y_axis = height - 30
+
+			# Use data from the window object
+			sorted_events = self.timeline_win.sorted_events
+			first_time = self.timeline_win.first_time
+			last_time = self.timeline_win.last_time
+			if not sorted_events or not first_time or not last_time: return
+			total_duration = (last_time - first_time).total_seconds()
+
+			# --- Calculate visible time range based on zoom and pan ---
+			visible_duration_seconds = total_duration / zoom_level
+			start_time_seconds = view_offset_seconds
+			end_time_seconds = start_time_seconds + visible_duration_seconds
+
+			# Draw axis
+			canvas.create_line(margin, y_axis, width - margin, y_axis, fill="black")
+
+			# Draw labels
+			def format_time_with_ms(dt_obj):
+				if dt_obj and dt_obj.microsecond > 0:
+					return dt_obj.strftime("%H:%M:%S.%f")[:-3] # Trim to ms
+				elif dt_obj:
+					return dt_obj.strftime("%H:%M:%S")
+				else:
+					return ""
+			canvas.create_text(margin, y_axis + 10, text=format_time_with_ms(first_time + datetime.timedelta(seconds=start_time_seconds)), anchor="w")
+			canvas.create_text(width - margin, y_axis + 10, text=format_time_with_ms(first_time + datetime.timedelta(seconds=end_time_seconds)), anchor="e")
+
+			# Store drawn items for hit-testing
+			canvas.drawn_items = []
+
+			# Draw events
+			for dt, f_text, r_idx in sorted_events:
+				time_offset = (dt - first_time).total_seconds()
+				if time_offset < start_time_seconds or time_offset > end_time_seconds:
+					continue # Skip events outside the current view
+				x_pos = time_to_x(dt, width, margin, start_time_seconds, visible_duration_seconds, first_time)
+				# Find the filter to get its color
+				color = "#0078D7" # Default color
+				for flt in self.filters:
+					if flt.text == f_text:
+						color = flt.back_color
+						break
+
+				item_id = canvas.create_oval(x_pos - 4, y_axis - 4, x_pos + 4, y_axis + 4, fill=color, outline="black")
+				canvas.drawn_items.append({
+					"id": item_id,
+					"raw_index": r_idx,
+					"datetime": dt,
+					"filter_text": f_text
+				})
+
+		def on_resize(event):
+			draw_timeline()
+
+		def on_zoom(event):
+			nonlocal zoom_level, view_offset_seconds
+			
+			# --- Zoom logic ---
+			zoom_factor = 1.2 if event.delta > 0 else 1 / 1.2
+			new_zoom_level = max(1.0, zoom_level * zoom_factor) # Don't zoom out past 100%
+
+			# --- Zoom centered on cursor ---
+			width = canvas.winfo_width()
+			margin = 20
+			# Time at cursor position before zoom
+			time_at_cursor_before = x_to_time_offset(event.x, width, margin, view_offset_seconds, total_duration / zoom_level)
+
+			# Update zoom level
+			zoom_level = new_zoom_level
+
+			# After zoom, the same time point should ideally be under the cursor.
+			# We adjust the view_offset to achieve this.
+			visible_duration_after = total_duration / zoom_level
+			cursor_pos_fraction = (event.x - margin) / (width - 2 * margin)
+			
+			new_offset = time_at_cursor_before - (cursor_pos_fraction * visible_duration_after)
+			
+			# Clamp offset to valid range
+			max_offset = total_duration - visible_duration_after
+			view_offset_seconds = max(0.0, min(new_offset, max_offset))
+
+			draw_timeline()
+			# Stop the event from propagating to the parent window (e.g., main log view scroll)
+			return "break"
+
+		# Mouse motion for tooltips
+		def on_motion(event):
+			x, y = event.x, event.y
+			canvas_width = canvas.winfo_width()
+			found_item = None
+
+			# Find the topmost item under the cursor
+			for item in reversed(canvas.find_withtag("all")):
+				coords = canvas.coords(item)
+				if len(coords) == 4 and coords[0] <= x <= coords[2] and coords[1] <= y <= coords[3]:
+					for drawn in canvas.drawn_items:
+						if drawn["id"] == item:
+							found_item = drawn; break
+				if found_item: break
+			
+			if found_item:
+				# 1. Construct tooltip text with timestamp
+				dt_obj = found_item["datetime"]
+				ts_str = dt_obj.strftime("%H:%M:%S.%f")[:-3] if dt_obj.microsecond > 0 else dt_obj.strftime("%H:%M:%S")
+				tooltip_text = f"{ts_str}\nL{found_item['raw_index']+1}: {found_item['filter_text']}"
+				tooltip.config(text=tooltip_text, justify=tk.LEFT)
+				tooltip.update_idletasks() # Update geometry to get correct width
+
+				# 2. Adjust position to prevent clipping
+				tooltip_width = tooltip.winfo_width()
+				place_x = x + 15
+				if place_x + tooltip_width > canvas_width:
+					place_x = x - tooltip_width - 10 # Place on the left
+
+				tooltip.place(x=place_x, y=y + 10)
+			else:
+				tooltip.place_forget()
+
+		# Panning start
+		def on_pan_start(event):
+			nonlocal pan_start_x, pan_start_offset
+			pan_start_x = event.x
+			pan_start_offset = view_offset_seconds
+			canvas.config(cursor="fleur")
+
+		def on_pan_drag(event):
+			# Panning drag
+			nonlocal view_offset_seconds
+			dx = event.x - pan_start_x
+			
+			width = canvas.winfo_width()
+			margin = 20
+			# Convert pixel delta to time delta
+			time_per_pixel = (total_duration / zoom_level) / (width - 2 * margin)
+			time_delta = dx * time_per_pixel
+
+			# Clamp new offset
+			max_offset = total_duration - (total_duration / zoom_level)
+			view_offset_seconds = max(0.0, min(pan_start_offset - time_delta, max_offset))
+			draw_timeline()
+
+
+		canvas.bind("<Configure>", on_resize)
+		canvas.bind("<MouseWheel>", on_zoom) # For Windows/macOS trackpad
+		canvas.bind("<Button-4>", on_zoom)   # For Linux scroll up
+		canvas.bind("<Button-5>", on_zoom)   # For Linux scroll down
+		canvas.bind("<Motion>", on_motion)
+		canvas.bind("<ButtonPress-1>", on_pan_start)
+		canvas.bind("<B1-Motion>", on_pan_drag)
+
+		# We need a separate click handler for release, because B1-Motion captures the drag
+		def on_pan_release(event):
+			canvas.config(cursor="")
+			# Check if it was a click (no drag)
+			if abs(event.x - pan_start_x) < 3: # Click tolerance
+				x, y = event.x, event.y
+				found_item = None
+				for item in reversed(canvas.find_withtag("all")):
+					coords = canvas.coords(item)
+					if len(coords) == 4 and coords[0] <= x <= coords[2] and coords[1] <= y <= coords[3]:
+						for drawn in canvas.drawn_items:
+							if drawn["id"] == item:
+								found_item = drawn; break
+					if found_item: break
+				if found_item: self.jump_to_line(found_item["raw_index"])
+
+		canvas.bind("<ButtonRelease-1>", on_pan_release)
+		
+		# Store the draw function for external calls
+		self.timeline_draw_func = draw_timeline
+		draw_timeline() # Initial draw
+
+	def _on_timeline_window_close(self):
+		self.timeline_win.destroy(); self.timeline_win = None; self.timeline_draw_func = None
 
 	# --- Rendering ---
 	def render_viewport(self):
@@ -1369,7 +1677,8 @@ class LogAnalyzerApp:
 		for idx, flt in enumerate(self.filters):
 			en_str = "☑" if flt.enabled else "☐"
 			type_str = "Excl" if flt.is_exclude else ("Regex" if flt.is_regex else "Text")
-			item_id = self.tree.insert("", "end", values=(en_str, type_str, flt.text, str(flt.hit_count)))
+			event_str = "✓" if flt.is_event else ""
+			item_id = self.tree.insert("", "end", values=(en_str, type_str, event_str, flt.text, str(flt.hit_count)))
 			tag_name = f"row_{idx}"
 			self.tree.item(item_id, tags=(tag_name,))
 			self.tree.tag_configure(tag_name, foreground=flt.fore_color, background=flt.back_color)
@@ -1406,13 +1715,29 @@ class LogAnalyzerApp:
 		item_id = self.tree.identify_row(event.y)
 		if item_id:
 			self.tree.selection_set(item_id)
+			# Update the context menu's checkbutton state based on the selected filter
+			idx = self.tree.index(item_id)
+			self.event_menu_var.set(self.filters[idx].is_event)
+			self.context_menu.entryconfig("Set as Event", state="normal")
 			self.context_menu.entryconfig("Remove Filter", state="normal")
 			self.context_menu.entryconfig("Edit Filter", state="normal")
 		else:
 			self.tree.selection_remove(self.tree.selection())
+			self.context_menu.entryconfig("Set as Event", state="disabled")
 			self.context_menu.entryconfig("Remove Filter", state="disabled")
 			self.context_menu.entryconfig("Edit Filter", state="disabled")
 		self.context_menu.post(event.x_root, event.y_root)
+
+	def toggle_selected_filters_as_event(self):
+		if self.is_processing: return
+		selected_items = self.tree.selection()
+		if not selected_items: return
+
+		new_state = self.event_menu_var.get()
+		for item_id in selected_items:
+			idx = self.tree.index(item_id)
+			self.filters[idx].is_event = new_state
+		self.recalc_filtered_data()
 
 	def edit_selected_filter(self):
 		if self.is_processing: return
@@ -1455,7 +1780,7 @@ class LogAnalyzerApp:
 	def open_filter_dialog(self, filter_obj=None, index=None, initial_text=None):
 		dialog = tk.Toplevel(self.root)
 		dialog.title("Edit Filter" if filter_obj else "Add Filter")
-		dialog.transient(self.root)
+		dialog.transient(self.root) # Make it a child of the main window
 		dialog.grab_set()
 		dialog.geometry("400x200")
 
@@ -1474,8 +1799,10 @@ class LogAnalyzerApp:
 		options_frame.pack(fill=tk.X, expand=True)
 		var_regex = tk.BooleanVar(value=filter_obj.is_regex if filter_obj else False)
 		var_exclude = tk.BooleanVar(value=filter_obj.is_exclude if filter_obj else False)
+		var_event = tk.BooleanVar(value=filter_obj.is_event if filter_obj else False)
 		ttk.Checkbutton(options_frame, text="Regex", variable=var_regex).pack(side=tk.LEFT)
 		ttk.Checkbutton(options_frame, text="Exclude", variable=var_exclude).pack(side=tk.LEFT, padx=10)
+		ttk.Checkbutton(options_frame, text="As Event", variable=var_event).pack(side=tk.LEFT, padx=10)
 
 		colors = {"fg": filter_obj.fore_color if filter_obj else "#000000", "bg": filter_obj.back_color if filter_obj else "#FFFFFF"}
 
@@ -1507,10 +1834,11 @@ class LogAnalyzerApp:
 			if filter_obj:
 				filter_obj.text = text; filter_obj.fore_color = colors["fg"]; filter_obj.back_color = colors["bg"]
 				filter_obj.is_regex = var_regex.get(); filter_obj.is_exclude = var_exclude.get()
+				filter_obj.is_event = var_event.get()
 				if index in self.filter_matches: del self.filter_matches[index]
 				self.recalc_filtered_data()
 			else:
-				new_filter = Filter(text, colors["fg"], colors["bg"], enabled=True, is_regex=var_regex.get(), is_exclude=var_exclude.get())
+				new_filter = Filter(text, colors["fg"], colors["bg"], enabled=True, is_regex=var_regex.get(), is_exclude=var_exclude.get(), is_event=var_event.get())
 				self.filters.append(new_filter)
 				self.recalc_filtered_data()
 			dialog.destroy()
@@ -1532,6 +1860,7 @@ class LogAnalyzerApp:
 				f_node.set("enabled", bool_to_tat(flt.enabled))
 				f_node.set("excluding", bool_to_tat(flt.is_exclude))
 				f_node.set("text", flt.text)
+				if flt.is_event: f_node.set("is_event", "y") # Add our custom attribute
 				f_node.set("type", "matches_text")
 				f_node.set("regex", bool_to_tat(flt.is_regex))
 				f_node.set("case_sensitive", "n")
@@ -1576,7 +1905,8 @@ class LogAnalyzerApp:
 				back = fix_color(f.get('backColor'), "#FFFFFF")
 				is_exclude = is_true(f.get('excluding'))
 				is_regex = is_true(f.get('regex'))
-				if text: new_filters.append(Filter(text, fore, back, enabled, is_regex, is_exclude))
+				is_event = is_true(f.get('is_event')) # Read our custom attribute, defaults to False if not found
+				if text: new_filters.append(Filter(text, fore, back, enabled, is_regex, is_exclude, is_event=is_event))
 			self.filters = new_filters
 			self.current_tat_path = filepath; self.update_title()
 			self.filter_matches = {}
