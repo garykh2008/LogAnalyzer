@@ -19,7 +19,7 @@
       - [Help](#help)
     - [Shortcuts \& Operations](#shortcuts--operations)
   - [4. Release Notes](#4-release-notes)
-    - [Version 1.4 (TBD)](#version-14-tbd)
+    - [Version 1.4 (2025-12-08)](#version-14-2025-12-08)
       - [🎨 UI \& Navigation Enhancements](#-ui--navigation-enhancements)
       - [✨ Interactive Graphical Event Timeline](#-interactive-graphical-event-timeline)
     - [Version 1.3 (2025-12-02)](#version-13-2025-12-02)
@@ -154,7 +154,7 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 ## 4. Release Notes
 
-### Version 1.4 (TBD)
+### Version 1.4 (2025-12-08)
 
 #### 🎨 UI & Navigation Enhancements
 
