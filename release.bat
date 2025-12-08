@@ -16,20 +16,29 @@ setlocal EnableDelayedExpansion
 :: ============================================================================
 
 :: --- Mode Selection ---
-if /I "%~1"=="/buildonly" (
-    goto :build_only_mode
-) else (
-    goto :full_release_mode
+if /I "%~1" == "/buildonly" goto :build_only_mode
+
+:: Check for no parameter
+if "%~1" == "" (
+    echo [Error] No parameter provided.
+    echo Usage for full release: %~nx0 vX.Y
+    echo Usage for build only:   %~nx0 /buildonly
+    exit /b 1
 )
+
+:: Check if parameter starts with 'v' (case-insensitive)
+set "PARAM=%~1"
+if /I "!PARAM:~0,1!" == "v" goto :full_release_mode
+
+:: If we reach here, the parameter is invalid
+echo [Error] Invalid parameter: %~1
+echo Usage for full release: %~nx0 vX.Y
+echo Usage for build only:   %~nx0 /buildonly
+exit /b 1
+
 
 :: --- 1. Version Check & Setup ---
 :full_release_mode
-if "%~1"=="" (
-    echo [Error] No version number provided.
-    echo Usage for full release: %~nx0 vX.Y
-    echo Usage for packaging only: %~nx0 /buildonly
-    exit /b 1
-)
 set "NEW_VER=%~1"
 echo --- Preparing to release version: %NEW_VER% ---
 
