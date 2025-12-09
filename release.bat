@@ -212,7 +212,8 @@ python "%DOC_SCRIPT%"
 echo      [Build] Building Windows Executable...
 if not exist "%REL_WIN%" mkdir "%REL_WIN%"
 set "ABS_DOC_SRC=%~dp0%DOC_DIR%"
-pyinstaller --noconfirm --noconsole --onefile --clean --distpath "%REL_WIN%" --workpath "build" --specpath "build" --add-data "%ABS_DOC_SRC%;%DOC_DIR%" --add-data "!TKINTERDND2_PATH!;tkinterdnd2" --name "LogAnalyzer_%BUILD_VER%" "%PYTHON_FILE%" > build/pyinstaller.log 2>&1
+set "ABS_ICON_PATH=%~dp0loganalyzer.ico"
+pyinstaller --noconfirm --noconsole --onefile --clean --distpath "%REL_WIN%" --workpath "build" --specpath "build" --add-data "%ABS_DOC_SRC%;%DOC_DIR%" --add-data "!TKINTERDND2_PATH!;tkinterdnd2" --add-data "%ABS_ICON_PATH%;." --icon="%ABS_ICON_PATH%" --name "LogAnalyzer_%BUILD_VER%" "%PYTHON_FILE%" > build/pyinstaller.log 2>&1
 if %errorlevel% neq 0 ( echo [Error] PyInstaller failed. Check build/pyinstaller.log && exit /b 1 )
 
 echo      [Build] Packaging for Linux...

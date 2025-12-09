@@ -58,6 +58,15 @@ class LogAnalyzerApp:
 		self.root = root
 		self.root.geometry("1000x750")
 
+		# Set application icon
+		try:
+			icon_path = self.resource_path("loganalyzer.ico")
+			self.root.iconbitmap(icon_path)
+		except Exception:
+			# Fallback for systems that might not support .ico or if file is missing
+			pass
+
+
 		# --- UI Theme ---
 		style = ttk.Style(self.root)
 		style.theme_use("clam")
