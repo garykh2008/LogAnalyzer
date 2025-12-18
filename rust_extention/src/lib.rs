@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use pyo3::exceptions::PyValueError;
 use rayon::prelude::*;
 use regex::Regex;
 use std::fs::File;
@@ -16,10 +17,10 @@ impl LogEngine {
     fn new(path: &str) -> PyResult<Self> {
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
-        
+
         let mut lines = Vec::new();
         let mut buf = Vec::new();
-        
+
         loop {
             buf.clear();
             match reader.read_until(b'\n', &mut buf) {
@@ -59,15 +60,61 @@ impl LogEngine {
         self.lines.len()
     }
 
+    /// 全局搜尋：回傳所有匹配的「原始行號」列表
+    fn search(&self, query: String, is_regex: bool, case_sensitive: bool) -> PyResult<Vec<usize>> {
+        let lines = &self.lines;
+
+        // 根據是否為 Regex 與 大小寫敏感 決定搜尋策略
+        let results: Vec<usize> = if is_regex {
+            let re = regex::RegexBuilder::new(&query)
+                .case_insensitive(!case_sensitive)
+                .build()
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+            lines.par_iter()
+                .enumerate()
+                .filter_map(|(i, line)| {
+                    if re.is_match(line) { Some(i) } else { None }
+                })
+                .collect()
+        } else {
+            if case_sensitive {
+                // 一般文字搜尋 (區分大小寫)
+                lines.par_iter()
+                    .enumerate()
+                    .filter_map(|(i, line)| {
+                        if line.contains(&query) { Some(i) } else { None }
+                    })
+                    .collect()
+            } else {
+                // 一般文字搜尋 (不區分大小寫)
+                // 使用 Regex escape 加上 case_insensitive 是處理 Unicode 最穩健且快速的方法
+                let re = regex::RegexBuilder::new(&regex::escape(&query))
+                    .case_insensitive(true)
+                    .build()
+                    .map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+                lines.par_iter()
+                    .enumerate()
+                    .filter_map(|(i, line)| {
+                        if re.is_match(line) { Some(i) } else { None }
+                    })
+                    .collect()
+            }
+        };
+
+        Ok(results)
+    }
+
     // 回傳: (line_tags_indices, filtered_indices, hit_counts, timeline_events)
     // line_tags_indices: 0=None, 1=EXCLUDED, 2=filter_0, 3=filter_1...
     fn filter(
-        &self, 
+        &self,
         filters: Vec<(String, bool, bool, bool, usize)>, // (text, is_regex, is_exclude, is_event, original_index)
     ) -> PyResult<(Vec<u8>, Vec<usize>, Vec<usize>, Vec<(String, String, usize)>)> {
-        
+
         let lines = &self.lines;
-        
+
         // 預先編譯 Regex 以提升效能
         let compiled_filters: Vec<_> = filters.iter().map(|(text, is_regex, is_exclude, is_event, idx)| {
             let re = if *is_regex {
@@ -100,7 +147,7 @@ impl LogEngine {
                 if matched {
                     tag_code = 1; // 1 = EXCLUDED
                     matched_filter_idx = Some(i);
-                    break; 
+                    break;
                 }
             }
 
@@ -108,7 +155,7 @@ impl LogEngine {
             if tag_code == 0 {
                 for (i, (text, re, is_regex, is_exclude, is_event, _)) in compiled_filters.iter().enumerate() {
                     if *is_exclude { continue; }
-                    
+
                     let matched = if *is_regex {
                         re.as_ref().map_or(false, |r| r.is_match(line))
                     } else {
@@ -120,7 +167,7 @@ impl LogEngine {
                         // 注意：這裡的 i 是 compiled_filters 的索引，對應 Python 傳入的順序
                         tag_code = (2 + i) as u8;
                         matched_filter_idx = Some(i);
-                        
+
                         if *is_event {
                             if let Some(caps) = ts_regex.captures(line) {
                                 if let Some(m) = caps.get(1) {
@@ -144,14 +191,14 @@ impl LogEngine {
 
         for (raw_idx, (code, matched_idx, event)) in results.into_iter().enumerate() {
             line_tags_codes.push(code);
-            
+
             if let Some(idx) = matched_idx {
                 hit_counts[idx] += 1;
             }
 
             if code >= 2 {
                 filtered_indices.push(raw_idx);
-                
+
                 if let Some(evt) = event {
                     timeline_events.push(evt);
                 }

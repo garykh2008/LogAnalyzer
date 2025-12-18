@@ -16,6 +16,7 @@ import datetime
 import queue
 import webbrowser
 import sys
+import bisect
 
 # --- Rust Extension Import ---
 try:
@@ -145,6 +146,12 @@ class LogAnalyzerApp:
 		self.filter_matches = {}
 
 		self.current_log_path = None
+
+		# Search Cache
+		self.last_search_query = None
+		self.last_search_results = None # List of raw indices from Rust
+		self.last_search_case = False
+
 		self.current_tat_path = None
 
 		# Notes System
@@ -279,6 +286,12 @@ class LogAnalyzerApp:
 
 		self.scrollbar_y = ttk.Scrollbar(self.content_frame, command=self.on_scroll_y)
 		self.scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+
+		# Search Marker Canvas (Minimap)
+		self.marker_canvas = tk.Canvas(self.content_frame, width=12, bg="#f0f0f0", bd=0, highlightthickness=0)
+		self.marker_canvas.pack(side=tk.RIGHT, fill=tk.Y)
+		self.marker_canvas.bind("<Button-1>", self.on_marker_click)
+		self.marker_canvas.bind("<Configure>", self.on_marker_resize)
 
 		self.line_number_area = tk.Text(self.content_frame, width=7, wrap="none", font=self.font_object,
 										state="disabled", bg="#f0f0f0", bd=0, highlightthickness=0, takefocus=0)
@@ -608,6 +621,10 @@ class LogAnalyzerApp:
 					self.selected_raw_index = -1
 					self.selection_offset = 0
 					self.filter_matches = {}
+					self.last_search_query = None
+					self.last_search_results = None
+					self.marker_canvas.delete("all")
+
 					self.notes = {} # Clear notes
 					self.check_and_import_notes() # Auto-import notes
 					self.refresh_notes_window()
@@ -761,6 +778,7 @@ class LogAnalyzerApp:
 		self.text_area.config(bg=c["bg_widget"], fg=c["fg_widget"], insertbackground=c["fg_widget"])
 		self.line_number_area.config(bg=c["bg_line_num"], fg=c["fg_disabled"])
 
+		self.marker_canvas.config(bg=c["bg_line_num"]) # Match line number bg or scrollbar track
 		# --- Apply to ttk Styles ---
 		style = ttk.Style(self.root)
 		style.configure(".", background=c["bg"], foreground=c["fg"], fieldbackground=c["bg_widget"])
@@ -995,6 +1013,7 @@ class LogAnalyzerApp:
 		current = self.show_only_filtered_var.get()
 		self.show_only_filtered_var.set(not current)
 		self.refresh_view_fast()
+		self._draw_search_markers() # Redraw markers as relative positions change
 		return "break"
 
 	def restore_view_position(self):
@@ -1879,63 +1898,173 @@ class LogAnalyzerApp:
 		self.find_frame.pack_forget()
 		self.text_area.tag_remove("find_match", "1.0", tk.END)
 		self.text_area.focus_set() # Return focus to the text area
+		self.marker_canvas.delete("all") # Clear markers
 		return "break"
+
+	def _is_visible(self, raw_idx):
+		"""Check if a raw line index is currently visible (not filtered out)."""
+		if not self.show_only_filtered_var.get(): return True
+		# Check if raw_idx is in filtered_indices (which is sorted)
+		i = bisect.bisect_left(self.filtered_indices, raw_idx)
+		if i != len(self.filtered_indices) and self.filtered_indices[i] == raw_idx:
+			return True
+		return False
+
+	def _highlight_find_match(self, query, case_sensitive):
+		"""Highlights the match in the currently visible text area."""
+		# The jump_to_line has already positioned the view.
+		# We search only the visible text widget content (fast).
+		pos = self.text_area.search(query, "1.0", stopindex=tk.END, nocase=not case_sensitive)
+		if pos:
+			end_pos = f"{pos}+{len(query)}c"
+			self.text_area.tag_add("find_match", pos, end_pos)
+
+	def _draw_search_markers(self):
+		self.marker_canvas.delete("all")
+		if not self.last_search_results: return
+
+		h = self.marker_canvas.winfo_height()
+		if h <= 1: return
+
+		show_filtered = self.show_only_filtered_var.get()
+		total_view_items = self.get_total_count()
+		if total_view_items == 0: return
+
+		unique_y = set()
+		color = "#FFA500" # Orange match color
+
+		# Optimization: If too many results, sample them to avoid UI lag
+		results = self.last_search_results
+		limit = 5000
+		step = 1
+		if len(results) > limit:
+			step = len(results) // limit
+
+		if show_filtered:
+			# Filtered mode: Need to map raw_idx -> view_idx
+			# This is slower because of bisect, so sampling is important
+			for i in range(0, len(results), step):
+				raw_idx = results[i]
+				# Check visibility
+				idx = bisect.bisect_left(self.filtered_indices, raw_idx)
+				if idx < len(self.filtered_indices) and self.filtered_indices[idx] == raw_idx:
+					y = int((idx / total_view_items) * h)
+					unique_y.add(y)
+		else:
+			# Full mode: raw_idx is directly useful
+			total_raw = len(self.raw_lines)
+			for i in range(0, len(results), step):
+				raw_idx = results[i]
+				y = int((raw_idx / total_raw) * h)
+				unique_y.add(y)
+
+		for y in unique_y:
+			self.marker_canvas.create_line(0, y, 15, y, fill=color, width=1)
+
+	def on_marker_resize(self, event):
+		if self.last_search_results:
+			self._draw_search_markers()
+
+	def on_marker_click(self, event):
+		h = self.marker_canvas.winfo_height()
+		if h <= 0: return
+		y = event.y
+		ratio = y / h
+
+		total = self.get_total_count()
+		target_idx = int(total * ratio)
+
+		# Scroll view to that position
+		self.view_start_index = max(0, min(target_idx, total - self.visible_rows))
+		self.render_viewport()
+		self.update_scrollbar_thumb()
 
 	def _find(self, backward=False):
 		"""Core find logic."""
 		query = self.find_entry.get()
 		if not query: return
 
-		self.text_area.tag_remove("find_match", "1.0", tk.END)
+		case_sensitive = self.find_case_var.get()
 
-		nocase = self.find_case_var.get()
-		search_query = query if nocase else query.lower()
+		# 1. Perform Search (if query changed or cache missing)
+		if (query != self.last_search_query or
+			case_sensitive != self.last_search_case or
+			self.last_search_results is None):
 
-		total_items = self.get_total_count()
-		if total_items == 0: return
+			self.set_ui_busy(True)
+			try:
+				if self.rust_engine:
+					# Call Rust: search(query, is_regex, case_sensitive)
+					# Note: UI Find bar currently assumes text search (is_regex=False)
+					self.last_search_results = self.rust_engine.search(query, False, case_sensitive)
+				else:
+					self.last_search_results = []
 
-		start_index = self.get_current_cache_index()
+				self.last_search_query = query
+				self.last_search_case = case_sensitive
+				self._draw_search_markers() # Draw markers on new search
+			except Exception as e:
+				print(f"Search error: {e}")
+				self.last_search_results = []
+			finally:
+				self.set_ui_busy(False)
 
-		# Define search range
+		if not self.last_search_results:
+			self.find_entry.config(foreground="red")
+			self.update_status("No matches found.")
+			return
+
+		# 2. Navigate to Next/Prev Match
+		# Find current position in the sorted results
+		curr = self.selected_raw_index
 		if backward:
-			indices = list(range(start_index - 1, -1, -1))
-			if self.find_wrap_var.get():
-				indices.extend(range(total_items - 1, start_index - 1, -1))
+			idx = bisect.bisect_left(self.last_search_results, curr)
 		else:
-			indices = list(range(start_index + 1, total_items))
-			if self.find_wrap_var.get():
-				indices.extend(range(0, start_index + 1))
+			idx = bisect.bisect_right(self.last_search_results, curr)
 
-		found_view_index = -1
-		for i in indices:
-			line_content, _, _ = self.get_view_item(i)
-			line_to_search = line_content if nocase else line_content.lower()
-			if search_query in line_to_search:
-				found_view_index = i
+		matches = self.last_search_results
+		count = len(matches)
+		target_raw_index = -1
+		found = False
+
+		# Generate candidates based on direction and wrapping
+		candidates = []
+		if backward:
+			# From idx-1 down to 0, then wrap if needed
+			candidates = range(idx - 1, -1, -1)
+			if self.find_wrap_var.get():
+				candidates = list(candidates) + list(range(count - 1, idx - 1, -1))
+		else:
+			# From idx up to end, then wrap if needed
+			candidates = range(idx, count)
+			if self.find_wrap_var.get():
+				candidates = list(candidates) + list(range(0, idx))
+
+		# Find the first candidate that is visible
+		for i in candidates:
+			raw_idx = matches[i]
+			if self._is_visible(raw_idx):
+				target_raw_index = raw_idx
+				found = True
 				break
 
-		if found_view_index != -1:
-			# A match was found, now jump to it and highlight
-			_, _, raw_idx = self.get_view_item(found_view_index)
-			self.jump_to_line(raw_idx)
-
-			# After jumping, the view is rendered. Now find the match in the text widget.
-			# We need to do this after the mainloop has updated the view.
-			def highlight_match():
-				pos = self.text_area.search(query, "1.0", stopindex=tk.END, nocase=not nocase)
-				if pos:
-					end_pos = f"{pos}+{len(query)}c"
-					self.text_area.tag_add("find_match", pos, end_pos)
-					# The jump_to_line already sets the focus line
-
-			# Schedule the highlight to run after the UI has updated from the jump
-			self.root.after(50, highlight_match)
-
+		if found:
+			self.jump_to_line(target_raw_index)
 			self.find_entry.config(foreground="black")
-			self.update_status(f"Found match on line {raw_idx + 1}")
+			self.update_status(f"Found match on line {target_raw_index + 1}")
+
+			# Schedule highlight (UI update needs a moment after jump)
+			self.text_area.tag_remove("find_match", "1.0", tk.END)
+			self.root.after(50, lambda: self._highlight_find_match(query, case_sensitive))
 		else:
-			self.find_entry.config(foreground="red")
-			self.update_status("End of file reached. No more matches found.")
+			self.find_entry.config(foreground="black")
+			# Use red text if wrapped and still not found (e.g. filtered out)
+			if self.show_only_filtered_var.get():
+				self.find_entry.config(foreground="red")
+				self.update_status("Match found but hidden by filters.")
+			else:
+				self.find_entry.config(foreground="red")
+				self.update_status("No more matches found.")
 
 	def find_next(self, event=None): self._find(backward=False); return "break"
 	def find_previous(self, event=None): self._find(backward=True); return "break"
