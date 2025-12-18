@@ -114,7 +114,7 @@ class LogAnalyzerApp:
 
 		# App Info
 		self.APP_NAME = "Log Analyzer"
-		self.VERSION = "V1.4"
+		self.VERSION = "V1.5"
 
 
 		# Threading & Queue
