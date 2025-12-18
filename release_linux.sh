@@ -8,14 +8,14 @@ PROJECT_ROOT=$(pwd)
 echo "[Linux Build] Setting up virtual environment..."
 if ! python3 -c "import venv" &>/dev/null; then
     echo "[Linux Build] Error: python3-venv module not found."
-    echo "Please install it (e.g., 'sudo apt install python3-venv' on Ubuntu/Debian)."
+    echo "Please run './install_deps.sh' to install system dependencies."
     exit 1
 fi
 
 # Check for tkinter (Required for tkinterdnd2)
 if ! python3 -c "import tkinter" &>/dev/null; then
     echo "[Linux Build] Error: tkinter module not found."
-    echo "Please install it (e.g., 'sudo apt install python3-tk' on Ubuntu/Debian)."
+    echo "Please run './install_deps.sh' to install system dependencies."
     exit 1
 fi
 
@@ -34,7 +34,7 @@ if ! python3 -m venv "$VENV_DIR"; then
         exit 1
     fi
     source "$VENV_DIR/bin/activate"
-    
+
     echo "[Linux Build] Bootstrapping pip..."
     # Download get-pip.py using python to avoid curl/wget dependencies
     python3 -c "import urllib.request; urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', 'get-pip.py')"
@@ -48,46 +48,48 @@ echo "[Linux Build] Installing Python dependencies into venv..."
 pip install pyinstaller markdown tkinterdnd2 maturin
 
 # Check for Rust
-SKIP_RUST=0
 echo "[Linux Build] Checking for Rust environment..."
+# Try sourcing cargo env just in case it was just installed via install_deps.sh
+if [ -f "$HOME/.cargo/env" ]; then
+    source "$HOME/.cargo/env"
+fi
+
 if ! command -v cargo &> /dev/null; then
-    echo "[Linux Build] Warning: Rust compiler (cargo) not found. Rust extension build will be skipped."
-    SKIP_RUST=1
+    echo "[Linux Build] Error: Rust compiler (cargo) not found. Rust is now a required dependency."
+    echo "Please run './install_deps.sh' to install Rust."
+    exit 1
 fi
 
 # 2. Build Rust Extension
-if [ "$SKIP_RUST" -eq 0 ]; then
 echo "[Linux Build] Building Rust extension..."
-if [ -d "rust_extention" ]; then
-    # Copy Rust source to temp dir to avoid WSL/NTFS permission issues
-    RUST_BUILD_DIR="$VENV_BASE/rust_build"
-    cp -r "rust_extention" "$RUST_BUILD_DIR"
-    cd "$RUST_BUILD_DIR"
-
-    # Clean artifacts copied from Windows to avoid installing wrong wheel
-    rm -rf target
-
-    # Set environment variable for compatibility
-    export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
-    maturin build --release
-
-    # Install the wheel
-    # Find the wheel file
-    WHEEL_FILE=$(find target/wheels -name "*.whl" | head -n 1)
-    if [ -n "$WHEEL_FILE" ]; then
-        echo "[Linux Build] Installing Rust wheel: $WHEEL_FILE"
-        pip install "$WHEEL_FILE" --force-reinstall
-    else
-        echo "[Linux Build] Error: Rust wheel not found!"
-        exit 1
-    fi
-    cd "$PROJECT_ROOT"
-else
-    echo "[Linux Build] Warning: rust_extention directory not found."
+if [ ! -d "rust_extention" ]; then
+    echo "[Linux Build] Error: rust_extention directory not found."
+    exit 1
 fi
+
+# Copy Rust source to temp dir to avoid WSL/NTFS permission issues
+RUST_BUILD_DIR="$VENV_BASE/rust_build"
+cp -r "rust_extention" "$RUST_BUILD_DIR"
+cd "$RUST_BUILD_DIR"
+
+# Clean artifacts copied from Windows to avoid installing wrong wheel
+rm -rf target
+
+# Set environment variable for compatibility
+export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+maturin build --release
+
+# Install the wheel
+# Find the wheel file
+WHEEL_FILE=$(find target/wheels -name "*.whl" | head -n 1)
+if [ -n "$WHEEL_FILE" ]; then
+    echo "[Linux Build] Installing Rust wheel: $WHEEL_FILE"
+    pip install "$WHEEL_FILE" --force-reinstall
 else
-    echo "[Linux Build] Skipping Rust extension build (Rust not found)."
+    echo "[Linux Build] Error: Rust wheel not found!"
+    exit 1
 fi
+cd "$PROJECT_ROOT"
 
 # 3. Build Docs
 echo "[Linux Build] Building documentation..."

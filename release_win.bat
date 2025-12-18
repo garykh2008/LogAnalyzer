@@ -27,10 +27,9 @@ if %errorlevel% neq 0 (
 echo [Init] Checking for Rust environment...
 where cargo >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [Warning] Rust compiler ^(cargo^) not found. Rust extension build will be skipped.
-    set "SKIP_RUST=1"
-) else (
-    set "SKIP_RUST=0"
+    echo [Error] Rust compiler ^(cargo^) not found. Rust is now a required dependency.
+    echo Please install the Rust toolchain: https://www.rust-lang.org/tools/install
+    exit /b 1
 )
 :: --- Mode Selection ---
 if /I "%~1" == "/buildonly" goto :build_only_mode
@@ -207,20 +206,17 @@ for /f "delims=" %%i in ('python -c "import os, tkinterdnd2; print(os.path.dirna
 if not defined TKINTERDND2_PATH ( echo [Error] tkinterdnd2 not found. && exit /b 1 )
 
 echo      [Build] Building and Installing Rust Extension...
-if "%SKIP_RUST%"=="0" (
-    if exist "rust_extention" (
-        pushd "rust_extention"
-        set PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
-        maturin build --release
-        if !errorlevel! neq 0 ( echo [Error] Rust build failed. && popd && exit /b 1 )
-        popd
-        for %%f in (rust_extention\target\wheels\*.whl) do pip install "%%f" --force-reinstall
-    ) else (
-        echo [Warning] Rust extension directory 'rust_extention' not found. Skipping.
-    )
-) else (
-    echo [Build] Skipping Rust extension build ^(Rust not found^).
+if not exist "rust_extention" (
+    echo [Error] Rust extension directory 'rust_extention' not found.
+    exit /b 1
 )
+
+pushd "rust_extention"
+set PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+maturin build --release
+if !errorlevel! neq 0 ( echo [Error] Rust build failed. && popd && exit /b 1 )
+popd
+for %%f in (rust_extention\target\wheels\*.whl) do pip install "%%f" --force-reinstall
 
 echo      [Build] Building documentation...
 python "%DOC_SCRIPT%"

@@ -13,11 +13,11 @@ if command -v python3 &>/dev/null; then
     echo -e "${GREEN}[V] Python3 is already installed.${NC}"
 else
     echo -e "${YELLOW}[!] Python3 not found. Attempting to install...${NC}"
-    
+
     # Update package list and install python3
     sudo apt-get update
     sudo apt-get install -y python3
-    
+
     # Verify installation
     if command -v python3 &>/dev/null; then
         echo -e "${GREEN}[V] Python3 installed successfully.${NC}"
@@ -33,7 +33,7 @@ if python3 -c "import tkinter" &>/dev/null; then
     echo -e "${GREEN}[V] Python3-tk is already installed.${NC}"
 else
     echo -e "${YELLOW}[!] Python3-tk not found. Attempting to install...${NC}"
-    
+
     sudo apt-get install -y python3-tk
 
     # Verify installation
@@ -43,6 +43,38 @@ else
         echo -e "${RED}[X] Failed to install Python3-tk.${NC}"
         exit 1
     fi
+fi
+
+# 3. Check and Install Python3-venv (Required for building release)
+if python3 -c "import venv" &>/dev/null; then
+    echo -e "${GREEN}[V] Python3-venv is already installed.${NC}"
+else
+    echo -e "${YELLOW}[!] Python3-venv not found. Attempting to install...${NC}"
+
+    sudo apt-get install -y python3-venv
+
+    if python3 -c "import venv" &>/dev/null; then
+        echo -e "${GREEN}[V] Python3-venv installed successfully.${NC}"
+    else
+        echo -e "${RED}[X] Failed to install Python3-venv.${NC}"
+        exit 1
+    fi
+fi
+
+# 4. Check and Install Rust (Required for extension)
+if command -v cargo &>/dev/null; then
+    echo -e "${GREEN}[V] Rust (cargo) is already installed.${NC}"
+else
+    echo -e "${YELLOW}[!] Rust not found. Attempting to install via rustup...${NC}"
+
+    # Ensure curl is present
+    if ! command -v curl &>/dev/null; then
+        echo -e "${YELLOW}Installing curl...${NC}"
+        sudo apt-get install -y curl
+    fi
+
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    echo -e "${GREEN}[V] Rust installed. You may need to restart your shell or run 'source \$HOME/.cargo/env'.${NC}"
 fi
 
 echo -e "${GREEN}--- All checks completed successfully ---${NC}"

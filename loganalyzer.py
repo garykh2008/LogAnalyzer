@@ -116,6 +116,10 @@ class LogAnalyzerApp:
 		self.APP_NAME = "Log Analyzer"
 		self.VERSION = "V1.5"
 
+		if not HAS_RUST:
+			# Since we are removing Python fallbacks, we must warn the user if the engine is missing.
+			messagebox.showerror("Error", "Rust extension (log_engine_rs) not found.\nPlease build the extension to use this application.")
+
 
 		# Threading & Queue
 		self.msg_queue = queue.Queue()
@@ -834,16 +838,10 @@ class LogAnalyzerApp:
 			lines = []
 			rust_eng = None
 
-			if HAS_RUST:
-				# Use Rust to load file (Zero-copy for Python)
-				rust_eng = log_engine_rs.LogEngine(filepath)
-				lines = RustLinesProxy(rust_eng)
-			else:
-				# Fallback to Python load
-				with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-					if file_size > 10 * 1024 * 1024:
-						self.msg_queue.put(('progress', 10, 100, "Reading file into memory... (Please wait)"))
-					lines = f.readlines() # List of strings
+			# Use Rust to load file (Zero-copy for Python)
+			# We assume HAS_RUST is True or handled at startup
+			rust_eng = log_engine_rs.LogEngine(filepath)
+			lines = RustLinesProxy(rust_eng)
 
 			t_end = time.time()
 			self.msg_queue.put(('load_complete', lines, t_end - t_start, filepath, rust_eng))
@@ -903,27 +901,14 @@ class LogAnalyzerApp:
 		if self.is_processing and target_indices is None: return # Allow re-entry if internal call? No, lock UI
 		if not self.is_processing: self.set_ui_busy(True)
 
-		# If we have Rust engine, use it!
-		if self.rust_engine:
-			self._start_rust_filter_thread()
+		# We now rely solely on the Rust engine for filtering.
+		# If rust_engine is not loaded (no file), we can't filter.
+		if not self.rust_engine:
+			self.set_ui_busy(False)
 			return
 
-		filters_snapshot = []
-		for f in self.filters:
-			filters_snapshot.append({
-				'text': f.text,
-				'is_regex': f.is_regex,
-				'is_exclude': f.is_exclude,
-				'enabled': f.enabled,
-				'is_event': f.is_event
-			})
-
-		# Pass current state for partial update
-		current_tags = self.all_line_tags if target_indices is not None else None
-
-		t = threading.Thread(target=self._worker_recalc_jit, args=(filters_snapshot, target_indices, current_tags))
-		t.daemon = True
-		t.start()
+		# Start the Rust filter thread
+		self._start_rust_filter_thread()
 
 	def _start_rust_filter_thread(self):
 		# Prepare filter data for Rust: List of (text, is_regex, is_exclude, is_event, original_idx)
@@ -979,195 +964,6 @@ class LogAnalyzerApp:
 				self.msg_queue.put(('load_error', f"Rust Engine Error: {e}"))
 
 		threading.Thread(target=run_rust, daemon=True).start()
-
-	def _worker_recalc_jit(self, filters_data, target_indices=None, current_tags=None):
-		t_start = time.time()
-		has_active_filters = any(f['enabled'] for f in filters_data)
-
-		if not has_active_filters:
-			t_end = time.time()
-			# Clear all tags
-			empty_tags = [None] * len(self.raw_lines)
-			self.msg_queue.put(('filter_complete', empty_tags, [], t_end - t_start, [0]*len(filters_data), {}, [], False))
-			return
-
-		# Setup regex groups
-		txt_excludes = []
-		reg_excludes = []
-		txt_includes = []
-		reg_includes = []
-
-		# Timestamp regex - more robust
-		ts_regex_str = r'(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b)'
-		ts_formats = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y-%H:%M:%S.%f", "%I:%M:%S.%f %p", "%H:%M:%S"]
-
-
-		for idx, f in enumerate(filters_data):
-			if not f['enabled']: continue
-			if f['is_exclude']:
-				if f['is_regex']:
-					try: reg_excludes.append((re.compile(f['text'], re.IGNORECASE), idx))
-					except: pass
-				else: txt_excludes.append((f['text'], idx))
-			else:
-				tag = f"filter_{idx}"
-				if f['is_regex']:
-					try: reg_includes.append((re.compile(f['text'], re.IGNORECASE), tag, idx))
-					except: pass
-				else: txt_includes.append((f['text'], tag, idx))
-
-		# JIT Code Generation
-		code_lines = []
-		code_lines.append("def fast_filter_worker(raw_lines, line_tags, filter_counts, temp_matches, timeline_events, update_prog, indices_subset):")
-		code_lines.append("    total = len(indices_subset) if indices_subset else len(raw_lines)")
-		code_lines.append("    report_interval = max(1, total // 20)")
-		code_lines.append("    ")
-		# If partial, loop over subset. Else loop over all.
-		code_lines.append("    iterable = indices_subset if indices_subset is not None else range(len(raw_lines))")
-		code_lines.append("    ")
-		code_lines.append("    for step, raw_idx in enumerate(iterable):")
-		code_lines.append("        if step % report_interval == 0: update_prog(step, total)")
-		code_lines.append("        line = raw_lines[raw_idx]")
-		code_lines.append("        line_tags[raw_idx] = None") # Reset tag for this line
-		code_lines.append("        ")
-
-		# Excludes
-		for text, idx in txt_excludes:
-			safe_text = repr(text)
-			code_lines.append(f"        if {safe_text} in line:")
-			code_lines.append(f"            filter_counts[{idx}] += 1")
-			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
-			code_lines.append(f"            line_tags[raw_idx] = 'EXCLUDED'")
-			code_lines.append(f"            continue")
-		for _, idx in reg_excludes:
-			code_lines.append(f"        if search_ex_{idx}(line):")
-			code_lines.append(f"            filter_counts[{idx}] += 1")
-			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
-			code_lines.append(f"            line_tags[raw_idx] = 'EXCLUDED'")
-			code_lines.append(f"            continue")
-
-		code_lines.append("")
-
-		# Includes
-		code_lines.append("        # Include Checks")
-		first_include = True
-		for text, tag, idx in txt_includes:
-			safe_text = repr(text)
-			prefix = "if" if first_include else "elif"
-			code_lines.append(f"        {prefix} {safe_text} in line:")
-			code_lines.append(f"            filter_counts[{idx}] += 1")
-			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
-			code_lines.append(f"            line_tags[raw_idx] = '{tag}'")
-			if filters_data[idx]['is_event']:
-				code_lines.append(f"            match = ts_search(line)")
-				code_lines.append(f"            if match: timeline_events.append((match.group(1), '{filters_data[idx]['text']}', raw_idx))")
-
-			first_include = False
-		for _, tag, idx in reg_includes:
-			prefix = "if" if first_include else "elif"
-			code_lines.append(f"        {prefix} search_inc_{idx}(line):")
-			code_lines.append(f"            filter_counts[{idx}] += 1")
-			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
-			code_lines.append(f"            line_tags[raw_idx] = '{tag}'")
-			if filters_data[idx]['is_event']:
-				code_lines.append(f"            match = ts_search(line)")
-				code_lines.append(f"            if match: timeline_events.append((match.group(1), '{filters_data[idx]['text']}', raw_idx))")
-
-			first_include = False
-
-		full_code = "\n".join(code_lines)
-		context = {}
-		# [OPTIMIZATION] Method Hoisting: Bind .search methods directly to avoid attribute lookup in the loop
-		for rule, idx in reg_excludes: context[f"search_ex_{idx}"] = rule.search
-		for rule, _, idx in reg_includes: context[f"search_inc_{idx}"] = rule.search
-		context['ts_search'] = re.compile(ts_regex_str).search
-
-		try:
-			exec(full_code, context)
-			worker_func = context['fast_filter_worker']
-
-			# Prepare Data containers
-			if target_indices is not None and current_tags is not None:
-				# Partial update: Copy existing tags
-				line_tags = list(current_tags)
-				# Reset hit counts? No, partial update makes hit counts tricky.
-				# Simple solution: Recalculate hit counts fully is safer?
-				# Actually, for disable, we can just subtract? No, lines might move from filter A to B.
-				# To be safe and correct, we need to recalc stats fully OR accept stats might be slightly off until full recalc.
-				# Let's start filter_counts at 0, but this only counts hits in the subset.
-				# Merging counts is complex.
-				# Trade-off: In partial mode, we might see wonky hit counts momentarily,
-				# OR we scan all tags afterwards to rebuild counts (Fast O(N)).
-				# Let's choose: Scan all tags to rebuild counts.
-
-				# Filter counts and matches need to be rebuilt from the final tags state
-				pass
-			else:
-				# Full update
-				line_tags = [None] * len(self.raw_lines)
-
-			# Temp counters for this run
-			filter_counts = [0] * len(filters_data)
-			temp_matches = {i: [] for i in range(len(filters_data)) if filters_data[i]['enabled']}
-			timeline_events_raw = [] # (ts_string, filter_text, raw_idx)
-
-			def update_prog_callback(curr, total):
-				self.msg_queue.put(('progress', curr, total, f"Filtering line {curr}/{total} (Smart)..."))
-
-			worker_func(self.raw_lines, line_tags, filter_counts, temp_matches, timeline_events_raw, update_prog_callback, target_indices)
-
-			# Post-process timeline events
-			timeline_events_processed = []
-			timestamps_found = False
-			for ts_str, f_text, r_idx in timeline_events_raw:
-				dt_obj = None
-				for fmt in ts_formats:
-					try:
-						# If format expects microseconds, parse the full string.
-						# Otherwise, parse only the part before the dot.
-						if "%f" in fmt:
-							dt_obj = datetime.datetime.strptime(ts_str, fmt)
-						else:
-							dt_obj = datetime.datetime.strptime(ts_str.split('.')[0], fmt)
-						break
-					except ValueError:
-						continue
-				if dt_obj:
-					timeline_events_processed.append((dt_obj, f_text, r_idx))
-			if timeline_events_processed: timestamps_found = True
-
-			# Post-processing: Rebuild Indices & Stats from final line_tags (Fast O(N))
-			final_indices = []
-			final_counts = [0] * len(filters_data)
-			# We need to map 'filter_X' string back to index X for stats
-			# This loop is 10M iterations, might take 1-2s in Python.
-			# But it's unavoidable if we want correct stats and view.
-
-			# Optimization: Use indices list for stats gathering if possible.
-			# Actually, if we just want the view to be fast, we can skip full stats recalc for now?
-			# User expects "Disable" to be fast.
-
-			for i, tag in enumerate(line_tags):
-				if tag and tag != 'EXCLUDED':
-					final_indices.append(i)
-					# Tag format: filter_5
-					try:
-						f_idx = int(tag.split('_')[1])
-						final_counts[f_idx] += 1
-					except: pass
-				elif tag == 'EXCLUDED':
-					# We don't know WHICH exclude filter hit it without storing it.
-					# V2.6 didn't store exclude index in tags.
-					# So exclude hit counts will be inaccurate in partial mode unless we track them better.
-					# Acceptable trade-off for speed.
-					pass
-
-			t_end = time.time()
-			self.msg_queue.put(('filter_complete', line_tags, final_indices, t_end - t_start, final_counts, {}, timeline_events_processed, timestamps_found))
-
-		except Exception as e:
-			print(f"JIT Compilation Failed: {e}")
-			self.msg_queue.put(('load_error', f"Optimization Error: {e}"))
 
 	# --- View Generation (Instant) ---
 	def refresh_view_fast(self):
