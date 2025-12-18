@@ -78,7 +78,11 @@ class RustLinesProxy:
 class LogAnalyzerApp:
 	def __init__(self, root):
 		self.root = root
-		self.root.geometry("1000x750")
+
+		# Config
+		self.config_file = "app_config.json"
+		self.config = self.load_config()
+		self.root.geometry(self.config.get("main_window_geometry", "1000x750"))
 
 		# Set application icon
 		try:
@@ -117,9 +121,6 @@ class LogAnalyzerApp:
 		self.msg_queue = queue.Queue()
 		self.is_processing = False
 
-		# Config
-		self.config_file = "app_config.json"
-		self.config = self.load_config()
 		self.dark_mode = tk.BooleanVar(value=self.config.get("dark_mode", False))
 
 		self.filters = []
@@ -168,7 +169,7 @@ class LogAnalyzerApp:
 		self.selected_raw_index = -1
 		self.selection_offset = 0
 
-		self.note_view_visible_var = tk.BooleanVar(value=False)
+		self.note_view_visible_var = tk.BooleanVar(value=self.config.get("note_view_visible", False))
 		note_view_mode = self.config.get("note_view_mode", "docked")
 		self.show_notes_in_window_var = tk.BooleanVar(value=(note_view_mode == "window"))
 		self.show_only_filtered_var = tk.BooleanVar(value=False)
@@ -204,7 +205,7 @@ class LogAnalyzerApp:
 		# self.file_menu.add_command(label="Export JSON", command=self.export_filters)
 
 		self.file_menu.add_separator()
-		self.file_menu.add_command(label="Exit", command=root.quit)
+		self.file_menu.add_command(label="Exit", command=self.on_close)
 
 		# [Filter Menu]
 		self.filter_menu = tk.Menu(self.menubar, tearoff=0)
@@ -347,7 +348,7 @@ class LogAnalyzerApp:
 		self.root.bind("<Control-Left>", self.on_nav_prev_match)
 		self.root.bind("<Control-Right>", self.on_nav_next_match)
 
-		top_pane.add(self.content_frame, width=750, minsize=300)
+		top_pane.add(self.content_frame, width=750, minsize=300, stretch="always")
 
 		# --- Upper-Right: Note View (Placeholder) ---
 		# The actual notes_frame will be created dynamically
@@ -357,7 +358,7 @@ class LogAnalyzerApp:
 		# Initial setup: Hide the notes view by default
 		self.toggle_note_view_visibility(initial_setup=True)
 
-		self.paned_window.add(top_pane, height=450, minsize=100)
+		self.paned_window.add(top_pane, height=450, minsize=100, stretch="always")
 
 		# Context Menu for Notes Tree
 		self.notes_context_menu = tk.Menu(self.root, tearoff=0)
@@ -408,7 +409,7 @@ class LogAnalyzerApp:
 		self.context_menu.add_command(label="Edit Filter", command=self.edit_selected_filter)
 		self.context_menu.add_command(label="Add Filter", command=self.add_filter_dialog)
 
-		self.paned_window.add(filter_frame, minsize=100)
+		self.paned_window.add(filter_frame, minsize=100, stretch="never")
 
 		# Start Queue Checker
 		self.check_queue()
@@ -421,6 +422,9 @@ class LogAnalyzerApp:
 		# Apply initial theme
 		self._apply_theme()
 		self._update_recent_files_menu()
+
+		self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+		self.root.after(200, self._restore_layout)
 
 	def _create_notes_view_widgets(self, parent_frame):
 		"""Helper to create all widgets for the notes view inside a given parent."""
@@ -448,6 +452,42 @@ class LogAnalyzerApp:
 		self.notes_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 		self.notes_tree.bind("<Double-1>", self.on_note_double_click)
 		self.notes_tree.bind("<Button-3>", self.on_notes_tree_right_click)
+
+	def _restore_layout(self):
+		sash_y = self.config.get("sash_main_y")
+		if sash_y:
+			try:
+				self.paned_window.sash_place(0, 0, sash_y)
+			except Exception: pass
+
+		# Restore top sash (Log vs Notes) if docked and visible
+		if self.note_view_visible_var.get() and self.notes_frame:
+			sash_x = self.config.get("sash_top_x")
+			if sash_x:
+				try:
+					self.top_pane.sash_place(0, sash_x, 0)
+				except Exception: pass
+
+	def on_close(self):
+		self._save_notes_width()
+		self._save_notes_window_geometry()
+
+		self.config["main_window_geometry"] = self.root.geometry()
+		self.config["note_view_visible"] = self.note_view_visible_var.get()
+
+		try:
+			self.config["sash_main_y"] = self.paned_window.sash_coord(0)[1]
+		except Exception: pass
+
+		# Save top sash (Log vs Notes) if docked
+		if self.notes_frame and self.notes_frame.winfo_exists():
+			try:
+				self.config["sash_top_x"] = self.top_pane.sash_coord(0)[0]
+			except Exception: pass
+
+		self.save_config()
+		self.root.destroy()
+		sys.exit(0)
 
 	# --- [Helper] Path Resource Finder ---
 	def resource_path(self, relative_path):
@@ -1416,6 +1456,7 @@ class LogAnalyzerApp:
 
 		if not is_visible:
 			# Hide the view
+			self._save_notes_width()
 			if self.notes_frame and self.notes_frame.winfo_exists():
 				try:
 					self.top_pane.remove(self.notes_frame)
@@ -1423,6 +1464,7 @@ class LogAnalyzerApp:
 				except tk.TclError: pass # Already removed
 				self.notes_frame = None
 			if self.notes_window and self.notes_window.winfo_exists():
+				self._save_notes_window_geometry()
 				self.notes_window.destroy()
 				self.notes_window = None
 			return
@@ -1448,6 +1490,7 @@ class LogAnalyzerApp:
 
 	def undock_note_view(self):
 		# Destroy the docked frame if it exists
+		self._save_notes_width()
 		if self.notes_frame and self.notes_frame.winfo_exists():
 			try:
 				self.top_pane.remove(self.notes_frame)
@@ -1458,7 +1501,8 @@ class LogAnalyzerApp:
 		if self.notes_window is None or not self.notes_window.winfo_exists():
 			self.notes_window = tk.Toplevel(self.root)
 			self.notes_window.title("Notes")
-			self.notes_window.geometry("400x500")
+			geom = self.config.get("notes_window_geometry", "400x500")
+			self.notes_window.geometry(geom)
 			self.notes_window.protocol("WM_DELETE_WINDOW", self.on_notes_window_close)
 
 		# Re-create the widgets inside the Toplevel window
@@ -1469,14 +1513,34 @@ class LogAnalyzerApp:
 	def dock_note_view(self):
 		# Destroy the separate window if it exists
 		if self.notes_window is not None and self.notes_window.winfo_exists():
+			self._save_notes_window_geometry()
 			self.notes_window.destroy()
 			self.notes_window = None
+
+		# Check if already docked to prevent duplicates
+		if self.notes_frame and self.notes_frame.winfo_exists():
+			self.refresh_notes_window()
+			return
 
 		# Re-create the frame and its widgets inside the main pane
 		self.notes_frame = ttk.LabelFrame(self.top_pane, text="Notes")
 		self._create_notes_view_widgets(self.notes_frame)
-		self.top_pane.add(self.notes_frame, minsize=200)
+
+		target_width = self.config.get("notes_panel_width", 200)
+		self.top_pane.add(self.notes_frame, minsize=200, width=target_width, stretch="always")
 		self.refresh_notes_window()
+
+	def _save_notes_width(self):
+		if self.notes_frame and self.notes_frame.winfo_exists():
+			w = self.notes_frame.winfo_width()
+			if w > 50: # Basic sanity check
+				self.config["notes_panel_width"] = w
+				self.save_config()
+
+	def _save_notes_window_geometry(self):
+		if self.notes_window and self.notes_window.winfo_exists():
+			self.config["notes_window_geometry"] = self.notes_window.geometry()
+			self.save_config()
 
 	def on_notes_window_close(self):
 		# This is called when the 'X' of the Toplevel is clicked
@@ -1569,8 +1633,9 @@ class LogAnalyzerApp:
 					self.update_status(f"Imported {len(self.notes)} notes.")
 
 					# Auto-show notes window on successful import
-					self.note_view_visible_var.set(True)
-					self.toggle_note_view_visibility()
+					if not self.note_view_visible_var.get():
+						self.note_view_visible_var.set(True)
+						self.toggle_note_view_visibility()
 					# The calling function will handle UI refresh
 
 				except Exception as e:
@@ -1989,11 +2054,11 @@ class LogAnalyzerApp:
 			if new_size != self.font_size:
 				self.font_size = new_size
 				self.font_object.configure(size=self.font_size)
-				
+
 				# Update Notes Treeview scaling
 				style = ttk.Style(self.root)
 				style.configure("Notes.Treeview", font=("Consolas", self.font_size), rowheight=int(max(20, self.font_size * 2.0)))
-				
+
 				self.config["font_size"] = self.font_size; self.save_config()
 				# The <Configure> event will handle the rest
 		return "break"
