@@ -1,6 +1,10 @@
 import tkinter as tk
 from tkinter import filedialog, colorchooser, messagebox, ttk
-from tkinterdnd2 import DND_FILES, TkinterDnD
+try:
+	from tkinterdnd2 import DND_FILES, TkinterDnD
+	HAS_DND = True
+except ImportError:
+	HAS_DND = False
 import tkinter.font as tkFont
 import re
 import json
@@ -12,6 +16,13 @@ import datetime
 import queue
 import webbrowser
 import sys
+
+# --- Rust Extension Import ---
+try:
+	import log_engine_rs
+	HAS_RUST = True
+except ImportError:
+	HAS_RUST = False
 
 # --- Helper Functions ---
 
@@ -53,6 +64,17 @@ class Filter:
 		if 'hit_count' in d: del d['hit_count']
 		return d
 
+class RustLinesProxy:
+	"""Proxies list access to the Rust LogEngine to avoid copying strings to Python."""
+	def __init__(self, engine):
+		self.engine = engine
+
+	def __len__(self):
+		return self.engine.line_count()
+
+	def __getitem__(self, idx):
+		return self.engine.get_line(idx)
+
 class LogAnalyzerApp:
 	def __init__(self, root):
 		self.root = root
@@ -72,10 +94,18 @@ class LogAnalyzerApp:
 		style.theme_use("clam")
 		style.configure("Treeview", rowheight=25, font=("Segoe UI", 9))
 		style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
+		# Fixed UI elements (Filters, Buttons, etc.) - Consolas 12
+		style.configure("Treeview", rowheight=25, font=("Consolas", 12))
+		style.configure("Treeview.Heading", font=("Consolas", 12, "bold"))
 		style.map("Treeview", background=[("selected", "#0078D7")])
 		style.configure("TLabelFrame", padding=5)
 		style.configure("TLabelFrame.Label", font=("Segoe UI", 10, "bold"))
 		style.configure("TButton", padding=5, font=("Segoe UI", 9))
+		style.configure("TLabelFrame.Label", font=("Consolas", 12, "bold"))
+		style.configure("TButton", padding=5, font=("Consolas", 12))
+		style.configure("TLabel", font=("Consolas", 12))
+		style.configure("TCheckbutton", font=("Consolas", 12))
+		style.configure("TEntry", font=("Consolas", 12))
 		style.configure("TProgressbar", thickness=15)
 
 		# App Info
@@ -94,6 +124,7 @@ class LogAnalyzerApp:
 
 		self.filters = []
 		self.raw_lines = []
+		self.rust_engine = None # Instance of log_engine_rs.LogEngine
 
 		# Cache structure: [(line_content, tags, raw_index), ...]
 		# If None, it means "Raw Mode"
@@ -127,6 +158,12 @@ class LogAnalyzerApp:
 		# Font management
 		self.font_size = self.config.get("font_size", 11)
 		self.font_object = tkFont.Font(family="Segoe UI", size=self.font_size)
+		self.font_size = self.config.get("font_size", 12)
+		self.font_object = tkFont.Font(family="Consolas", size=self.font_size)
+
+		# Dynamic Style for Notes (Scalable)
+		style.configure("Notes.Treeview", font=("Consolas", self.font_size), rowheight=int(max(20, self.font_size * 2.0)))
+		style.configure("Notes.Treeview.Heading", font=("Consolas", 12, "bold")) # Headings stay fixed or scalable? Let's keep headings fixed 12 for consistency with UI
 
 		self.selected_raw_index = -1
 		self.selection_offset = 0
@@ -377,8 +414,9 @@ class LogAnalyzerApp:
 		self.check_queue()
 
 		# --- Drag and Drop ---
-		self.root.drop_target_register(DND_FILES)
-		self.root.dnd_bind('<<Drop>>', self.on_drop)
+		if HAS_DND:
+			self.root.drop_target_register(DND_FILES)
+			self.root.dnd_bind('<<Drop>>', self.on_drop)
 
 		# Apply initial theme
 		self._apply_theme()
@@ -397,6 +435,7 @@ class LogAnalyzerApp:
 		# Treeview for notes
 		cols = ("line", "timestamp", "content")
 		self.notes_tree = ttk.Treeview(tree_frame, columns=cols, show="headings")
+		self.notes_tree = ttk.Treeview(tree_frame, columns=cols, show="headings", style="Notes.Treeview")
 		self.notes_tree.heading("line", text="Line")
 		self.notes_tree.column("line", width=60, anchor="center")
 		self.notes_tree.heading("timestamp", text="Timestamp")
@@ -466,7 +505,7 @@ class LogAnalyzerApp:
 		win.title("Keyboard Shortcuts")
 		win.transient(self.root)
 		win.grab_set()
-		win.geometry("450x300")
+		win.geometry("750x350")
 
 		frame = ttk.Frame(win, padding=15)
 		frame.pack(fill=tk.BOTH, expand=True)
@@ -475,7 +514,7 @@ class LogAnalyzerApp:
 			if not key and not desc:
 				ttk.Separator(frame, orient='horizontal').grid(row=i, columnspan=2, sticky='ew', pady=5)
 				continue
-			ttk.Label(frame, text=key, font=("Segoe UI", 9, "bold")).grid(row=i, column=0, sticky='w', padx=(0, 10))
+			ttk.Label(frame, text=key, font=("Consolas", 12, "bold")).grid(row=i, column=0, sticky='w', padx=(0, 10))
 			ttk.Label(frame, text=desc).grid(row=i, column=1, sticky='w')
 
 	# --- Status Update ---
@@ -511,8 +550,14 @@ class LogAnalyzerApp:
 					self.update_status(text)
 
 				elif msg_type == 'load_complete':
-					lines, duration, filepath = msg[1], msg[2], msg[3]
+					lines, duration, filepath, rust_eng = msg[1], msg[2], msg[3], msg[4]
+					self.rust_engine = rust_eng
 					self.raw_lines = lines
+
+					# Adjust line number area width based on total lines
+					max_digits = len(str(len(lines)))
+					self.line_number_area.config(width=max(7, max_digits))
+
 					self.load_duration_str = f"{duration:.4f}s"
 					self.current_log_path = filepath
 					self.update_title()
@@ -744,16 +789,24 @@ class LogAnalyzerApp:
 		try:
 			t_start = time.time()
 			file_size = os.path.getsize(filepath)
-			lines = []
 			self.msg_queue.put(('progress', 0, 100, f"Loading {os.path.basename(filepath)}..."))
-			with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-				if file_size < 10 * 1024 * 1024:
-					lines = f.readlines()
-				else:
-					self.msg_queue.put(('progress', 10, 100, "Reading file into memory... (Please wait)"))
-					lines = f.readlines()
+
+			lines = []
+			rust_eng = None
+
+			if HAS_RUST:
+				# Use Rust to load file (Zero-copy for Python)
+				rust_eng = log_engine_rs.LogEngine(filepath)
+				lines = RustLinesProxy(rust_eng)
+			else:
+				# Fallback to Python load
+				with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+					if file_size > 10 * 1024 * 1024:
+						self.msg_queue.put(('progress', 10, 100, "Reading file into memory... (Please wait)"))
+					lines = f.readlines() # List of strings
+
 			t_end = time.time()
-			self.msg_queue.put(('load_complete', lines, t_end - t_start, filepath))
+			self.msg_queue.put(('load_complete', lines, t_end - t_start, filepath, rust_eng))
 		except Exception as e:
 			self.msg_queue.put(('load_error', str(e)))
 
@@ -810,6 +863,11 @@ class LogAnalyzerApp:
 		if self.is_processing and target_indices is None: return # Allow re-entry if internal call? No, lock UI
 		if not self.is_processing: self.set_ui_busy(True)
 
+		# If we have Rust engine, use it!
+		if self.rust_engine:
+			self._start_rust_filter_thread()
+			return
+
 		filters_snapshot = []
 		for f in self.filters:
 			filters_snapshot.append({
@@ -826,6 +884,61 @@ class LogAnalyzerApp:
 		t = threading.Thread(target=self._worker_recalc_jit, args=(filters_snapshot, target_indices, current_tags))
 		t.daemon = True
 		t.start()
+
+	def _start_rust_filter_thread(self):
+		# Prepare filter data for Rust: List of (text, is_regex, is_exclude, is_event, original_idx)
+		# Note: Rust expects this specific tuple structure
+		rust_filters = []
+		for i, f in enumerate(self.filters):
+			if f.enabled:
+				rust_filters.append((f.text, f.is_regex, f.is_exclude, f.is_event, i))
+
+		def run_rust():
+			try:
+				t_start = time.time()
+				# Call Rust
+				# Returns: (tag_codes, filtered_indices, hit_counts, timeline_events)
+				tag_codes, filtered_indices, subset_counts, timeline_raw = self.rust_engine.filter(rust_filters)
+
+				# Map subset counts back to full filter list
+				full_counts = [0] * len(self.filters)
+				for i, count in enumerate(subset_counts):
+					if i < len(rust_filters):
+						original_idx = rust_filters[i][4]
+						full_counts[original_idx] = count
+
+				# Convert tag_codes (u8) back to string tags for Python UI
+				# 0 -> None, 1 -> 'EXCLUDED', 2+i -> 'filter_{i}'
+				# We need to map the 'i' back to the original filter index from rust_filters
+
+				# Create a map for fast lookup: code -> tag_string
+				code_map = {0: None, 1: 'EXCLUDED'}
+				for idx, (_, _, _, _, original_idx) in enumerate(rust_filters):
+					code_map[2 + idx] = f"filter_{original_idx}"
+
+				# Convert all tags (Fast list comprehension)
+				line_tags = [code_map.get(c, None) for c in tag_codes]
+
+				# Process timeline events
+				# Rust returns (ts_str, filter_text, raw_idx)
+				timeline_events_processed = []
+				ts_formats = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y-%H:%M:%S.%f", "%I:%M:%S.%f %p", "%H:%M:%S"]
+
+				for ts_str, f_text, r_idx in timeline_raw:
+					for fmt in ts_formats:
+						try:
+							dt_obj = datetime.datetime.strptime(ts_str.split('.')[0] if "%f" not in fmt else ts_str, fmt)
+							timeline_events_processed.append((dt_obj, f_text, r_idx))
+							break
+						except ValueError: continue
+
+				t_end = time.time()
+				self.msg_queue.put(('filter_complete', line_tags, filtered_indices, t_end - t_start, full_counts, {}, timeline_events_processed, bool(timeline_events_processed)))
+
+			except Exception as e:
+				self.msg_queue.put(('load_error', f"Rust Engine Error: {e}"))
+
+		threading.Thread(target=run_rust, daemon=True).start()
 
 	def _worker_recalc_jit(self, filters_data, target_indices=None, current_tags=None):
 		t_start = time.time()
@@ -887,7 +1000,7 @@ class LogAnalyzerApp:
 			code_lines.append(f"            line_tags[raw_idx] = 'EXCLUDED'")
 			code_lines.append(f"            continue")
 		for _, idx in reg_excludes:
-			code_lines.append(f"        if reg_ex_{idx}.search(line):")
+			code_lines.append(f"        if search_ex_{idx}(line):")
 			code_lines.append(f"            filter_counts[{idx}] += 1")
 			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
 			code_lines.append(f"            line_tags[raw_idx] = 'EXCLUDED'")
@@ -906,27 +1019,28 @@ class LogAnalyzerApp:
 			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
 			code_lines.append(f"            line_tags[raw_idx] = '{tag}'")
 			if filters_data[idx]['is_event']:
-				code_lines.append(f"            match = ts_regex.search(line)")
+				code_lines.append(f"            match = ts_search(line)")
 				code_lines.append(f"            if match: timeline_events.append((match.group(1), '{filters_data[idx]['text']}', raw_idx))")
 
 			first_include = False
 		for _, tag, idx in reg_includes:
 			prefix = "if" if first_include else "elif"
-			code_lines.append(f"        {prefix} reg_inc_{idx}.search(line):")
+			code_lines.append(f"        {prefix} search_inc_{idx}(line):")
 			code_lines.append(f"            filter_counts[{idx}] += 1")
 			code_lines.append(f"            temp_matches[{idx}].append(raw_idx)")
 			code_lines.append(f"            line_tags[raw_idx] = '{tag}'")
 			if filters_data[idx]['is_event']:
-				code_lines.append(f"            match = ts_regex.search(line)")
+				code_lines.append(f"            match = ts_search(line)")
 				code_lines.append(f"            if match: timeline_events.append((match.group(1), '{filters_data[idx]['text']}', raw_idx))")
 
 			first_include = False
 
 		full_code = "\n".join(code_lines)
 		context = {}
-		for rule, idx in reg_excludes: context[f"reg_ex_{idx}"] = rule
-		for rule, _, idx in reg_includes: context[f"reg_inc_{idx}"] = rule
-		context['ts_regex'] = re.compile(ts_regex_str)
+		# [OPTIMIZATION] Method Hoisting: Bind .search methods directly to avoid attribute lookup in the loop
+		for rule, idx in reg_excludes: context[f"search_ex_{idx}"] = rule.search
+		for rule, _, idx in reg_includes: context[f"search_inc_{idx}"] = rule.search
+		context['ts_search'] = re.compile(ts_regex_str).search
 
 		try:
 			exec(full_code, context)
@@ -1213,6 +1327,7 @@ class LogAnalyzerApp:
 		text_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
 		txt_input = tk.Text(text_frame, wrap="word", font=("Segoe UI", 10), height=5)
+		txt_input = tk.Text(text_frame, wrap="word", font=("Consolas", 12), height=5)
 		txt_input.pack(fill=tk.BOTH, expand=True)
 		txt_input.insert("1.0", current_note)
 		txt_input.focus_set()
@@ -1874,6 +1989,11 @@ class LogAnalyzerApp:
 			if new_size != self.font_size:
 				self.font_size = new_size
 				self.font_object.configure(size=self.font_size)
+				
+				# Update Notes Treeview scaling
+				style = ttk.Style(self.root)
+				style.configure("Notes.Treeview", font=("Consolas", self.font_size), rowheight=int(max(20, self.font_size * 2.0)))
+				
 				self.config["font_size"] = self.font_size; self.save_config()
 				# The <Configure> event will handle the rest
 		return "break"
@@ -1906,7 +2026,7 @@ class LogAnalyzerApp:
 		if not query: return
 
 		self.text_area.tag_remove("find_match", "1.0", tk.END)
-		
+
 		nocase = self.find_case_var.get()
 		search_query = query if nocase else query.lower()
 
@@ -1914,7 +2034,7 @@ class LogAnalyzerApp:
 		if total_items == 0: return
 
 		start_index = self.get_current_cache_index()
-		
+
 		# Define search range
 		if backward:
 			indices = list(range(start_index - 1, -1, -1))
@@ -2226,6 +2346,9 @@ class LogAnalyzerApp:
 		except Exception as e: messagebox.showerror("Error", f"JSON Import Failed: {e}")
 
 if __name__ == "__main__":
-	root = TkinterDnD.Tk()
+	if HAS_DND:
+		root = TkinterDnD.Tk()
+	else:
+		root = tk.Tk()
 	app = LogAnalyzerApp(root)
 	root.mainloop()

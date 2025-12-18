@@ -6,9 +6,9 @@ from get_ver import get_version
 # 取得目前版本
 version = get_version()
 # 通用輸入檔名 (注意：您需要手動將 .md 檔名修改為此)
-input_md_file = "Doc\\Log_Analyzer_Docs_EN.md"
+input_md_file = os.path.join("Doc", "Log_Analyzer_Docs_EN.md")
 # 根據版本動態產生輸出檔名
-output_html_file = f"Doc\\Log_Analyzer_{version}_Docs_EN.html"
+output_html_file = os.path.join("Doc", f"Log_Analyzer_{version}_Docs_EN.html")
 
 # --- 樣式與轉換邏輯 (不變) ---
 # 定義 CSS 樣式 (讓 HTML 看起來像 GitHub 風格般漂亮)

@@ -19,6 +19,9 @@
       - [Help](#help)
     - [Shortcuts \& Operations](#shortcuts--operations)
   - [4. Release Notes](#4-release-notes)
+    - [Version 1.5 (2025-12-18)](#version-15-2025-12-18)
+      - [⚡ Rust-Powered Core Engine](#-rust-powered-core-engine)
+      - [🎨 UI \& UX Improvements](#-ui--ux-improvements)
     - [Version 1.4 (2025-12-08)](#version-14-2025-12-08)
       - [🎨 UI \& Navigation Enhancements](#-ui--navigation-enhancements)
       - [✨ Interactive Graphical Event Timeline](#-interactive-graphical-event-timeline)
@@ -153,6 +156,34 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 * **Ctrl + Left/Right Arrow**: Jumps to the previous/next match in the filtered results.
 
 ## 4. Release Notes
+
+### Version 1.5 (2025-12-18)
+
+#### ⚡ Rust-Powered Core Engine
+
+This release introduces a groundbreaking performance upgrade by integrating a
+Rust-based core engine.
+
+*   **Extreme Performance**: Replaced the core file loading and filtering logic
+    with a custom Rust extension (`log_engine_rs`).
+*   **Parallel Processing**: Utilizes the `rayon` library to leverage all CPU
+    cores for filtering, reducing processing time for large files (e.g., 1GB+)
+    from seconds/minutes to sub-second speeds.
+*   **Zero-Copy Loading**: Optimized memory usage by keeping log data in the
+    Rust backend, significantly reducing Python memory overhead.
+*   **Seamless Integration**: The application automatically detects the Rust
+    extension and falls back to the standard Python implementation if not found.
+
+#### 🎨 UI & UX Improvements
+
+*   **Unified Typography**: Standardized the application font to **Consolas**
+    (Size 12) for a consistent, developer-friendly look across all widgets.
+*   **Global Scaling**: The Zoom function (`Ctrl + Scroll`) now scales the
+    Notes View and other UI elements in sync with the Log View.
+*   **Large File Support**: The line number area now dynamically adjusts its
+    width to correctly display line numbers for files exceeding 10 million lines.
+*   **Improved Dialogs**: Adjusted the "Keyboard Shortcuts" window size to
+    prevent text truncation.
 
 ### Version 1.4 (2025-12-08)
 
