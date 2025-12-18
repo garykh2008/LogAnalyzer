@@ -17,6 +17,7 @@ import queue
 import webbrowser
 import sys
 import bisect
+import ctypes
 
 # --- Rust Extension Import ---
 try:
@@ -46,6 +47,46 @@ def bool_to_tat(value):
 def color_to_tat(hex_color):
 	if not hex_color: return ""
 	return hex_color.replace("#", "")
+
+def hex_to_rgb(hex_str):
+	hex_str = hex_str.lstrip('#')
+	if not hex_str: return (0, 0, 0)
+	if len(hex_str) == 3: hex_str = "".join(c*2 for c in hex_str)
+	try:
+		return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
+	except: return (0, 0, 0)
+
+def adjust_color_for_theme(hex_color, is_background, is_dark_mode):
+	"""
+	Dynamically adjusts filter colors for Dark Mode to prevent jarring contrast.
+	- White backgrounds become dark/transparent.
+	- Black text becomes light text.
+	- Bright pastel backgrounds are dimmed.
+	- Dark text is lightened.
+	"""
+	if not hex_color: return hex_color
+	hex_color = hex_color.strip().lower()
+	if not hex_color.startswith("#"): hex_color = "#" + hex_color
+
+	if not is_dark_mode:
+		return hex_color
+
+	# 1. Handle Defaults
+	if is_background and (hex_color == "#ffffff" or hex_color == "#fff"):
+		return "#1e1e1e" # Match dark theme bg
+	if not is_background and (hex_color == "#000000" or hex_color == "#000"):
+		return "#d4d4d4" # Match dark theme text
+
+	# 2. Smart Adjustment based on Luminance
+	rgb = hex_to_rgb(hex_color)
+	lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255.0
+
+	if is_background and lum > 0.4: # Too bright for dark mode bg
+		return '#{:02x}{:02x}{:02x}'.format(*tuple(int(c * 0.25) for c in rgb))
+	if not is_background and lum < 0.5: # Too dark for dark mode text
+		return '#{:02x}{:02x}{:02x}'.format(*tuple(int(c + (255 - c) * 0.6) for c in rgb))
+
+	return hex_color
 
 # --- Core Classes ---
 
@@ -97,17 +138,16 @@ class LogAnalyzerApp:
 		# --- UI Theme ---
 		style = ttk.Style(self.root)
 		style.theme_use("clam")
-		style.configure("Treeview", rowheight=25, font=("Segoe UI", 9))
-		style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
-		# Fixed UI elements (Filters, Buttons, etc.) - Consolas 12
-		style.configure("Treeview", rowheight=25, font=("Consolas", 12))
-		style.configure("Treeview.Heading", font=("Consolas", 12, "bold"))
-		style.map("Treeview", background=[("selected", "#0078D7")])
+
+		# Modern Treeview Style
+		style.configure("Treeview", rowheight=28, font=("Consolas", 11), borderwidth=0)
+		style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), borderwidth=1, relief="flat")
+
 		style.configure("TLabelFrame", padding=5)
 		style.configure("TLabelFrame.Label", font=("Segoe UI", 10, "bold"))
-		style.configure("TButton", padding=5, font=("Segoe UI", 9))
-		style.configure("TLabelFrame.Label", font=("Consolas", 12, "bold"))
-		style.configure("TButton", padding=5, font=("Consolas", 12))
+
+		style.configure("TButton", padding=4, font=("Segoe UI", 10))
+
 		style.configure("TLabel", font=("Consolas", 12))
 		style.configure("TCheckbutton", font=("Consolas", 12))
 		style.configure("TEntry", font=("Consolas", 12))
@@ -274,12 +314,12 @@ class LogAnalyzerApp:
 		self.update_status("Ready")
 
 		# 3. Main Content Area (PanedWindow)
-		self.paned_window = tk.PanedWindow(root, orient=tk.VERTICAL, sashwidth=6, sashrelief=tk.RAISED, bg="#d9d9d9")
+		self.paned_window = tk.PanedWindow(root, orient=tk.VERTICAL, sashwidth=4, sashrelief=tk.FLAT, bg="#d9d9d9")
 		self.paned_window.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
 		# --- Upper: Log View ---
 		# --- Upper Pane: Contains both Log View and Note View ---
-		top_pane = tk.PanedWindow(self.paned_window, orient=tk.HORIZONTAL, sashwidth=6, sashrelief=tk.RAISED, bg="#d9d9d9")
+		top_pane = tk.PanedWindow(self.paned_window, orient=tk.HORIZONTAL, sashwidth=4, sashrelief=tk.FLAT, bg="#d9d9d9")
 
 		# --- Upper-Left: Log View ---
 		self.content_frame = ttk.Frame(top_pane)
@@ -388,7 +428,7 @@ class LogAnalyzerApp:
 		self.log_context_menu.add_command(label="Remove Note", command=self.remove_note)
 
 		# --- Lower: Filter View ---
-		filter_frame = ttk.LabelFrame(self.paned_window, text="Filters (Drag to Reorder)")
+		filter_frame = ttk.LabelFrame(self.paned_window, text="Filters")
 
 		cols = ("enabled", "type", "event", "pattern", "hits")
 		self.tree = ttk.Treeview(filter_frame, columns=cols, show="headings")
@@ -582,14 +622,22 @@ class LogAnalyzerApp:
 
 	# --- Tag Configuration ---
 	def apply_tag_styles(self):
+		is_dark = self.dark_mode.get()
 		for i, flt in enumerate(self.filters):
 			tag_name = f"filter_{i}"
-			self.text_area.tag_config(tag_name, foreground=flt.fore_color, background=flt.back_color)
+			# Adjust colors for theme without modifying the filter object
+			fg = adjust_color_for_theme(flt.fore_color, False, is_dark)
+			bg = adjust_color_for_theme(flt.back_color, True, is_dark)
+			self.text_area.tag_config(tag_name, foreground=fg, background=bg)
+
+			# Update Filter List (Treeview) colors as well
+			self.tree.tag_configure(f"row_{i}", foreground=fg, background=bg)
+
 		self.text_area.tag_config("current_line", background="#0078D7", foreground="#FFFFFF")
 		if self.dark_mode.get():
-			self.text_area.tag_config("note_line", background="#5a5332", foreground="#FFFFFF")
+			self.text_area.tag_config("note_line", background="#3a3d41", foreground="#d4d4d4")
 		else:
-			self.text_area.tag_config("note_line", background="#FFFACD", foreground="#000000")
+			self.text_area.tag_config("note_line", background="#fffbdd", foreground="#000000")
 
 		self.text_area.tag_config("find_match", background="#FFA500", foreground="#000000")
 
@@ -756,18 +804,41 @@ class LogAnalyzerApp:
 		is_dark = self.dark_mode.get()
 
 		# Define color palettes
+		# VS Code-inspired Palette
 		c = {
-			"bg": "#2e2e2e" if is_dark else "#f0f0f0",
-			"fg": "#dcdcdc" if is_dark else "#000000",
-			"bg_widget": "#3c3c3c" if is_dark else "#ffffff",
-			"fg_widget": "#dcdcdc" if is_dark else "#000000",
-			"bg_disabled": "#505050" if is_dark else "#d9d9d9",
-			"fg_disabled": "#888888" if is_dark else "#a3a3a3",
-			"bg_select": "#0078D7",
-			"fg_select": "#FFFFFF",
-			"bg_pane": "#4a4a4a" if is_dark else "#d9d9d9",
-			"bg_line_num": "#383838" if is_dark else "#f0f0f0",
+			"bg": "#1e1e1e" if is_dark else "#f3f3f3",
+			"fg": "#cccccc" if is_dark else "#1f1f1f",
+			"bg_widget": "#1e1e1e" if is_dark else "#ffffff",
+			"fg_widget": "#d4d4d4" if is_dark else "#1f1f1f",
+			"bg_disabled": "#2d2d2d" if is_dark else "#e0e0e0",
+			"fg_disabled": "#6e6e6e" if is_dark else "#888888",
+			"bg_select": "#264f78" if is_dark else "#0060c0",
+			"fg_select": "#ffffff",
+			"bg_pane": "#252526" if is_dark else "#d0d0d0",
+			"bg_line_num": "#1e1e1e" if is_dark else "#f8f8f8",
+			"fg_line_num": "#858585" if is_dark else "#2b91af",
+			"bg_tree": "#252526" if is_dark else "#ffffff",
+			"fg_tree": "#cccccc" if is_dark else "#000000",
+			"bg_head": "#333333" if is_dark else "#e1e1e1",
+			"fg_head": "#eeeeee" if is_dark else "#000000",
+			"scrollbar_bg": "#2e2e2e" if is_dark else "#f3f3f3",
+			"scrollbar_thumb": "#424242" if is_dark else "#c1c1c1",
+			"scrollbar_hover": "#4f4f4f" if is_dark else "#a8a8a8",
+			"stripe_odd": "#252526" if is_dark else "#ffffff",
+			"stripe_even": "#2d2d2d" if is_dark else "#f9f9f9",
 		}
+
+		# Windows Title Bar Dark Mode
+		if sys.platform == "win32":
+			try:
+				# DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+				value = 1 if is_dark else 0
+				hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
+				if hwnd == 0: hwnd = self.root.winfo_id()
+
+				ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(ctypes.c_int(value)), 4)
+			except Exception:
+				pass
 
 		# --- Apply to root and standard tk widgets ---
 		self.root.config(bg=c["bg"])
@@ -776,7 +847,7 @@ class LogAnalyzerApp:
 
 		# Log View
 		self.text_area.config(bg=c["bg_widget"], fg=c["fg_widget"], insertbackground=c["fg_widget"])
-		self.line_number_area.config(bg=c["bg_line_num"], fg=c["fg_disabled"])
+		self.line_number_area.config(bg=c["bg_line_num"], fg=c["fg_line_num"])
 
 		self.marker_canvas.config(bg=c["bg_line_num"]) # Match line number bg or scrollbar track
 		# --- Apply to ttk Styles ---
@@ -787,20 +858,40 @@ class LogAnalyzerApp:
 		style.configure("TFrame", background=c["bg"])
 		style.configure("TLabel", background=c["bg"], foreground=c["fg"])
 		style.configure("TButton", background=c["bg_widget"], foreground=c["fg"])
-		style.map("TButton", background=[("active", c["bg_select"])])
+		style.map("TButton",
+			background=[("active", c["bg_select"]), ("pressed", c["bg_select"])],
+			foreground=[("active", c["fg_select"]), ("pressed", c["fg_select"])]
+		)
 		style.configure("TCheckbutton", background=c["bg"], foreground=c["fg"])
 		style.map("TCheckbutton", background=[("active", c["bg"])])
 
 		# Paned Window Sash
 		style.configure("Sash", background=c["bg_pane"])
 
+		# Scrollbars (Flat Modern Look)
+		# Remove grip, border, and 3D relief for a clean look
+		style.configure("Vertical.TScrollbar", gripcount=0, borderwidth=0, relief="flat",
+						background=c["scrollbar_thumb"], darkcolor=c["scrollbar_bg"], lightcolor=c["scrollbar_bg"],
+						troughcolor=c["scrollbar_bg"], bordercolor=c["scrollbar_bg"], arrowcolor=c["fg"])
+		style.map("Vertical.TScrollbar", background=[("active", c["scrollbar_hover"]), ("pressed", c["bg_select"])])
+
+		style.configure("Horizontal.TScrollbar", gripcount=0, borderwidth=0, relief="flat",
+						background=c["scrollbar_thumb"], darkcolor=c["scrollbar_bg"], lightcolor=c["scrollbar_bg"],
+						troughcolor=c["scrollbar_bg"], bordercolor=c["scrollbar_bg"], arrowcolor=c["fg"])
+		style.map("Horizontal.TScrollbar", background=[("active", c["scrollbar_hover"]), ("pressed", c["bg_select"])])
+
 		# Treeview
-		style.configure("Treeview", background=c["bg_widget"], foreground=c["fg_widget"], fieldbackground=c["bg_widget"])
+		style.configure("Treeview", background=c["bg_tree"], foreground=c["fg_tree"], fieldbackground=c["bg_tree"])
 		style.map("Treeview", background=[("selected", c["bg_select"])], foreground=[("selected", c["fg_select"])])
-		style.configure("Treeview.Heading", background=c["bg"], foreground=c["fg"])
+		style.configure("Treeview.Heading", background=c["bg_head"], foreground=c["fg_head"])
 
 		# Status Bar
 		self.status_label.config(background=c["bg"], foreground=c["fg"])
+
+		# Apply Stripes to Notes Treeview if it exists
+		if hasattr(self, 'notes_tree') and self.notes_tree.winfo_exists():
+			self.notes_tree.tag_configure("odd", background=c["stripe_odd"])
+			self.notes_tree.tag_configure("even", background=c["stripe_even"])
 
 		# Re-apply tag styles to update note color
 		self.apply_tag_styles()
@@ -1157,6 +1248,7 @@ class LogAnalyzerApp:
 		dialog.transient(self.root)
 		dialog.grab_set()
 		dialog.geometry("400x200")
+		dialog.config(bg=self.root.cget("bg")) # Match theme
 
 		# Buttons (Pack first to ensure visibility at bottom)
 		btn_frame = ttk.Frame(dialog, padding=10)
@@ -1318,6 +1410,7 @@ class LogAnalyzerApp:
 			self.notes_window.title("Notes")
 			geom = self.config.get("notes_window_geometry", "400x500")
 			self.notes_window.geometry(geom)
+			self.notes_window.config(bg=self.root.cget("bg")) # Match theme
 			self.notes_window.protocol("WM_DELETE_WINDOW", self.on_notes_window_close)
 
 		# Re-create the widgets inside the Toplevel window
@@ -1394,7 +1487,7 @@ class LogAnalyzerApp:
 			self.notes_tree.delete(item)
 
 		sorted_indices = sorted(self.notes.keys())
-		for idx in sorted_indices:
+		for i, idx in enumerate(sorted_indices):
 			line_num = idx + 1
 
 			# Extract timestamp from the raw log line
@@ -1411,7 +1504,8 @@ class LogAnalyzerApp:
 					timestamp_str = match.group(1)
 
 			content = self.notes[idx].replace("\n", " ") # Flatten for display
-			self.notes_tree.insert("", "end", values=(line_num, timestamp_str, content), tags=(str(idx),))
+			tag_stripe = "even" if i % 2 == 0 else "odd"
+			self.notes_tree.insert("", "end", values=(line_num, timestamp_str, content), tags=(str(idx), tag_stripe))
 
 	def on_note_double_click(self, event):
 		item_id = self.notes_tree.identify_row(event.y)
@@ -1510,6 +1604,7 @@ class LogAnalyzerApp:
 		dialog.grab_set()
 		dialog.geometry("300x120")
 		dialog.resizable(False, False)
+		dialog.config(bg=self.root.cget("bg")) # Match theme
 
 		main_frame = ttk.Frame(dialog, padding=10)
 		main_frame.pack(fill=tk.BOTH, expand=True)
@@ -2071,6 +2166,7 @@ class LogAnalyzerApp:
 
 	def refresh_filter_list(self):
 		for item in self.tree.get_children(): self.tree.delete(item)
+		is_dark = self.dark_mode.get()
 		for idx, flt in enumerate(self.filters):
 			en_str = "☑" if flt.enabled else "☐"
 			type_str = "Excl" if flt.is_exclude else ("Regex" if flt.is_regex else "Text")
@@ -2078,7 +2174,10 @@ class LogAnalyzerApp:
 			item_id = self.tree.insert("", "end", values=(en_str, type_str, event_str, flt.text, str(flt.hit_count)))
 			tag_name = f"row_{idx}"
 			self.tree.item(item_id, tags=(tag_name,))
-			self.tree.tag_configure(tag_name, foreground=flt.fore_color, background=flt.back_color)
+
+			fg = adjust_color_for_theme(flt.fore_color, False, is_dark)
+			bg = adjust_color_for_theme(flt.back_color, True, is_dark)
+			self.tree.tag_configure(tag_name, foreground=fg, background=bg)
 
 	def on_tree_click(self, event):
 		if self.is_processing: return
@@ -2180,6 +2279,7 @@ class LogAnalyzerApp:
 		dialog.transient(self.root) # Make it a child of the main window
 		dialog.grab_set()
 		dialog.geometry("400x200")
+		dialog.config(bg=self.root.cget("bg")) # Match theme
 
 		main_frame = ttk.Frame(dialog, padding=10)
 		main_frame.pack(fill=tk.BOTH, expand=True)
