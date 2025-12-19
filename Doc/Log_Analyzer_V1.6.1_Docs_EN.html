@@ -1,0 +1,450 @@
+
+	<!DOCTYPE html>
+	<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Log Analyzer Documentation ( V1.6.1 )</title>
+		
+<style>
+	body {
+		font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+		line-height: 1.6;
+		color: #24292e;
+		max-width: 900px;
+		margin: 0 auto;
+		padding: 45px;
+	}
+	h1, h2, h3 { border-bottom: 1px solid #eaecef; padding-bottom: .3em; }
+	code { background-color: #f6f8fa; padding: 0.2em 0.4em; border-radius: 3px; font-family: Consolas, "Courier New", monospace; }
+	pre { background-color: #f6f8fa; padding: 16px; overflow: auto; border-radius: 3px; }
+	pre code { background-color: transparent; padding: 0; }
+	blockquote { border-left: 0.25em solid #dfe2e5; color: #6a737d; padding: 0 1em; margin: 0; }
+	table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
+	th, td { border: 1px solid #dfe2e5; padding: 6px 13px; }
+	th { background-color: #f6f8fa; font-weight: 600; }
+	tr:nth-child(2n) { background-color: #f6f8fa; }
+	a { color: #0366d6; text-decoration: none; }
+	a:hover { text-decoration: underline; }
+</style>
+
+	</head>
+	<body>
+		<h1 id="log-analyzer-user-manual">Log Analyzer User Manual</h1>
+<h2 id="table-of-contents">Table of Contents</h2>
+<ul>
+<li><a href="#log-analyzer-user-manual">Log Analyzer User Manual</a></li>
+<li><a href="#table-of-contents">Table of Contents</a></li>
+<li><a href="#1-introduction">1. Introduction</a></li>
+<li><a href="#2-key-features">2. Key Features</a><ul>
+<li><a href="#-high-performance">🚀 High Performance</a></li>
+<li><a href="#-powerful-filtering-system">🔍 Powerful Filtering System</a></li>
+<li><a href="#-file--compatibility">📂 File \&amp; Compatibility</a></li>
+<li><a href="#️-intuitive-ui">🖥️ Intuitive UI</a></li>
+</ul>
+</li>
+<li><a href="#3-user-guide">3. User Guide</a><ul>
+<li><a href="#menu-bar">Menu Bar</a></li>
+<li><a href="#file">File</a></li>
+<li><a href="#filter">Filter</a></li>
+<li><a href="#view">View</a></li>
+<li><a href="#notes">Notes</a></li>
+<li><a href="#help">Help</a></li>
+<li><a href="#shortcuts--operations">Shortcuts \&amp; Operations</a></li>
+</ul>
+</li>
+<li><a href="#4-release-notes">4. Release Notes</a><ul>
+<li><a href="#version-16-2025-12-19">Version 1.6 (2025-12-19)</a></li>
+<li><a href="#-core-engine-update">⚡ Core Engine Update</a></li>
+<li><a href="#version-15-2025-12-18">Version 1.5 (2025-12-18)</a></li>
+<li><a href="#-rust-powered-core-engine">⚡ Rust-Powered Core Engine</a></li>
+<li><a href="#-ui--ux-improvements">🎨 UI \&amp; UX Improvements</a></li>
+<li><a href="#version-14-2025-12-08">Version 1.4 (2025-12-08)</a></li>
+<li><a href="#-ui--navigation-enhancements">🎨 UI \&amp; Navigation Enhancements</a></li>
+<li><a href="#-interactive-graphical-event-timeline">✨ Interactive Graphical Event Timeline</a></li>
+<li><a href="#version-13-2025-12-02">Version 1.3 (2025-12-02)</a></li>
+<li><a href="#-comprehensive-notes-system">✨ Comprehensive Notes System</a></li>
+<li><a href="#-ui--user-experience-overhaul">🎨 UI \&amp; User Experience Overhaul</a></li>
+<li><a href="#version-12-2025-11-28">Version 1.2 (2025-11-28)</a></li>
+<li><a href="#-new-features">✨ New Features</a></li>
+<li><a href="#version-11-2025-11-28">Version 1.1 (2025-11-28)</a></li>
+<li><a href="#-performance--logic">⚡ Performance \&amp; Logic</a></li>
+<li><a href="#-fixes--changes">🛠 Fixes \&amp; Changes</a></li>
+<li><a href="#version-10-2025-11-27">Version 1.0 (2025-11-27)</a></li>
+<li><a href="#-new-features-1">✨ New Features</a></li>
+<li><a href="#-performance-improvements">⚡ Performance Improvements</a></li>
+<li><a href="#-bug-fixes">🐛 Bug Fixes</a></li>
+</ul>
+</li>
+<li><a href="#5-system-requirements">5. System Requirements</a></li>
+</ul>
+<hr />
+<h2 id="1-introduction">1. Introduction</h2>
+<p><strong>Log Analyzer</strong> is a high-performance log analysis tool designed specifically for developers and system administrators. It addresses the common issue of lag and unresponsiveness found in traditional text editors when opening large log files, providing powerful features for filtering, searching, and syntax highlighting.</p>
+<p>Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dynamic compilation technology, ensuring a smooth interface and rapid filtering operations even when handling log files that are hundreds of MBs in size or contain tens of millions of lines.</p>
+<h2 id="2-key-features">2. Key Features</h2>
+<h3 id="high-performance">🚀 High Performance</h3>
+<ul>
+<li>
+<p><strong>Multi-threading Architecture</strong>: File reading and filtering operations are performed in the background, ensuring the main window (UI) always remains responsive and eliminating "Not Responding" scenarios.</p>
+<ul>
+<li>
+<p><strong>Rust-Powered Core Engine</strong>: The core filtering logic is powered by a custom Rust extension (<code>log_engine_rs</code>), replacing the legacy Python implementation.</p>
+</li>
+<li>
+<p><strong>Parallel Processing</strong>: Utilizes the <code>rayon</code> library to leverage all CPU cores, enabling sub-second filtering speeds even for massive log files (e.g., 1GB+).</p>
+</li>
+</ul>
+</li>
+</ul>
+<h3 id="powerful-filtering-system">🔍 Powerful Filtering System</h3>
+<ul>
+<li>
+<p><strong>Include &amp; Exclude</strong>: Supports positive filtering (showing only lines containing keywords) and negative exclusion (hiding lines containing keywords).</p>
+</li>
+<li>
+<p><strong>Regular Expressions (Regex)</strong>: Supports Python standard regular expressions for complex pattern matching.</p>
+</li>
+<li>
+<p><strong>Custom Color Highlighting</strong>: Each filter rule can have custom foreground and background colors, making critical information stand out.</p>
+</li>
+<li>
+<p><strong>Instant Toggle</strong>: Specific filters can be checked/unchecked at any time with immediate view updates.</p>
+</li>
+</ul>
+<h3 id="file-compatibility">📂 File &amp; Compatibility</h3>
+<ul>
+<li>
+<p><strong>TAT Format Support</strong>: Fully compatible with <code>TextAnalysisTool.NET</code>'s <code>.tat</code> file format, allowing for seamless import/export of existing filter rules.</p>
+</li>
+<li>
+<p><strong>JSON Support</strong>: Built-in functionality for importing/exporting filter rules in JSON format (Advanced feature).</p>
+</li>
+</ul>
+<h3 id="intuitive-ui">🖥️ Intuitive UI</h3>
+<ul>
+<li>
+<p><strong>Progress Bar</strong>: A status bar at the bottom provides real-time visual feedback on loading and filtering progress.</p>
+</li>
+<li>
+<p><strong>Detailed Statistics</strong>: The status bar displays current Load Time, Filter Time, and displayed line count statistics.</p>
+</li>
+<li>
+<p><strong>Drag-and-Drop Sorting</strong>: Filter priority can be adjusted simply by dragging the filter list items.</p>
+</li>
+</ul>
+<h2 id="3-user-guide">3. User Guide</h2>
+<h3 id="menu-bar">Menu Bar</h3>
+<h4 id="file">File</h4>
+<ul>
+<li>
+<p><strong>Open Log...</strong>: Open a log file (.log, .txt, <em>.</em>).</p>
+</li>
+<li>
+<p><strong>Open Recent</strong>: Provides a list of the last 10 opened files for quick access. Includes an option to clear the list.</p>
+</li>
+<li>
+<p><strong>Load Filters</strong>: Import filter rule files in <code>.tat</code> or <code>.xml</code> format.</p>
+</li>
+<li>
+<p><strong>Save Filters</strong>: Save current filter rules to the file (overwrites the current file).</p>
+</li>
+<li>
+<p><strong>Save Filters As</strong>: Save current filter rules as a new file.</p>
+</li>
+<li>
+<p><strong>Exit</strong>: Close the application.</p>
+</li>
+</ul>
+<h4 id="filter">Filter</h4>
+<ul>
+<li>
+<p><strong>Add Filter</strong>: Open the dialog to add a new filter rule.</p>
+</li>
+<li>
+<p><strong>Show Filtered Only (Ctrl+H)</strong>:</p>
+</li>
+<li>
+<p><strong>Checked</strong>: Displays only lines that match the filter rules.</p>
+</li>
+<li>
+<p><strong>Unchecked</strong>: Displays all original log lines, but keeps keyword highlighting (Raw Mode).</p>
+</li>
+</ul>
+<h4 id="view">View</h4>
+<ul>
+<li>
+<p><strong>Find... (Ctrl+F)</strong>: Opens a search bar at the top of the log view to find text within the entire log file.</p>
+</li>
+<li>
+<p><strong>Go to Line... (Ctrl+G)</strong>: Opens a dialog to jump directly to a specific line number.</p>
+</li>
+<li>
+<p><strong>Dark Mode</strong>: Toggles a persistent, application-wide dark theme for improved viewing in low-light environments.</p>
+</li>
+<li>
+<p><strong>Show Timeline</strong>: Opens a new window displaying a graphical timeline of events.</p>
+<ul>
+<li>This option is only enabled if the loaded log file contains recognizable timestamps.</li>
+<li>Events are filters that have been marked with the <strong>"As Event"</strong> property. The color of the event point on the timeline corresponds to the filter's background color.</li>
+<li>Hovering over an event point shows its timestamp, line number, and content; clicking it jumps to that line in the log view.</li>
+</ul>
+</li>
+</ul>
+<h4 id="notes">Notes</h4>
+<ul>
+<li>
+<p><strong>Show Notes</strong>: Toggles the visibility of the Notes View panel.</p>
+</li>
+<li>
+<p><strong>Show in Separate Window</strong>: When "Show Notes" is active, this toggles the Notes View between being docked in the main window or appearing as a separate, floating window.</p>
+</li>
+<li>
+<p><strong>Save Notes to Text file</strong>: Exports all current notes to a human-readable <code>.txt</code> file, formatted as <code>Line &lt;Tab&gt; Timestamp &lt;Tab&gt; Note Content</code>.</p>
+</li>
+</ul>
+<h4 id="help">Help</h4>
+<ul>
+<li><strong>Keyboard Shortcuts</strong>: Displays a window with a summary of all keyboard shortcuts.</li>
+<li><strong>Documentation</strong>: Opens this user manual.</li>
+<li><strong>About</strong>: Displays application version information.</li>
+</ul>
+<h3 id="shortcuts-operations">Shortcuts &amp; Operations</h3>
+<ul>
+<li>
+<p><strong>Double-click Log Content</strong>: Selects text and quickly adds it as a new Filter.</p>
+</li>
+<li>
+<p><strong><code>c</code> key on Log View</strong>: After selecting a line, press <code>c</code> to quickly add or edit a note for that line.</p>
+</li>
+<li>
+<p><strong>Double-click Filter List</strong>: Edits the selected filter rule.</p>
+</li>
+<li>
+<p><strong>Space</strong>: Toggles the Enable/Disable status of the selected filter in the list.</p>
+</li>
+<li>
+<p><strong>Delete</strong>: Removes the selected filter.</p>
+</li>
+<li>
+<p><strong>Ctrl + H</strong>: Toggles between "Show Filtered Only" and "Show All".</p>
+</li>
+<li>
+<p><strong>Ctrl + Scroll Wheel</strong>: Adjusts the font size.</p>
+</li>
+<li>
+<p><strong>Ctrl + Left/Right Arrow</strong>: Jumps to the previous/next match in the filtered results.</p>
+</li>
+</ul>
+<h2 id="4-release-notes">4. Release Notes</h2>
+<h3 id="version-16-2025-12-19">Version 1.6 (2025-12-19)</h3>
+<h4 id="core-engine-update">⚡ Core Engine Update</h4>
+<ul>
+<li><strong>Rust Engine Mandatory</strong>: The legacy Python filtering fallback has been removed. The application now strictly relies on the high-performance Rust core (<code>log_engine_rs</code>) for all file loading and filtering operations.</li>
+<li><strong>Streamlined Architecture</strong>: This change reduces code complexity and ensures that all users benefit from the multi-threaded, zero-copy performance optimizations introduced in V1.5.</li>
+<li><strong>Dependency Update</strong>: The Rust toolchain is now a required dependency for building the application from source.</li>
+</ul>
+<h3 id="version-15-2025-12-18">Version 1.5 (2025-12-18)</h3>
+<h4 id="rust-powered-core-engine">⚡ Rust-Powered Core Engine</h4>
+<p>This release introduces a groundbreaking performance upgrade by integrating a
+Rust-based core engine.</p>
+<ul>
+<li><strong>Extreme Performance</strong>: Replaced the core file loading and filtering logic
+    with a custom Rust extension (<code>log_engine_rs</code>).</li>
+<li><strong>Parallel Processing</strong>: Utilizes the <code>rayon</code> library to leverage all CPU
+    cores for filtering, reducing processing time for large files (e.g., 1GB+)
+    from seconds/minutes to sub-second speeds.</li>
+<li><strong>Zero-Copy Loading</strong>: Optimized memory usage by keeping log data in the
+    Rust backend, significantly reducing Python memory overhead.</li>
+<li><strong>Seamless Integration</strong>: The application automatically detects the Rust
+    extension and falls back to the standard Python implementation if not found.</li>
+</ul>
+<h4 id="ui-ux-improvements">🎨 UI &amp; UX Improvements</h4>
+<ul>
+<li><strong>Unified Typography</strong>: Standardized the application font to <strong>Consolas</strong>
+    (Size 12) for a consistent, developer-friendly look across all widgets.</li>
+<li><strong>Global Scaling</strong>: The Zoom function (<code>Ctrl + Scroll</code>) now scales the
+    Notes View and other UI elements in sync with the Log View.</li>
+<li><strong>Large File Support</strong>: The line number area now dynamically adjusts its
+    width to correctly display line numbers for files exceeding 10 million lines.</li>
+<li><strong>Improved Dialogs</strong>: Adjusted the "Keyboard Shortcuts" window size to
+    prevent text truncation.</li>
+</ul>
+<h3 id="version-14-2025-12-08">Version 1.4 (2025-12-08)</h3>
+<h4 id="ui-navigation-enhancements">🎨 UI &amp; Navigation Enhancements</h4>
+<ul>
+<li><strong>Full Dark Mode</strong>: A new "View" -&gt; "Dark Mode" option toggles a persistent, application-wide dark theme. The theme covers all elements, including the main window, dialogs, timeline, and notes view, for a comfortable experience in low-light environments.</li>
+<li><strong>Recent Files Menu</strong>: The "File" menu now includes an "Open Recent" list, providing one-click access to the last 10 opened log files.</li>
+<li><strong>Find (Ctrl+F)</strong>: A powerful new find bar appears at the top of the log view, allowing full-text search across the <em>entire</em> log file (not just the visible portion).<ul>
+<li>Features include "Next (F3)" / "Previous (Shift+F3)", case sensitivity, and wrap-around search.</li>
+<li>The found line is automatically centered and set as the new focus line for a seamless workflow.</li>
+<li>The status bar provides clear feedback when a search completes.</li>
+</ul>
+</li>
+<li><strong>Go to Line (Ctrl+G)</strong>: A new dialog allows you to instantly jump to any specific line number within the current view (filtered or full).</li>
+</ul>
+<h4 id="interactive-graphical-event-timeline">✨ Interactive Graphical Event Timeline</h4>
+<p>This release introduces a major new feature: a graphical, interactive timeline to visualize log events over time. This allows users to quickly identify event clusters, correlations, and anomalies.</p>
+<ul>
+<li><strong>New Timeline Window</strong>: A new "View" -&gt; "Show Timeline" menu option opens a resizable window that plots events based on their timestamps.</li>
+<li><strong>Interactive Navigation</strong>:<ul>
+<li><strong>Zoom</strong>: Use the mouse wheel to zoom in and out, centered on the cursor's position.</li>
+<li><strong>Pan</strong>: Click and drag to pan the timeline horizontally.</li>
+</ul>
+</li>
+<li><strong>Event Configuration &amp; Management</strong>:<ul>
+<li>The "Add/Edit Filter" dialog now includes an <strong>"As Event"</strong> checkbox.</li>
+<li>A new "Event" column in the filter list provides at-a-glance status (✓).</li>
+<li>Quickly toggle a filter's event status via the right-click context menu.</li>
+</ul>
+</li>
+<li><strong>Smart Tooltips &amp; Interaction</strong>:<ul>
+<li>Hovering over an event point displays a sleek, dark-themed tooltip with the precise timestamp (including milliseconds), line number, and filter text.</li>
+<li>The tooltip intelligently repositions itself to avoid being clipped by the window edges.</li>
+<li>Clicking an event point jumps directly to that line in the main log view.</li>
+</ul>
+</li>
+<li><strong>Live Updates &amp; Persistence</strong>:<ul>
+<li>The timeline window automatically refreshes when filters are modified or event statuses are changed.</li>
+<li>The "As Event" setting is now saved in the <code>.tat</code> filter file, ensuring persistence across sessions while maintaining compatibility with <code>TextAnalysisTool.NET</code>.</li>
+</ul>
+</li>
+</ul>
+<h3 id="version-13-2025-12-02">Version 1.3 (2025-12-02)</h3>
+<h4 id="comprehensive-notes-system">✨ Comprehensive Notes System</h4>
+<p>This release introduces a powerful notes system, allowing users to annotate, save, and share their findings directly within the application.</p>
+<ul>
+<li><strong>Integrated Note View</strong>: A new "Notes" panel can be docked to the right of the log view, allowing for simultaneous analysis and note-taking.</li>
+<li><strong>Flexible Layout</strong>: The Notes View can be toggled between a docked panel and a separate floating window via the "Notes" menu to suit any workflow.</li>
+<li><strong>Automatic Save/Load</strong>: Notes can be exported to a <code>.note</code> (JSON) file, which is automatically named after the log file. When reloading the same log, the application will detect the note file and ask to import it, preserving your work across sessions.</li>
+<li><strong>Plain Text Export</strong>: Added an option to "Save Notes to Text file," exporting notes in a clean, readable <code>.txt</code> format.</li>
+<li><strong>Timestamp Extraction</strong>: The Notes View automatically extracts and displays the timestamp from the corresponding log line, providing crucial context.</li>
+<li><strong>Quick-Add Shortcut</strong>: In the log view, simply select a line and press the <code>c</code> key to instantly add or edit a note.</li>
+</ul>
+<h4 id="ui-user-experience-overhaul">🎨 UI &amp; User Experience Overhaul</h4>
+<p>This release brings a modernized look and feel to the application with a complete UI refresh.</p>
+<ul>
+<li>
+<p><strong>Modernized UI Theme</strong>:</p>
+<ul>
+<li>Adopted the <strong>'clam'</strong> theme for a cleaner, more professional appearance.</li>
+<li>Replaced standard Tkinter widgets with <strong>ttk widgets</strong> (Buttons, Labels, Scrollbars, Frames) for better consistency and style.</li>
+<li>Updated the default font to <strong>Segoe UI</strong> for improved readability on Windows.</li>
+</ul>
+</li>
+<li>
+<p><strong>Enhanced Filter Dialog</strong>:</p>
+<ul>
+<li>Refactored the "Add/Edit Filter" dialog to use modern widgets.</li>
+<li>Improved layout and spacing for better usability.</li>
+<li>Added a <strong>Cancel</strong> button and made the dialog <strong>modal</strong> to prevent state issues.</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h3 id="version-12-2025-11-28">Version 1.2 (2025-11-28)</h3>
+<p><strong>✨ New Feature Update</strong></p>
+<p>This release introduces a major usability feature for a more intuitive workflow.</p>
+<h4 id="new-features">✨ New Features</h4>
+<ul>
+<li><strong>Drag and Drop to Open</strong>: Users can now drag a log file (<code>.log</code>, <code>.txt</code>, etc.) directly onto the application window to open it.</li>
+</ul>
+<hr />
+<h3 id="version-11-2025-11-28">Version 1.1 (2025-11-28)</h3>
+<p><strong>🚀 Performance &amp; Stability Update</strong></p>
+<p>This release focuses on optimizing user interaction speed and fixing regression bugs found in v1.0.</p>
+<h4 id="performance-logic">⚡ Performance &amp; Logic</h4>
+<ul>
+<li>
+<p><strong>Instant View Switching</strong>: The "Show Filtered Only" (<code>Ctrl+H</code>) toggle is now instantaneous. View generation is decoupled from data processing, eliminating lag when switching modes.</p>
+</li>
+<li>
+<p><strong>Smart Filter Toggling</strong>:</p>
+<ul>
+<li><strong>Disabling</strong> a filter now triggers an instant view refresh without rescanning the file.</li>
+<li><strong>Re-enabling</strong> a previously calculated filter uses cached data for instant display.</li>
+</ul>
+</li>
+<li>
+<p><strong>Incremental Scanning</strong>: Enabling a new filter now only scans lines that haven't been matched by existing filters, significantly reducing processing time for large files.</p>
+</li>
+</ul>
+<h4 id="fixes-changes">🛠 Fixes &amp; Changes</h4>
+<ul>
+<li>
+<p><strong>Default Behavior</strong>: "Show Filtered Only" is now <strong>Disabled</strong> by default to provide a full context view upon loading.</p>
+</li>
+<li>
+<p><strong>Bug Fix</strong>: Restored missing mouse wheel scrolling and zoom (<code>Ctrl + Wheel</code>) functionality that was affected in the previous threading refactor.</p>
+</li>
+<li>
+<p><strong>Bug Fix</strong>: Resolved <code>AttributeError</code> related to scrollbar event handling.</p>
+</li>
+</ul>
+<hr />
+<h3 id="version-10-2025-11-27">Version 1.0 (2025-11-27)</h3>
+<p><strong>🎉 First Official Release!</strong></p>
+<p>This version marks a significant milestone for Log Analyzer, focusing on a complete overhaul of the user experience and extreme optimization of core performance.</p>
+<h4 id="new-features_1">✨ New Features</h4>
+<ul>
+<li>
+<p><strong>New Menu Bar Design</strong>: Refactored the crowded toolbar into standard File / Filter / Help menus for a cleaner interface.</p>
+</li>
+<li>
+<p><strong>About Dialog</strong>: Added a window to display version information.</p>
+</li>
+<li>
+<p><strong>Improved Progress Feedback</strong>: Added a bottom Progress Bar to provide clear visual feedback when processing large files.</p>
+</li>
+</ul>
+<h4 id="performance-improvements">⚡ Performance Improvements</h4>
+<ul>
+<li>
+<p><strong>Multi-threaded Architecture Refactor</strong>:</p>
+</li>
+<li>
+<p>Moved file I/O and filtering operations to a background Worker Thread.</p>
+</li>
+<li>
+<p>Resolved the issue of the window "freezing" (Not Responding) when processing large files.</p>
+</li>
+<li>
+<p><strong>JIT Loop Unrolling Optimization</strong>:</p>
+</li>
+<li>
+<p>Deeply optimized the filter calculation logic.</p>
+</li>
+<li>
+<p>Eliminated loop iteration overhead by dynamically generating Python code.</p>
+</li>
+<li>
+<p><strong>Performance Boost</strong>: Reduced filtering time for 10 million log lines from <strong>74 seconds</strong> to <strong>30 seconds</strong>.</p>
+</li>
+</ul>
+<h4 id="bug-fixes">🐛 Bug Fixes</h4>
+<ul>
+<li>
+<p>Fixed a crash (<code>tag "current_line" isn't defined</code>) that could occur when clicking the window before a file was loaded or filters initialized.</p>
+</li>
+<li>
+<p>Fixed an issue where the Status Bar would fail to display Load Time / Filter Time in certain scenarios.</p>
+</li>
+<li>
+<p>Removed trailing whitespace from the source code (Code Cleanup).</p>
+</li>
+</ul>
+<h2 id="5-system-requirements">5. System Requirements</h2>
+<ul>
+<li>
+<p><strong>OS</strong>: Windows / macOS / Linux</p>
+</li>
+<li>
+<p><strong>Runtime</strong>: Python 3.6+</p>
+</li>
+<li>
+<p><strong>Dependencies</strong>: Tkinter (Usually included with Python installation)</p>
+</li>
+</ul>
+	</body>
+	</html>
+	
