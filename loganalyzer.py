@@ -124,7 +124,12 @@ class LogAnalyzerApp:
 		# Config
 		self.config_file = "app_config.json"
 		self.config = self.load_config()
-		self.root.geometry(self.config.get("main_window_geometry", "1000x750"))
+		self.non_maximized_geometry = self.config.get("main_window_geometry", "1000x750")
+		self.root.geometry(self.non_maximized_geometry)
+		if self.config.get("window_maximized", False):
+			try:
+				self.root.state("zoomed")
+			except Exception: pass
 
 		# Set application icon
 		try:
@@ -140,8 +145,8 @@ class LogAnalyzerApp:
 		style.theme_use("clam")
 
 		# Modern Treeview Style
-		style.configure("Treeview", rowheight=28, font=("Consolas", 11), borderwidth=0)
-		style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), borderwidth=1, relief="flat")
+		style.configure("Treeview", rowheight=28, font=("Consolas", 11), borderwidth=1, relief="solid")
+		style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), borderwidth=1, relief="groove")
 
 		style.configure("TLabelFrame", padding=5)
 		style.configure("TLabelFrame.Label", font=("Segoe UI", 10, "bold"))
@@ -182,9 +187,6 @@ class LogAnalyzerApp:
 		# Pre-computed indices for filtered view [idx1, idx2, ...]
 		self.filtered_indices = []
 
-		# Filter Match Cache: { filter_index: [raw_idx1, raw_idx2, ...] }
-		self.filter_matches = {}
-
 		self.current_log_path = None
 
 		# Search Cache
@@ -208,8 +210,6 @@ class LogAnalyzerApp:
 		self.visible_rows = 50
 
 		# Font management
-		self.font_size = self.config.get("font_size", 11)
-		self.font_object = tkFont.Font(family="Segoe UI", size=self.font_size)
 		self.font_size = self.config.get("font_size", 12)
 		self.font_object = tkFont.Font(family="Consolas", size=self.font_size)
 
@@ -220,7 +220,7 @@ class LogAnalyzerApp:
 		self.selected_raw_index = -1
 		self.selection_offset = 0
 
-		self.note_view_visible_var = tk.BooleanVar(value=self.config.get("note_view_visible", False))
+		self.note_view_visible_var = tk.BooleanVar(value=False)
 		note_view_mode = self.config.get("note_view_mode", "docked")
 		self.show_notes_in_window_var = tk.BooleanVar(value=(note_view_mode == "window"))
 		self.show_only_filtered_var = tk.BooleanVar(value=False)
@@ -418,19 +418,19 @@ class LogAnalyzerApp:
 		# --- Lower: Filter View ---
 		filter_frame = ttk.LabelFrame(self.paned_window, text="Filters")
 
-		cols = ("enabled", "type", "event", "pattern", "hits")
+		cols = ("enabled", "type", "pattern", "hits", "event")
 		self.tree = ttk.Treeview(filter_frame, columns=cols, show="headings")
 
 		self.tree.heading("enabled", text="En")
-		self.tree.column("enabled", width=40, anchor="center")
+		self.tree.column("enabled", width=30, minwidth=30, stretch=False, anchor="center")
 		self.tree.heading("type", text="Type")
-		self.tree.column("type", width=60, anchor="center")
-		self.tree.heading("event", text="Event")
-		self.tree.column("event", width=50, anchor="center")
+		self.tree.column("type", width=50, minwidth=50, stretch=False, anchor="center")
 		self.tree.heading("pattern", text="Pattern / Regex")
 		self.tree.column("pattern", width=600, anchor="w")
 		self.tree.heading("hits", text="Hits")
-		self.tree.column("hits", width=80, anchor="e")
+		self.tree.column("hits", width=80, minwidth=80, stretch=False, anchor="center")
+		self.tree.heading("event", text="Event")
+		self.tree.column("event", width=50, minwidth=50, stretch=False, anchor="center")
 
 		tree_scroll = ttk.Scrollbar(filter_frame, orient="vertical", command=self.tree.yview)
 		self.tree.configure(yscrollcommand=tree_scroll.set)
@@ -468,6 +468,7 @@ class LogAnalyzerApp:
 		self._apply_theme()
 		self._update_recent_files_menu()
 
+		self.root.bind("<Configure>", self.on_root_configure)
 		self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 		self.root.after(200, self._restore_layout)
 
@@ -483,12 +484,11 @@ class LogAnalyzerApp:
 		tree_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 		# Treeview for notes
 		cols = ("line", "timestamp", "content")
-		self.notes_tree = ttk.Treeview(tree_frame, columns=cols, show="headings")
 		self.notes_tree = ttk.Treeview(tree_frame, columns=cols, show="headings", style="Notes.Treeview")
 		self.notes_tree.heading("line", text="Line")
-		self.notes_tree.column("line", width=60, anchor="center")
+		self.notes_tree.column("line", width=80, minwidth=80, stretch=False, anchor="center")
 		self.notes_tree.heading("timestamp", text="Timestamp")
-		self.notes_tree.column("timestamp", width=150, anchor="w")
+		self.notes_tree.column("timestamp", width=230, minwidth=200, stretch=False, anchor="w")
 		self.notes_tree.heading("content", text="Note Content")
 		self.notes_tree.column("content", width=350, anchor="w")
 		scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.notes_tree.yview)
@@ -505,30 +505,30 @@ class LogAnalyzerApp:
 				self.paned_window.sash_place(0, 0, sash_y)
 			except Exception: pass
 
-		# Restore top sash (Log vs Notes) if docked and visible
-		if self.note_view_visible_var.get() and self.notes_frame:
-			sash_x = self.config.get("sash_top_x")
-			if sash_x:
-				try:
-					self.top_pane.sash_place(0, sash_x, 0)
-				except Exception: pass
+	def on_root_configure(self, event):
+		if event.widget == self.root:
+			# Only update stored geometry if the window is in 'normal' state (not maximized/zoomed or iconic)
+			try:
+				if self.root.state() == "normal":
+					self.non_maximized_geometry = self.root.geometry()
+			except Exception: pass
 
 	def on_close(self):
-		self._save_notes_width()
 		self._save_notes_window_geometry()
 
-		self.config["main_window_geometry"] = self.root.geometry()
+		is_maximized = False
+		try:
+			if self.root.state() == "zoomed": is_maximized = True
+		except Exception: pass
+		self.config["window_maximized"] = is_maximized
+
+		self.config["main_window_geometry"] = self.non_maximized_geometry
+
 		self.config["note_view_visible"] = self.note_view_visible_var.get()
 
 		try:
 			self.config["sash_main_y"] = self.paned_window.sash_coord(0)[1]
 		except Exception: pass
-
-		# Save top sash (Log vs Notes) if docked
-		if self.notes_frame and self.notes_frame.winfo_exists():
-			try:
-				self.config["sash_top_x"] = self.top_pane.sash_coord(0)[0]
-			except Exception: pass
 
 		self.save_config()
 		self.root.destroy()
@@ -656,7 +656,6 @@ class LogAnalyzerApp:
 					self.update_title()
 					self.selected_raw_index = -1
 					self.selection_offset = 0
-					self.filter_matches = {}
 					self.last_search_query = None
 					self.last_search_results = None
 					self.marker_canvas.delete("all")
@@ -675,7 +674,7 @@ class LogAnalyzerApp:
 					self.update_status("Load failed")
 
 				elif msg_type == 'filter_complete':
-					line_tags, filtered_idx, duration, counts, matches = msg[1], msg[2], msg[3], msg[4], msg[5]
+					line_tags, filtered_idx, duration, counts = msg[1], msg[2], msg[3], msg[4]
 
 					self.timeline_events, self.timestamps_found = msg[6], msg[7]
 					# Only update if full recalc or if we need to sync state
@@ -690,8 +689,6 @@ class LogAnalyzerApp:
 					for i, count in enumerate(counts):
 						if i < len(self.filters):
 							self.filters[i].hit_count = count
-
-					if matches: self.filter_matches.update(matches)
 
 					self.apply_tag_styles()
 					self.refresh_filter_list()
@@ -786,7 +783,7 @@ class LogAnalyzerApp:
 
 	def save_config(self):
 		try:
-			with open(self.config_file, 'w') as f: json.dump(self.config, f)
+			with open(self.config_file, 'w') as f: json.dump(self.config, f, indent=4)
 		except: pass
 
 	# --- Recent Files ---
@@ -1032,22 +1029,19 @@ class LogAnalyzerApp:
 			target_tag = f"filter_{idx}"
 			if flt.is_exclude: target_tag = 'EXCLUDED'
 
-			# Identify rows that need update
-			# We scan all_line_tags (fast in memory)
-			target_indices = [i for i, tag in enumerate(self.all_line_tags) if tag == target_tag]
-
-			if not target_indices:
+			# Check if this filter actually affects any lines
+			if target_tag not in self.all_line_tags:
 				# No lines affected, just update UI
+				self.refresh_filter_list()
 				self.set_ui_busy(False)
 				return
 
-			# Launch partial recalc worker
-			self.recalc_filtered_data(target_indices=target_indices)
+			self.recalc_filtered_data()
 		else:
 			self.recalc_filtered_data()
 
-	def recalc_filtered_data(self, target_indices=None):
-		if self.is_processing and target_indices is None: return # Allow re-entry if internal call? No, lock UI
+	def recalc_filtered_data(self):
+		if self.is_processing: return
 		if not self.is_processing: self.set_ui_busy(True)
 
 		# We now rely solely on the Rust engine for filtering.
@@ -1071,7 +1065,7 @@ class LogAnalyzerApp:
 			try:
 				t_start = time.time()
 				# Call Rust
-				# Returns: (tag_codes, filtered_indices, hit_counts, timeline_events)
+				# Returns: (tag_codes, filtered_indices, hit_counts, timeline_events) - matches dict is empty/removed
 				tag_codes, filtered_indices, subset_counts, timeline_raw = self.rust_engine.filter(rust_filters)
 
 				# Map subset counts back to full filter list
@@ -1230,7 +1224,7 @@ class LogAnalyzerApp:
 			index = self.text_area.index(f"@{event.x},{event.y}")
 			ui_row = int(index.split('.')[0])
 			self.text_area.mark_set(tk.INSERT, index)
-			self.text_area.tag_add("current_line", f"{ui_row}.0", f"{ui_row}.end")
+			self.text_area.tag_add("current_line", f"{ui_row}.0", f"{ui_row+1}.0")
 			self.text_area.tag_raise("current_line")
 			cache_index = self.view_start_index + (ui_row - 1)
 			total = self.get_total_count()
@@ -1313,7 +1307,6 @@ class LogAnalyzerApp:
 		text_frame = ttk.Frame(dialog, padding=10)
 		text_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-		txt_input = tk.Text(text_frame, wrap="word", font=("Segoe UI", 10), height=5)
 		txt_input = tk.Text(text_frame, wrap="word", font=("Consolas", 12), height=5)
 		txt_input.pack(fill=tk.BOTH, expand=True)
 		txt_input.insert("1.0", current_note)
@@ -1403,7 +1396,6 @@ class LogAnalyzerApp:
 
 		if not is_visible:
 			# Hide the view
-			self._save_notes_width()
 			if self.notes_frame and self.notes_frame.winfo_exists():
 				try:
 					self.top_pane.remove(self.notes_frame)
@@ -1437,7 +1429,6 @@ class LogAnalyzerApp:
 
 	def undock_note_view(self):
 		# Destroy the docked frame if it exists
-		self._save_notes_width()
 		if self.notes_frame and self.notes_frame.winfo_exists():
 			try:
 				self.top_pane.remove(self.notes_frame)
@@ -1474,16 +1465,18 @@ class LogAnalyzerApp:
 		self.notes_frame = ttk.LabelFrame(self.top_pane, text="Notes")
 		self._create_notes_view_widgets(self.notes_frame)
 
-		target_width = self.config.get("notes_panel_width", 200)
-		self.top_pane.add(self.notes_frame, minsize=200, width=target_width, stretch="always")
-		self.refresh_notes_window()
+		# Calculate current available width for defaults or validation
+		current_total_w = self.top_pane.winfo_width()
+		if current_total_w <= 1: # Startup/Not realized
+			current_total_w = 1000
 
-	def _save_notes_width(self):
-		if self.notes_frame and self.notes_frame.winfo_exists():
-			w = self.notes_frame.winfo_width()
-			if w > 50: # Basic sanity check
-				self.config["notes_panel_width"] = w
-				self.save_config()
+		target_notes_w = int(current_total_w / 3)
+		# Update Log View width to match the remaining 2/3 space.
+		# This ensures Tkinter maintains the 2:1 ratio during window resizing.
+		self.top_pane.paneconfigure(self.content_frame, width=current_total_w - target_notes_w)
+		self.top_pane.add(self.notes_frame, minsize=200, width=target_notes_w, stretch="always")
+
+		self.refresh_notes_window()
 
 	def _save_notes_window_geometry(self):
 		if self.notes_window and self.notes_window.winfo_exists():
@@ -1954,7 +1947,7 @@ class LogAnalyzerApp:
 		self.line_number_area.insert("1.0", line_nums_text)
 		self.line_number_area.tag_add("right_align", "1.0", "end")
 		for rel_idx, tags in tag_buffer:
-			for tag in tags: self.text_area.tag_add(tag, f"{rel_idx}.0", f"{rel_idx}.end")
+			for tag in tags: self.text_area.tag_add(tag, f"{rel_idx}.0", f"{rel_idx+1}.0")
 		self.text_area.tag_raise("current_line")
 		self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED)
 
@@ -2257,7 +2250,7 @@ class LogAnalyzerApp:
 			en_str = "☑" if flt.enabled else "☐"
 			type_str = "Excl" if flt.is_exclude else ("Regex" if flt.is_regex else "Text")
 			event_str = "✓" if flt.is_event else ""
-			item_id = self.tree.insert("", "end", values=(en_str, type_str, event_str, flt.text, str(flt.hit_count)))
+			item_id = self.tree.insert("", "end", values=(en_str, type_str, flt.text, str(flt.hit_count), event_str))
 			tag_name = f"row_{idx}"
 			self.tree.item(item_id, tags=(tag_name,))
 
@@ -2344,7 +2337,6 @@ class LogAnalyzerApp:
 		indices_to_delete = sorted([self.tree.index(item) for item in selected_items], reverse=True)
 		for idx in indices_to_delete:
 			del self.filters[idx]
-			if idx in self.filter_matches: del self.filter_matches[idx]
 		self.recalc_filtered_data()
 
 	def on_filter_double_click(self, event):
@@ -2418,7 +2410,6 @@ class LogAnalyzerApp:
 				filter_obj.text = text; filter_obj.fore_color = colors["fg"]; filter_obj.back_color = colors["bg"]
 				filter_obj.is_regex = var_regex.get(); filter_obj.is_exclude = var_exclude.get()
 				filter_obj.is_event = var_event.get()
-				if index in self.filter_matches: del self.filter_matches[index]
 				self.recalc_filtered_data()
 			else:
 				new_filter = Filter(text, colors["fg"], colors["bg"], enabled=True, is_regex=var_regex.get(), is_exclude=var_exclude.get(), is_event=var_event.get())
@@ -2492,7 +2483,6 @@ class LogAnalyzerApp:
 				if text: new_filters.append(Filter(text, fore, back, enabled, is_regex, is_exclude, is_event=is_event))
 			self.filters = new_filters
 			self.current_tat_path = filepath; self.update_title()
-			self.filter_matches = {}
 			self.recalc_filtered_data()
 			self.show_toast(f"Imported {len(new_filters)} filters")
 		except Exception as e: messagebox.showerror("Import Error", str(e))
@@ -2517,7 +2507,6 @@ class LogAnalyzerApp:
 			with open(filepath, 'r') as f:
 				data = json.load(f)
 				self.filters = [Filter(**item) for item in data]
-			self.filter_matches = {}
 			self.recalc_filtered_data()
 		except Exception as e: messagebox.showerror("Error", f"JSON Import Failed: {e}")
 
