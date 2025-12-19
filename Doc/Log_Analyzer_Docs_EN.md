@@ -19,6 +19,8 @@
       - [Help](#help)
     - [Shortcuts \& Operations](#shortcuts--operations)
   - [4. Release Notes](#4-release-notes)
+    - [Version 1.6 (2025-12-19)](#version-16-2025-12-19)
+      - [⚡ Core Engine Update](#-core-engine-update)
     - [Version 1.5 (2025-12-18)](#version-15-2025-12-18)
       - [⚡ Rust-Powered Core Engine](#-rust-powered-core-engine)
       - [🎨 UI \& UX Improvements](#-ui--ux-improvements)
@@ -53,9 +55,9 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 * **Multi-threading Architecture**: File reading and filtering operations are performed in the background, ensuring the main window (UI) always remains responsive and eliminating "Not Responding" scenarios.
 
-* **JIT Dynamic Compilation Filtering Engine**: Utilizes Dynamic Code Generation technology to "unroll" complex filtering rules into highly efficient Python code, eliminating loop overhead.
+    * **Rust-Powered Core Engine**: The core filtering logic is powered by a custom Rust extension (`log_engine_rs`), replacing the legacy Python implementation.
 
-  * *Performance Benchmark*: Applying 81 filtering rules to an 800MB / 10 million line test file takes approximately **30 seconds**.
+      * **Parallel Processing**: Utilizes the `rayon` library to leverage all CPU cores, enabling sub-second filtering speeds even for massive log files (e.g., 1GB+).
 
 ### 🔍 Powerful Filtering System
 
@@ -156,6 +158,14 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 * **Ctrl + Left/Right Arrow**: Jumps to the previous/next match in the filtered results.
 
 ## 4. Release Notes
+
+### Version 1.6 (2025-12-19)
+
+#### ⚡ Core Engine Update
+
+*   **Rust Engine Mandatory**: The legacy Python filtering fallback has been removed. The application now strictly relies on the high-performance Rust core (`log_engine_rs`) for all file loading and filtering operations.
+*   **Streamlined Architecture**: This change reduces code complexity and ensures that all users benefit from the multi-threaded, zero-copy performance optimizations introduced in V1.5.
+*   **Dependency Update**: The Rust toolchain is now a required dependency for building the application from source.
 
 ### Version 1.5 (2025-12-18)
 

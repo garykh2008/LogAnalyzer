@@ -155,7 +155,7 @@ class LogAnalyzerApp:
 
 		# App Info
 		self.APP_NAME = "Log Analyzer"
-		self.VERSION = "V1.5"
+		self.VERSION = "V1.6"
 
 		if not HAS_RUST:
 			# Since we are removing Python fallbacks, we must warn the user if the engine is missing.
