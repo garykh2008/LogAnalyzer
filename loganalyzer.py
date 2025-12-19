@@ -1018,27 +1018,7 @@ class LogAnalyzerApp:
 	# --- Filter Logic (Threaded) ---
 	def smart_update_filter(self, idx, is_enabling):
 		if self.is_processing: return
-
-		# [OPTIMIZATION] Smart Disable
-		# If disabling, we only need to re-check lines that were matched by this filter (or excluded by it)
-		# If enabling, we must do full recalc (as new filter matches are unknown)
-
-		if not is_enabling and self.all_line_tags:
-			self.set_ui_busy(True)
-			flt = self.filters[idx]
-			target_tag = f"filter_{idx}"
-			if flt.is_exclude: target_tag = 'EXCLUDED'
-
-			# Check if this filter actually affects any lines
-			if target_tag not in self.all_line_tags:
-				# No lines affected, just update UI
-				self.refresh_filter_list()
-				self.set_ui_busy(False)
-				return
-
-			self.recalc_filtered_data()
-		else:
-			self.recalc_filtered_data()
+		self.recalc_filtered_data()
 
 	def recalc_filtered_data(self):
 		if self.is_processing: return
