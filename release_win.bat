@@ -205,18 +205,12 @@ echo      [Build] Finding tkinterdnd2 path...
 for /f "delims=" %%i in ('python -c "import os, tkinterdnd2; print(os.path.dirname(tkinterdnd2.__file__))"') do set "TKINTERDND2_PATH=%%i"
 if not defined TKINTERDND2_PATH ( echo [Error] tkinterdnd2 not found. && exit /b 1 )
 
-echo      [Build] Building and Installing Rust Extension...
-if not exist "rust_extention" (
-    echo [Error] Rust extension directory 'rust_extention' not found.
+echo      [Build] Updating Rust Extension...
+call update_rust.bat
+if %errorlevel% neq 0 (
+    echo [Error] Failed to update Rust extension.
     exit /b 1
 )
-
-pushd "rust_extention"
-set PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
-maturin build --release
-if !errorlevel! neq 0 ( echo [Error] Rust build failed. && popd && exit /b 1 )
-popd
-for %%f in (rust_extention\target\wheels\*.whl) do pip install "%%f" --force-reinstall
 
 echo      [Build] Building documentation...
 python "%DOC_SCRIPT%"

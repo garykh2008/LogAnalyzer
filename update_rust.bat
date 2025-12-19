@@ -18,7 +18,6 @@ echo [Update] Entering %RUST_DIR%...
 cd %RUST_DIR%
 if %errorlevel% neq 0 (
     echo [Error] Directory %RUST_DIR% not found!
-    pause
     exit /b 1
 )
 
@@ -30,7 +29,6 @@ maturin build --release
 if %errorlevel% neq 0 (
     echo [Error] Maturin build failed!
     cd ..
-    pause
     exit /b 1
 )
 
@@ -43,4 +41,3 @@ for %%f in (%RUST_DIR%\target\wheels\*.whl) do (
 
 echo.
 echo [Success] Rust extension updated successfully!
-pause

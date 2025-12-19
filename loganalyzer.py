@@ -345,6 +345,11 @@ class LogAnalyzerApp:
 		self.scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
 		self.text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+		# Welcome Label (Empty State)
+		self.welcome_label = tk.Label(self.text_area, text="Drag & Drop Log File Here\nor use File > Open Log",
+									  font=("Segoe UI", 14), fg="#888888", bg="#ffffff")
+		self.welcome_label.place(relx=0.5, rely=0.5, anchor="center")
+
 		# Configure default selection tag immediately
 		self.text_area.tag_config("current_line", background="#0078D7", foreground="#FFFFFF")
 
@@ -379,28 +384,11 @@ class LogAnalyzerApp:
 		self.root.bind("<Control-g>", self.show_goto_dialog)
 		self.root.bind("<Control-G>", self.show_goto_dialog)
 
-		# --- Find Bar ---
-		self.find_frame = ttk.Frame(self.content_frame, padding=5)
-		# This frame will be packed later when shown
-
+		# --- Find Bar State ---
+		self.find_window = None
+		self.find_entry = None
 		self.find_case_var = tk.BooleanVar(value=False)
 		self.find_wrap_var = tk.BooleanVar(value=True)
-
-		ttk.Label(self.find_frame, text="Find:").pack(side=tk.LEFT, padx=(0, 5))
-		self.find_entry = ttk.Entry(self.find_frame)
-		self.find_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-		self.find_entry.bind("<Return>", self.find_next)
-		self.find_entry.bind("<Shift-Return>", self.find_previous)
-
-		self.find_next_btn = ttk.Button(self.find_frame, text="Next", command=self.find_next, width=8)
-		self.find_next_btn.pack(side=tk.LEFT, padx=5)
-		self.find_prev_btn = ttk.Button(self.find_frame, text="Prev", command=self.find_previous, width=8)
-		self.find_prev_btn.pack(side=tk.LEFT)
-
-		ttk.Checkbutton(self.find_frame, text="Case", variable=self.find_case_var).pack(side=tk.LEFT, padx=(10, 0))
-		ttk.Checkbutton(self.find_frame, text="Wrap", variable=self.find_wrap_var).pack(side=tk.LEFT, padx=(5, 10))
-
-		ttk.Button(self.find_frame, text="✕", command=self.hide_find_bar, width=3).pack(side=tk.RIGHT)
 
 		self.root.bind("<Control-Left>", self.on_nav_prev_match)
 		self.root.bind("<Control-Right>", self.on_nav_next_match)
@@ -672,6 +660,7 @@ class LogAnalyzerApp:
 					self.last_search_query = None
 					self.last_search_results = None
 					self.marker_canvas.delete("all")
+					self.welcome_label.place_forget()
 
 					self.notes = {} # Clear notes
 					self.check_and_import_notes() # Auto-import notes
@@ -739,6 +728,53 @@ class LogAnalyzerApp:
 		except: pass
 		self.tree.state(("disabled",) if is_busy else ("!disabled",))
 		self.root.config(cursor="watch" if is_busy else "")
+
+	# --- Toast Notifications ---
+	def show_toast(self, message, duration=2000, is_error=False):
+		try:
+			toast = tk.Toplevel(self.root)
+			toast.overrideredirect(True)
+
+			is_dark = self.dark_mode.get()
+			bg = "#323232" if is_dark else "#333333"
+			fg = "#ffffff"
+			if is_error: bg = "#a31515"
+
+			toast.config(bg=bg)
+			# Use tk.Label for direct color control
+			lbl = tk.Label(toast, text=message, bg=bg, fg=fg, font=("Segoe UI", 10), padx=15, pady=8)
+			lbl.pack()
+
+			# Center horizontally, near bottom
+			self.root.update_idletasks()
+			rw, rh = self.root.winfo_width(), self.root.winfo_height()
+			rx, ry = self.root.winfo_x(), self.root.winfo_y()
+			tw, th = lbl.winfo_reqwidth(), lbl.winfo_reqheight()
+
+			x = rx + (rw - tw) // 2
+			y = ry + rh - 100
+			toast.geometry(f"+{x}+{y}")
+			toast.attributes("-alpha", 0.0)
+
+			# Animation
+			def fade_in(curr_alpha=0):
+				if curr_alpha < 0.9:
+					curr_alpha += 0.1
+					toast.attributes("-alpha", curr_alpha)
+					self.root.after(20, lambda: fade_in(curr_alpha))
+				else:
+					self.root.after(duration, fade_out)
+
+			def fade_out(curr_alpha=0.9):
+				if curr_alpha > 0:
+					curr_alpha -= 0.1
+					toast.attributes("-alpha", curr_alpha)
+					self.root.after(20, lambda: fade_out(curr_alpha))
+				else:
+					toast.destroy()
+
+			fade_in()
+		except Exception: pass
 
 	# --- Config Management ---
 	def load_config(self):
@@ -845,9 +881,13 @@ class LogAnalyzerApp:
 		self.paned_window.config(bg=c["bg_pane"])
 		self.top_pane.config(bg=c["bg_pane"])
 
+		if self.find_window and self.find_window.winfo_exists():
+			self.find_window.config(bg=c["bg"])
+
 		# Log View
 		self.text_area.config(bg=c["bg_widget"], fg=c["fg_widget"], insertbackground=c["fg_widget"])
 		self.line_number_area.config(bg=c["bg_line_num"], fg=c["fg_line_num"])
+		self.welcome_label.config(bg=c["bg_widget"], fg=c["fg_disabled"])
 
 		self.marker_canvas.config(bg=c["bg_line_num"]) # Match line number bg or scrollbar track
 		# --- Apply to ttk Styles ---
@@ -1982,15 +2022,52 @@ class LogAnalyzerApp:
 
 	# --- Filter List & Editing ---
 	def show_find_bar(self, event=None):
-		"""Displays the find bar at the top of the log view."""
-		self.find_frame.pack(side=tk.TOP, fill=tk.X, before=self.scrollbar_x)
+		"""Displays the find bar in a separate window."""
+		if self.find_window and self.find_window.winfo_exists():
+			self.find_window.lift()
+			self.find_entry.focus_set()
+			self.find_entry.select_range(0, tk.END)
+			return "break"
+
+		self.find_window = tk.Toplevel(self.root)
+		self.find_window.title("Find")
+		self.find_window.transient(self.root)
+		self.find_window.resizable(False, False)
+		self.find_window.protocol("WM_DELETE_WINDOW", self.hide_find_bar)
+		self.find_window.config(bg=self.root.cget("bg"))
+
+		# Center relative to root or just offset
+		x = self.root.winfo_rootx() + self.root.winfo_width() - 400
+		y = self.root.winfo_rooty() + 80
+		self.find_window.geometry(f"+{x}+{y}")
+
+		frame = ttk.Frame(self.find_window, padding=5)
+		frame.pack(fill=tk.BOTH, expand=True)
+
+		ttk.Label(frame, text="Find:").pack(side=tk.LEFT, padx=(0, 5))
+		self.find_entry = ttk.Entry(frame, width=25)
+		self.find_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+		self.find_entry.bind("<Return>", self.find_next)
+		self.find_entry.bind("<Shift-Return>", self.find_previous)
+		if self.last_search_query:
+			self.find_entry.insert(0, self.last_search_query)
+			self.find_entry.select_range(0, tk.END)
+
+		ttk.Button(frame, text="⬇", command=self.find_next, width=4).pack(side=tk.LEFT, padx=2)
+		ttk.Button(frame, text="⬆", command=self.find_previous, width=4).pack(side=tk.LEFT, padx=2)
+
+		ttk.Checkbutton(frame, text="Case", variable=self.find_case_var).pack(side=tk.LEFT, padx=(10, 0))
+		ttk.Checkbutton(frame, text="Wrap", variable=self.find_wrap_var).pack(side=tk.LEFT, padx=(5, 0))
+
 		self.find_entry.focus_set()
-		self.find_entry.select_range(0, tk.END)
 		return "break"
 
 	def hide_find_bar(self, event=None):
 		"""Hides the find bar and removes search highlights."""
-		self.find_frame.pack_forget()
+		if self.find_window:
+			self.find_window.destroy()
+			self.find_window = None
+			self.find_entry = None
 		self.text_area.tag_remove("find_match", "1.0", tk.END)
 		self.text_area.focus_set() # Return focus to the text area
 		self.marker_canvas.delete("all") # Clear markers
@@ -2076,7 +2153,12 @@ class LogAnalyzerApp:
 
 	def _find(self, backward=False):
 		"""Core find logic."""
-		query = self.find_entry.get()
+		query = None
+		if self.find_entry and self.find_entry.winfo_exists():
+			query = self.find_entry.get()
+		elif self.last_search_query:
+			query = self.last_search_query
+
 		if not query: return
 
 		case_sensitive = self.find_case_var.get()
@@ -2145,20 +2227,24 @@ class LogAnalyzerApp:
 
 		if found:
 			self.jump_to_line(target_raw_index)
-			self.find_entry.config(foreground="black")
+			if self.find_entry and self.find_entry.winfo_exists():
+				self.find_entry.config(foreground="black")
 			self.update_status(f"Found match on line {target_raw_index + 1}")
 
 			# Schedule highlight (UI update needs a moment after jump)
 			self.text_area.tag_remove("find_match", "1.0", tk.END)
 			self.root.after(50, lambda: self._highlight_find_match(query, case_sensitive))
 		else:
-			self.find_entry.config(foreground="black")
+			if self.find_entry and self.find_entry.winfo_exists():
+				self.find_entry.config(foreground="black")
 			# Use red text if wrapped and still not found (e.g. filtered out)
 			if self.show_only_filtered_var.get():
-				self.find_entry.config(foreground="red")
+				if self.find_entry and self.find_entry.winfo_exists():
+					self.find_entry.config(foreground="red")
 				self.update_status("Match found but hidden by filters.")
 			else:
-				self.find_entry.config(foreground="red")
+				if self.find_entry and self.find_entry.winfo_exists():
+					self.find_entry.config(foreground="red")
 				self.update_status("No more matches found.")
 
 	def find_next(self, event=None): self._find(backward=False); return "break"
@@ -2372,7 +2458,7 @@ class LogAnalyzerApp:
 	def quick_save_tat(self):
 		if self.is_processing: return
 		if self.current_tat_path:
-			if self._write_tat_file(self.current_tat_path): messagebox.showinfo("Save", "Saved successfully")
+			if self._write_tat_file(self.current_tat_path): self.show_toast("Filters saved successfully")
 		else: self.save_as_tat_filters()
 
 	def save_as_tat_filters(self):
@@ -2383,7 +2469,7 @@ class LogAnalyzerApp:
 		self.config["last_filter_dir"] = os.path.dirname(filepath); self.save_config()
 		if self._write_tat_file(filepath):
 			self.current_tat_path = filepath; self.update_title()
-			messagebox.showinfo("Success", "File saved")
+			self.show_toast("Filters saved successfully")
 
 	def import_tat_filters(self):
 		if self.is_processing: return
@@ -2408,7 +2494,7 @@ class LogAnalyzerApp:
 			self.current_tat_path = filepath; self.update_title()
 			self.filter_matches = {}
 			self.recalc_filtered_data()
-			messagebox.showinfo("Success", f"Imported {len(new_filters)} filters")
+			self.show_toast(f"Imported {len(new_filters)} filters")
 		except Exception as e: messagebox.showerror("Import Error", str(e))
 
 	# JSON methods

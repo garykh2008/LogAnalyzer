@@ -61,35 +61,10 @@ if ! command -v cargo &> /dev/null; then
 fi
 
 # 2. Build Rust Extension
-echo "[Linux Build] Building Rust extension..."
-if [ ! -d "rust_extention" ]; then
-    echo "[Linux Build] Error: rust_extention directory not found."
-    exit 1
-fi
-
-# Copy Rust source to temp dir to avoid WSL/NTFS permission issues
-RUST_BUILD_DIR="$VENV_BASE/rust_build"
-cp -r "rust_extention" "$RUST_BUILD_DIR"
-cd "$RUST_BUILD_DIR"
-
-# Clean artifacts copied from Windows to avoid installing wrong wheel
-rm -rf target
-
-# Set environment variable for compatibility
-export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
-maturin build --release
-
-# Install the wheel
-# Find the wheel file
-WHEEL_FILE=$(find target/wheels -name "*.whl" | head -n 1)
-if [ -n "$WHEEL_FILE" ]; then
-    echo "[Linux Build] Installing Rust wheel: $WHEEL_FILE"
-    pip install "$WHEEL_FILE" --force-reinstall
-else
-    echo "[Linux Build] Error: Rust wheel not found!"
-    exit 1
-fi
-cd "$PROJECT_ROOT"
+echo "[Linux Build] Updating Rust extension..."
+# Make sure the script is executable (in case permissions were lost)
+chmod +x update_rust.sh
+./update_rust.sh
 
 # 3. Build Docs
 echo "[Linux Build] Building documentation..."
