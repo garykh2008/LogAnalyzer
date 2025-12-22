@@ -159,6 +159,47 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 ## 4. Release Notes
 
+### Version 1.6.3 (2025-12-22)
+
+#### ✨ Filter List Enhancements
+
+*   **Drag-and-Drop Reordering**:
+    *   Filters can now be reordered simply by dragging and dropping them within the list.
+    *   Visual indicators show the insertion position during the drag operation.
+*   **Context Menu Options**: Added "Move to Top" and "Move to Bottom" options for quick reorganization.
+
+#### 🛠 Fixes
+
+*   **UI Stability**: Fixed an issue where the filter list would not refresh correctly if no log file was loaded.
+
+### Version 1.6.2 (2025-12-22)
+
+#### 🔍 Find Functionality Upgrade
+
+*   **Visual Highlights**: All visible search matches are now highlighted with a light yellow background for better visibility.
+*   **Improved Workflow**:
+    *   The Find window now auto-closes upon a successful search.
+    *   Search state is preserved, allowing `F3` (Next) and `F2` (Previous) to continue working after the dialog closes.
+    *   `Esc` key immediately cancels the search and clears highlights.
+*   **Keybinding Change**: "Find Previous" is now mapped to **F2** (previously Shift+F3).
+
+#### 🎨 UI Polish
+
+*   **Consistent Branding**: The application icon is now applied to all popup windows (Find, Go to Line, Notes, Filter, Timeline, Shortcuts).
+*   **Clean Layout**: Removed the unused progress bar from the status bar.
+*   **Typography**: Enforced **Consolas** as the global default font for consistent styling across all platforms.
+
+### Version 1.6.1 (2025-12-19)
+
+#### ⚡ Performance & UI Optimization
+
+*   **Responsiveness**: Fixed a UI freeze issue when disabling filters by simplifying the update logic.
+*   **Visual Improvements**:
+    *   Extended Log View background highlighting to span the full line width.
+    *   Optimized Filter View column widths and order for better readability.
+*   **Notes View**: Fixed layout instability by enforcing a default width when opening the panel.
+*   **Build System**: Modularized Rust extension build scripts (`update_rust`) for better cross-platform support.
+
 ### Version 1.6 (2025-12-19)
 
 #### ⚡ Core Engine Update
