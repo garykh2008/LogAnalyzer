@@ -378,8 +378,8 @@ class LogAnalyzerApp:
 		self.root.bind("<Control-f>", self.show_find_bar)
 		self.root.bind("<Control-F>", self.show_find_bar)
 		self.root.bind("<F3>", self.find_next)
-		self.root.bind("<Shift-F3>", self.find_previous)
-		self.root.bind("<Escape>", self.hide_find_bar)
+		self.root.bind("<F2>", self.find_previous)
+		self.root.bind("<Escape>", self.on_escape)
 
 		self.root.bind("<Control-g>", self.show_goto_dialog)
 		self.root.bind("<Control-G>", self.show_goto_dialog)
@@ -571,16 +571,22 @@ class LogAnalyzerApp:
 	def show_keyboard_shortcuts(self):
 		"""Displays a window with a summary of keyboard shortcuts."""
 		shortcuts = [
-			("General", ""),
+			("General & View", ""),
+			("Ctrl + F", "Open the Find window"),
+			("Ctrl + G", "Go to a specific line number"),
 			("Ctrl + H", "Toggle between 'Show Filtered Only' and 'Show All'"),
 			("Ctrl + Scroll", "Adjust font size in the log view"),
-			("Ctrl + Left/Right", "Jump to previous/next match for the selected filter"),
 			("", ""),
-			("In Log View", ""),
+			("Find & Navigation", ""),
+			("F2", "Find previous occurrence"),
+			("F3", "Find next occurrence"),
+			("Ctrl + Left/Right", "Jump to previous/next match for a selected filter"),
+			("", ""),
+			("Log View", ""),
 			("Double-Click", "Select text to quickly add a new filter"),
 			("'c' key", "Add or edit a note for the selected line"),
 			("", ""),
-			("In Filter List", ""),
+			("Filter List", ""),
 			("Double-Click", "Edit the selected filter"),
 			("Spacebar", "Enable or disable the selected filter"),
 			("Delete key", "Remove the selected filter(s)"),
@@ -590,7 +596,7 @@ class LogAnalyzerApp:
 		win.title("Keyboard Shortcuts")
 		win.transient(self.root)
 		win.grab_set()
-		win.geometry("750x350")
+		win.geometry("750x550")
 
 		frame = ttk.Frame(win, padding=15)
 		frame.pack(fill=tk.BOTH, expand=True)
@@ -628,6 +634,10 @@ class LogAnalyzerApp:
 			self.text_area.tag_config("note_line", background="#fffbdd", foreground="#000000")
 
 		self.text_area.tag_config("find_match", background="#FFA500", foreground="#000000")
+		# New tag for all matches
+		find_all_bg = "#4a4a21" if is_dark else "#FFFFE0"
+		find_all_fg = "#d4d4d4" if is_dark else "#000000"
+		self.text_area.tag_config("find_match_all", background=find_all_bg, foreground=find_all_fg)
 
 	# --- Threading Infrastructure ---
 	def check_queue(self):
@@ -1928,6 +1938,19 @@ class LogAnalyzerApp:
 		self.line_number_area.tag_add("right_align", "1.0", "end")
 		for rel_idx, tags in tag_buffer:
 			for tag in tags: self.text_area.tag_add(tag, f"{rel_idx}.0", f"{rel_idx+1}.0")
+
+		# Highlight all search matches
+		if self.last_search_query:
+			query = self.last_search_query
+			case_sensitive = self.last_search_case
+			start_index = "1.0"
+			while True:
+				pos = self.text_area.search(query, start_index, stopindex=tk.END, nocase=not case_sensitive)
+				if not pos: break
+				end_pos = f"{pos}+{len(query)}c"
+				self.text_area.tag_add("find_match_all", pos, end_pos)
+				start_index = end_pos
+
 		self.text_area.tag_raise("current_line")
 		self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED)
 
@@ -2006,12 +2029,17 @@ class LogAnalyzerApp:
 		self.find_window.title("Find")
 		self.find_window.transient(self.root)
 		self.find_window.resizable(False, False)
-		self.find_window.protocol("WM_DELETE_WINDOW", self.hide_find_bar)
+		self.find_window.protocol("WM_DELETE_WINDOW", self.close_find_bar)
 		self.find_window.config(bg=self.root.cget("bg"))
 
-		# Center relative to root or just offset
-		x = self.root.winfo_rootx() + self.root.winfo_width() - 400
-		y = self.root.winfo_rooty() + 80
+		# Center relative to root
+		rw = self.root.winfo_width()
+		rh = self.root.winfo_height()
+		rx = self.root.winfo_rootx()
+		ry = self.root.winfo_rooty()
+		w = 400; h = 80
+		x = rx + (rw - w) // 2
+		y = ry + (rh - h) // 2
 		self.find_window.geometry(f"+{x}+{y}")
 
 		frame = ttk.Frame(self.find_window, padding=5)
@@ -2020,14 +2048,12 @@ class LogAnalyzerApp:
 		ttk.Label(frame, text="Find:").pack(side=tk.LEFT, padx=(0, 5))
 		self.find_entry = ttk.Entry(frame, width=25)
 		self.find_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-		self.find_entry.bind("<Return>", self.find_next)
-		self.find_entry.bind("<Shift-Return>", self.find_previous)
+		self.find_entry.bind("<Return>", self.on_find_confirm)
 		if self.last_search_query:
 			self.find_entry.insert(0, self.last_search_query)
 			self.find_entry.select_range(0, tk.END)
 
-		ttk.Button(frame, text="⬇", command=self.find_next, width=4).pack(side=tk.LEFT, padx=2)
-		ttk.Button(frame, text="⬆", command=self.find_previous, width=4).pack(side=tk.LEFT, padx=2)
+		ttk.Button(frame, text="Find", command=self.on_find_confirm, width=6).pack(side=tk.LEFT, padx=2)
 
 		ttk.Checkbutton(frame, text="Case", variable=self.find_case_var).pack(side=tk.LEFT, padx=(10, 0))
 		ttk.Checkbutton(frame, text="Wrap", variable=self.find_wrap_var).pack(side=tk.LEFT, padx=(5, 0))
@@ -2035,15 +2061,45 @@ class LogAnalyzerApp:
 		self.find_entry.focus_set()
 		return "break"
 
-	def hide_find_bar(self, event=None):
-		"""Hides the find bar and removes search highlights."""
+	def on_find_confirm(self, event=None):
+		self._find(backward=False)
+		if self.last_search_results:
+			self.close_find_bar()
+		return "break"
+
+	def close_find_bar(self, event=None):
+		"""Closes the find bar but keeps search highlights."""
 		if self.find_window:
 			self.find_window.destroy()
 			self.find_window = None
 			self.find_entry = None
+		self.text_area.focus_set()
+		return "break"
+
+	def cancel_search(self, event=None):
+		"""Clears search highlights and state."""
+		if self.find_window:
+			self.close_find_bar()
+
+		# Clear highlights from the view
 		self.text_area.tag_remove("find_match", "1.0", tk.END)
-		self.text_area.focus_set() # Return focus to the text area
+		self.text_area.tag_remove("find_match_all", "1.0", tk.END)
+
+		# Clear search state to fully cancel the search
+		if self.last_search_query:
+			self.last_search_query = None
+			self.last_search_results = None
+			# A viewport refresh is needed to remove the 'find_match_all' tags
+			self.render_viewport()
+
 		self.marker_canvas.delete("all") # Clear markers
+		return "break"
+
+	def on_escape(self, event=None):
+		if self.find_window and self.find_window.winfo_exists():
+			self.close_find_bar()
+		else:
+			self.cancel_search()
 		return "break"
 
 	def _is_visible(self, raw_idx):
