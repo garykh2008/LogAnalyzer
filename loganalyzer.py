@@ -132,9 +132,11 @@ class LogAnalyzerApp:
 			except Exception: pass
 
 		# Set application icon
+		self.icon_path = None
 		try:
 			icon_path = self.resource_path("loganalyzer.ico")
 			self.root.iconbitmap(icon_path)
+			self.icon_path = icon_path
 		except Exception:
 			# Fallback for systems that might not support .ico or if file is missing
 			pass
@@ -531,6 +533,15 @@ class LogAnalyzerApp:
 		self.root.destroy()
 		sys.exit(0)
 
+	def _apply_icon(self, toplevel_window):
+		"""Applies the application icon to a toplevel window."""
+		if self.icon_path:
+			try:
+				toplevel_window.iconbitmap(self.icon_path)
+			except Exception:
+				pass # Ignore if it fails for a specific window
+
+
 	# --- [Helper] Path Resource Finder ---
 	def resource_path(self, relative_path):
 		try:
@@ -591,6 +602,7 @@ class LogAnalyzerApp:
 
 		win = tk.Toplevel(self.root)
 		win.title("Keyboard Shortcuts")
+		self._apply_icon(win)
 		win.transient(self.root)
 		win.grab_set()
 		win.geometry("750x550")
@@ -1256,6 +1268,7 @@ class LogAnalyzerApp:
 
 		dialog = tk.Toplevel(self.root)
 		dialog.title(f"Note for Line {idx + 1}")
+		self._apply_icon(dialog)
 		dialog.transient(self.root)
 		dialog.grab_set()
 		dialog.geometry("400x200")
@@ -1416,6 +1429,7 @@ class LogAnalyzerApp:
 		if self.notes_window is None or not self.notes_window.winfo_exists():
 			self.notes_window = tk.Toplevel(self.root)
 			self.notes_window.title("Notes")
+			self._apply_icon(self.notes_window)
 			geom = self.config.get("notes_window_geometry", "400x500")
 			self.notes_window.geometry(geom)
 			self.notes_window.config(bg=self.root.cget("bg")) # Match theme
@@ -1610,6 +1624,7 @@ class LogAnalyzerApp:
 
 		dialog = tk.Toplevel(self.root)
 		dialog.title("Go to Line")
+		self._apply_icon(dialog)
 		dialog.transient(self.root)
 		dialog.grab_set()
 		dialog.geometry("300x120")
@@ -1658,6 +1673,7 @@ class LogAnalyzerApp:
 
 		self.timeline_win = tk.Toplevel(self.root)
 		self.timeline_win.title("Event Timeline")
+		self._apply_icon(self.timeline_win)
 		self.timeline_win.geometry("800x250")
 		self.timeline_win.protocol("WM_DELETE_WINDOW", self._on_timeline_window_close)
 		self.timeline_win.config(bg=self.root.cget('bg')) # Inherit theme
@@ -2014,6 +2030,7 @@ class LogAnalyzerApp:
 
 		self.find_window = tk.Toplevel(self.root)
 		self.find_window.title("Find")
+		self._apply_icon(self.find_window)
 		self.find_window.transient(self.root)
 		self.find_window.resizable(False, False)
 		self.find_window.protocol("WM_DELETE_WINDOW", self.close_find_bar)
@@ -2377,6 +2394,7 @@ class LogAnalyzerApp:
 	def open_filter_dialog(self, filter_obj=None, index=None, initial_text=None):
 		dialog = tk.Toplevel(self.root)
 		dialog.title("Edit Filter" if filter_obj else "Add Filter")
+		self._apply_icon(dialog)
 		dialog.transient(self.root) # Make it a child of the main window
 		dialog.grab_set()
 		dialog.geometry("400x200")
