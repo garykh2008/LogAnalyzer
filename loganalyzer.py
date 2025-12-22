@@ -204,9 +204,15 @@ class LogAnalyzerApp:
 
 		# Timeline System
 		self.timeline_events = [] # List of (datetime_obj, filter_text, raw_index)
+		self.timeline_events_by_time = []
+		self.timeline_events_by_index = []
 		self.timestamps_found = False
-		self.timeline_win = None # Reference to the Toplevel timeline window
-		self.timeline_draw_func = None # Reference to the draw_timeline function
+		
+		# Timeline Zoom/Pan State
+		self.timeline_zoom = 1.0
+		self.timeline_view_offset = 0.0 # Seconds from start
+		self.timeline_pan_start_x = 0
+		self.timeline_pan_start_offset = 0.0
 
 		self.view_start_index = 0
 		self.visible_rows = 50
@@ -282,7 +288,7 @@ class LogAnalyzerApp:
 		self.view_menu.add_separator()
 		self.view_menu.add_checkbutton(label="Dark Mode", variable=self.dark_mode, command=self.toggle_dark_mode)
 		self.view_menu.add_separator()
-		self.view_menu.add_command(label="Show Timeline", command=self.show_timeline_window, state="disabled")
+		self.view_menu.add_command(label="Toggle Timeline", command=self.toggle_timeline_pane, state="disabled")
 
 
 		# [Notes Menu]
@@ -417,6 +423,28 @@ class LogAnalyzerApp:
 		self.log_context_menu = tk.Menu(self.root, tearoff=0)
 		self.log_context_menu.add_command(label="Add/Edit Note", command=self.add_note_dialog)
 		self.log_context_menu.add_command(label="Remove Note", command=self.remove_note)
+
+		# --- Middle: Timeline View ---
+		self.timeline_frame = ttk.Frame(self.paned_window)
+		self.timeline_canvas = tk.Canvas(self.timeline_frame, bg="#ffffff", height=60, cursor="hand2")
+		self.timeline_canvas.pack(fill=tk.BOTH, expand=True)
+		self.timeline_canvas.bind("<Configure>", self.on_timeline_resize)
+		self.timeline_canvas.bind("<Button-1>", self.on_timeline_click)
+		self.timeline_canvas.bind("<B1-Motion>", self.on_timeline_drag)
+		self.timeline_canvas.bind("<Motion>", self.on_timeline_motion)
+		self.timeline_canvas.bind("<MouseWheel>", self.on_timeline_zoom)
+		self.timeline_canvas.bind("<Button-4>", self.on_timeline_zoom)
+		self.timeline_canvas.bind("<Button-5>", self.on_timeline_zoom)
+		self.timeline_canvas.bind("<ButtonPress-3>", self.on_timeline_pan_start)
+		self.timeline_canvas.bind("<B3-Motion>", self.on_timeline_pan_drag)
+		self.timeline_canvas.bind("<ButtonRelease-3>", self.on_timeline_pan_release)
+		
+		self.timeline_tooltip = ttk.Label(self.root, text="", background="#333333", foreground="#ffffff", relief="solid", borderwidth=1, padding=(5, 2))
+
+		self.paned_window.add(self.timeline_frame, minsize=40, height=60, stretch="never")
+
+		# Hide timeline pane by default on startup
+		self.paned_window.forget(self.timeline_frame)
 
 		# --- Lower: Filter View ---
 		filter_frame = ttk.LabelFrame(self.paned_window, text="Filters")
@@ -701,10 +729,7 @@ class LogAnalyzerApp:
 					line_tags, filtered_idx, duration, counts = msg[1], msg[2], msg[3], msg[4]
 
 					self.timeline_events, self.timestamps_found = msg[6], msg[7]
-					# Only update if full recalc or if we need to sync state
-					# In partial update, we merge results manually before calling this,
-					# or this msg contains the FULL updated state.
-					# For simplicity, worker always returns FULL state (even if derived partially)
+					self._update_timeline_data()
 
 					self.all_line_tags = line_tags
 					self.filtered_indices = filtered_idx
@@ -717,15 +742,10 @@ class LogAnalyzerApp:
 					self.apply_tag_styles()
 					self.refresh_filter_list()
 					self.refresh_view_fast()
-					# Update timeline data before redrawing
-					if self.timeline_win and self.timeline_win.winfo_exists():
-						self.timeline_win.sorted_events = sorted(self.timeline_events, key=lambda x: x[0]) if self.timeline_events else []
-						self.timeline_win.first_time = self.timeline_win.sorted_events[0][0] if self.timeline_win.sorted_events else None
-						self.timeline_win.last_time = self.timeline_win.sorted_events[-1][0] if self.timeline_win.sorted_events else None
-					# If timeline window is open, refresh it
-					if self.timeline_win and self.timeline_win.winfo_exists() and self.timeline_draw_func:
-						self.timeline_draw_func()
-					self.view_menu.entryconfig("Show Timeline", state="normal" if self.timestamps_found else "disabled")
+					
+					self.draw_timeline()
+					
+					self.view_menu.entryconfig("Toggle Timeline", state="normal" if self.timestamps_found else "disabled")
 
 					self.set_ui_busy(False)
 
@@ -956,6 +976,9 @@ class LogAnalyzerApp:
 		if hasattr(self, 'notes_tree') and self.notes_tree.winfo_exists():
 			self.notes_tree.tag_configure("odd", background=c["stripe_odd"])
 			self.notes_tree.tag_configure("even", background=c["stripe_even"])
+		
+		# Redraw timeline to apply theme changes
+		self.draw_timeline()
 
 		# Re-apply tag styles to update note color
 		self.apply_tag_styles()
@@ -1677,257 +1700,387 @@ class LogAnalyzerApp:
 		dialog.bind("<Escape>", lambda e: dialog.destroy())
 		return "break"
 
-	# --- Timeline Window ---
-	def show_timeline_window(self):
-		if not self.timeline_events:
-			messagebox.showinfo("Timeline", "No events found to display on the timeline.", parent=self.root)
+	# --- Embedded Timeline Logic ---
+
+	def _update_timeline_data(self):
+		"""Sorts events for the timeline."""
+		if self.timeline_events:
+			# Sort by time for drawing
+			self.timeline_events_by_time = sorted(self.timeline_events, key=lambda x: x[0])
+			# Sort by index for lookups
+			self.timeline_events_by_index = sorted(self.timeline_events, key=lambda x: x[2])
+		else:
+			self.timeline_events_by_time = []
+			self.timeline_events_by_index = []
+
+	def get_approx_time(self, raw_idx):
+		"""Estimates the timestamp for a given raw line index using event data, with interpolation."""
+		if not self.timeline_events_by_index: return None
+		
+		# Events are (time, filter_text, raw_index)
+		event_indices = [e[2] for e in self.timeline_events_by_index]
+		
+		idx = bisect.bisect_left(event_indices, raw_idx)
+		
+		if idx < len(event_indices) and event_indices[idx] == raw_idx:
+			# Exact match
+			return self.timeline_events_by_index[idx][0]
+		elif idx == 0:
+			# raw_idx is before or at the first event's raw_index
+			return self.timeline_events_by_index[0][0]
+		elif idx >= len(event_indices): # raw_idx is after or at the last event's raw_index
+			return self.timeline_events_by_index[-1][0]
+		else:
+			# raw_idx is between timeline_events_by_index[idx-1] and timeline_events_by_index[idx]
+			event_before = self.timeline_events_by_index[idx-1]
+			event_after = self.timeline_events_by_index[idx]
+			
+			time_before, raw_idx_before = event_before[0], event_before[2]
+			time_after, raw_idx_after = event_after[0], event_after[2]
+			
+			if raw_idx_after == raw_idx_before: # Safeguard against division by zero
+				return time_before
+			
+			# Linear interpolation of time based on raw_index
+			fraction = (raw_idx - raw_idx_before) / (raw_idx_after - raw_idx_before)
+			interpolated_timedelta = (time_after - time_before) * fraction
+			return time_before + interpolated_timedelta
+
+	def get_approx_index_from_time(self, target_time):
+		"""Finds the nearest line index for a given timestamp."""
+		if not self.timeline_events_by_time: return 0
+		
+		# Bisect to find time
+		idx = bisect.bisect_left(self.timeline_events_by_time, target_time, key=lambda x: x[0])
+		
+		if idx < len(self.timeline_events_by_time):
+			return self.timeline_events_by_time[idx][2]
+		elif idx > 0:
+			return self.timeline_events_by_time[idx-1][2]
+		return 0
+
+	def draw_timeline(self):
+		"""Full redraw of the timeline."""
+		self.timeline_canvas.delete("all")
+		width = self.timeline_canvas.winfo_width()
+		height = self.timeline_canvas.winfo_height()
+		
+		if width <= 1: return
+
+		is_dark = self.dark_mode.get()
+		bg_color = "#2e2e2e" if is_dark else "#ffffff"
+		self.timeline_canvas.config(bg=bg_color)
+		
+		if not self.timeline_events_by_time:
+			self.timeline_canvas.create_text(width//2, height//2, text="No events marked", fill="#888888")
 			return
 
-		if self.timeline_win and self.timeline_win.winfo_exists():
-			self.timeline_win.lift() # Bring to front if already open
-			return
+		# Draw Events
+		self._draw_timeline_events_layer(width, height)
+		
+		# Draw Viewport
+		self._draw_timeline_viewport_layer(width, height)
 
-		self.timeline_win = tk.Toplevel(self.root)
-		self.timeline_win.title("Event Timeline")
-		self._apply_icon(self.timeline_win)
-		self.timeline_win.geometry("800x250")
-		self.timeline_win.protocol("WM_DELETE_WINDOW", self._on_timeline_window_close)
-		self.timeline_win.config(bg=self.root.cget('bg')) # Inherit theme
-
-		# Canvas for drawing
-		canvas = tk.Canvas(self.timeline_win, bg="white")
-		canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-		# Store data directly on the window object to allow external updates
-		self.timeline_win.sorted_events = sorted(self.timeline_events, key=lambda x: x[0])
-		self.timeline_win.first_time = self.timeline_win.sorted_events[0][0]
-		self.timeline_win.last_time = self.timeline_win.sorted_events[-1][0]
-		total_duration = (self.timeline_win.last_time - self.timeline_win.first_time).total_seconds()
-		if total_duration == 0: total_duration = 1 # Avoid division by zero
-
-		# --- State for Zoom & Pan ---
-		zoom_level = 1.0  # 1.0 = 100% zoom
-		view_offset_seconds = 0.0 # Pan offset from the start
-
-		# --- State for Panning ---
-		pan_start_x = 0
-		pan_start_offset = 0
-
-		# Tooltip
-		# --- Aesthetic Tooltip ---
-		tooltip = ttk.Label(
-			self.timeline_win, text="",
-			background="#3C3C3C",      # Fixed dark background for visibility
-			foreground="#FFFFFF",      # White text
-			relief="flat",             # No border
-			padding=(8, 5))            # Horizontal and vertical padding
-
-		# Helper functions for coordinate conversion
-		# Helper to convert a datetime object to an X coordinate
-		def time_to_x(dt, width, margin, start_seconds, duration_seconds, first_time):
-			if not dt or not first_time: return -1
-			time_since_start = (dt - first_time).total_seconds()
-			# Use a small tolerance (epsilon) for floating point comparisons at the edges
-			epsilon = 1e-9
-			if time_since_start < (start_seconds - epsilon) or time_since_start > (start_seconds + duration_seconds + epsilon):
-				return -1 # Not in view, with tolerance
-
-			relative_pos = (time_since_start - start_seconds) / duration_seconds
-			return margin + relative_pos * (width - 2 * margin)
-
-		# Helper to convert an X coordinate back to a time offset in seconds
-		def x_to_time_offset(x_coord, width, margin, start_seconds, duration_seconds):
-			if (width - 2 * margin) <= 0: return start_seconds
-			relative_pos = (x_coord - margin) / (width - 2 * margin)
-			return start_seconds + relative_pos * duration_seconds
-
-		# Main drawing function
-		def draw_timeline():
-			canvas.delete("all")
-			width = canvas.winfo_width()
-			height = canvas.winfo_height()
-			margin = 20
-			y_axis = height - 30
-
-			# Adapt canvas to theme
-			is_dark = self.dark_mode.get()
-			canvas_bg = "#2e2e2e" if is_dark else "white"
-			axis_color = "#dcdcdc" if is_dark else "black"
-			canvas.config(bg=canvas_bg)
-
-			# Use data from the window object
-			sorted_events = self.timeline_win.sorted_events
-			first_time = self.timeline_win.first_time
-			last_time = self.timeline_win.last_time
-			if not sorted_events or not first_time or not last_time: return
-			total_duration = (last_time - first_time).total_seconds()
-
-			# --- Calculate visible time range based on zoom and pan ---
-			visible_duration_seconds = total_duration / zoom_level
-			start_time_seconds = view_offset_seconds
-			end_time_seconds = start_time_seconds + visible_duration_seconds
-
-			# Draw axis
-			canvas.create_line(margin, y_axis, width - margin, y_axis, fill=axis_color)
-
-			# Draw labels
-			def format_time_with_ms(dt_obj):
-				if dt_obj and dt_obj.microsecond > 0:
-					return dt_obj.strftime("%H:%M:%S.%f")[:-3] # Trim to ms
-				elif dt_obj:
-					return dt_obj.strftime("%H:%M:%S")
+	def _draw_timeline_events_layer(self, width, height):
+		self.timeline_buckets = [ [] for _ in range(width) ]
+		
+		start_time = self.timeline_events_by_time[0][0]
+		end_time = self.timeline_events_by_time[-1][0]
+		total_duration = (end_time - start_time).total_seconds()
+		if total_duration <= 0: total_duration = 1
+		
+		# Zoom logic
+		visible_duration = total_duration / self.timeline_zoom
+		view_start_time_offset = self.timeline_view_offset # Seconds from start
+		
+		filter_color_map = {}
+		for f in self.filters:
+			# Smart Color Logic: Use FG if BG is white/default
+			bg_lower = f.back_color.lower()
+			fg_lower = f.fore_color.lower()
+			if bg_lower in ("#ffffff", "#fff", "white", "#d9d9d9"):
+				# Use FG, but if FG is black, force a blue
+				if fg_lower in ("#000000", "#000", "black"):
+					filter_color_map[f.text] = "#0078D7"
 				else:
-					return ""
-			canvas.create_text(margin, y_axis + 10, text=format_time_with_ms(first_time + datetime.timedelta(seconds=start_time_seconds)), anchor="w", fill=axis_color)
-			canvas.create_text(width - margin, y_axis + 10, text=format_time_with_ms(first_time + datetime.timedelta(seconds=end_time_seconds)), anchor="e", fill=axis_color)
-
-			# Store drawn items for hit-testing
-			canvas.drawn_items = []
-
-			# Draw events
-			for dt, f_text, r_idx in sorted_events:
-				time_offset = (dt - first_time).total_seconds()
-				if time_offset < start_time_seconds or time_offset > end_time_seconds:
-					continue # Skip events outside the current view
-				x_pos = time_to_x(dt, width, margin, start_time_seconds, visible_duration_seconds, first_time)
-				# Find the filter to get its color
-				color = "#0078D7" # Default color
-				for flt in self.filters:
-					if flt.text == f_text:
-						color = flt.back_color
-						break
-
-				item_id = canvas.create_oval(x_pos - 4, y_axis - 4, x_pos + 4, y_axis + 4, fill=color, outline="black")
-				canvas.drawn_items.append({
-					"id": item_id,
-					"raw_index": r_idx,
-					"datetime": dt,
-					"filter_text": f_text
-				})
-
-		def on_resize(event):
-			draw_timeline()
-
-		def on_zoom(event):
-			nonlocal zoom_level, view_offset_seconds
-
-			# --- Zoom logic ---
-			zoom_factor = 1.2 if event.delta > 0 else 1 / 1.2
-			new_zoom_level = max(1.0, zoom_level * zoom_factor) # Don't zoom out past 100%
-
-			# --- Zoom centered on cursor ---
-			width = canvas.winfo_width()
-			margin = 20
-			# Time at cursor position before zoom
-			time_at_cursor_before = x_to_time_offset(event.x, width, margin, view_offset_seconds, total_duration / zoom_level)
-
-			# Update zoom level
-			zoom_level = new_zoom_level
-
-			# After zoom, the same time point should ideally be under the cursor.
-			# We adjust the view_offset to achieve this.
-			visible_duration_after = total_duration / zoom_level
-			cursor_pos_fraction = (event.x - margin) / (width - 2 * margin)
-
-			new_offset = time_at_cursor_before - (cursor_pos_fraction * visible_duration_after)
-
-			# Clamp offset to valid range
-			max_offset = total_duration - visible_duration_after
-			view_offset_seconds = max(0.0, min(new_offset, max_offset))
-
-			draw_timeline()
-			# Stop the event from propagating to the parent window (e.g., main log view scroll)
-			return "break"
-
-		# Mouse motion for tooltips
-		def on_motion(event):
-			x, y = event.x, event.y
-			canvas_width = canvas.winfo_width()
-			found_item = None
-
-			# Find the topmost item under the cursor
-			for item in reversed(canvas.find_withtag("all")):
-				coords = canvas.coords(item)
-				if len(coords) == 4 and coords[0] <= x <= coords[2] and coords[1] <= y <= coords[3]:
-					for drawn in canvas.drawn_items:
-						if drawn["id"] == item:
-							found_item = drawn; break
-				if found_item: break
-
-			if found_item:
-				# 1. Construct tooltip text with timestamp
-				dt_obj = found_item["datetime"]
-				ts_str = dt_obj.strftime("%H:%M:%S.%f")[:-3] if dt_obj.microsecond > 0 else dt_obj.strftime("%H:%M:%S")
-				tooltip_text = f"{ts_str}\nL{found_item['raw_index']+1}: {found_item['filter_text']}"
-				tooltip.config(text=tooltip_text, justify=tk.LEFT)
-				tooltip.update_idletasks() # Update geometry to get correct width
-
-				# 2. Adjust position to prevent clipping
-				tooltip_width = tooltip.winfo_width()
-				place_x = x + 15
-				if place_x + tooltip_width > canvas_width:
-					place_x = x - tooltip_width - 10 # Place on the left
-
-				tooltip.place(x=place_x, y=y + 10)
+					filter_color_map[f.text] = f.fore_color
 			else:
-				tooltip.place_forget()
+				filter_color_map[f.text] = f.back_color
 
-		# Panning start
-		def on_pan_start(event):
-			nonlocal pan_start_x, pan_start_offset
-			pan_start_x = event.x
-			pan_start_offset = view_offset_seconds
-			canvas.config(cursor="fleur")
+		# Calculate visible time range
+		t_start = start_time + datetime.timedelta(seconds=view_start_time_offset)
+		t_end = t_start + datetime.timedelta(seconds=visible_duration)
 
-		def on_pan_drag(event):
-			# Panning drag
-			nonlocal view_offset_seconds
-			dx = event.x - pan_start_x
+		# 1. Bucket events (Optimization: Binary search for start/end index)
+		import bisect
+		idx_start = bisect.bisect_left(self.timeline_events_by_time, t_start, key=lambda x: x[0])
+		
+		for i in range(idx_start, len(self.timeline_events_by_time)):
+			dt, f_text, r_idx = self.timeline_events_by_time[i]
+			if dt > t_end: break # Out of view
+			
+			offset_in_view = (dt - t_start).total_seconds()
+			x = int((offset_in_view / visible_duration) * width)
+			
+			if 0 <= x < width:
+				self.timeline_buckets[x].append((dt, f_text, r_idx))
+				
+		# 2. Draw buckets (Density Bars)
+		max_count = 0
+		for b in self.timeline_buckets:
+			if len(b) > max_count: max_count = len(b)
+			
+		if max_count == 0: return
 
-			width = canvas.winfo_width()
-			margin = 20
-			# Convert pixel delta to time delta
-			time_per_pixel = (total_duration / zoom_level) / (width - 2 * margin)
-			time_delta = dx * time_per_pixel
+		from collections import Counter
 
-			# Clamp new offset
-			max_offset = total_duration - (total_duration / zoom_level)
-			view_offset_seconds = max(0.0, min(pan_start_offset - time_delta, max_offset))
-			draw_timeline()
+		for x, events in enumerate(self.timeline_buckets):
+			if not events: continue
+			count = len(events)
+			
+			# Height calculation (Linear density)
+			bar_height = int((count / max_count) * height)
+			if bar_height < 3: bar_height = 3 # Minimum visibility
+			
+			# Determine dominant color
+			colors = [filter_color_map.get(e[1], "#0078D7") for e in events]
+			if colors:
+				most_common_color = Counter(colors).most_common(1)[0][0]
+			else:
+				most_common_color = "#0078D7"
+			
+			# Draw bar from bottom
+			y1 = height
+			y2 = height - bar_height
+			
+			self.timeline_canvas.create_line(x, y1, x, y2, fill=most_common_color, width=1, tags="events")
 
+	def _draw_timeline_viewport_layer(self, width, height):
+		self.timeline_canvas.delete("viewport")
+		
+		if not self.timeline_events_by_time: return
+		if not hasattr(self, 'view_start_index') or not hasattr(self, 'current_displayed_lines'): return
 
-		canvas.bind("<Configure>", on_resize)
-		canvas.bind("<MouseWheel>", on_zoom) # For Windows/macOS trackpad
-		canvas.bind("<Button-4>", on_zoom)   # For Linux scroll up
-		canvas.bind("<Button-5>", on_zoom)   # For Linux scroll down
-		canvas.bind("<Motion>", on_motion)
-		canvas.bind("<ButtonPress-1>", on_pan_start)
-		canvas.bind("<B1-Motion>", on_pan_drag)
+		start_time = self.timeline_events_by_time[0][0]
+		end_time = self.timeline_events_by_time[-1][0]
+		total_duration = (end_time - start_time).total_seconds()
+		if total_duration <= 0: return
 
-		# We need a separate click handler for release, because B1-Motion captures the drag
-		def on_pan_release(event):
-			canvas.config(cursor="")
-			# Check if it was a click (no drag)
-			if abs(event.x - pan_start_x) < 3: # Click tolerance
-				x, y = event.x, event.y
-				found_item = None
-				for item in reversed(canvas.find_withtag("all")):
-					coords = canvas.coords(item)
-					if len(coords) == 4 and coords[0] <= x <= coords[2] and coords[1] <= y <= coords[3]:
-						for drawn in canvas.drawn_items:
-							if drawn["id"] == item:
-								found_item = drawn; break
-					if found_item: break
-				if found_item: self.jump_to_line(found_item["raw_index"])
+		visible_duration = total_duration / self.timeline_zoom
+		view_start_time_offset = self.timeline_view_offset
+		
+		# Viewport Window Time - current view on timeline
+		t_timeline_view_start = start_time + datetime.timedelta(seconds=view_start_time_offset)
 
-		canvas.bind("<ButtonRelease-1>", on_pan_release)
+		# Get time for start and end of LOG view (the highlighted box)
+		first_displayed_raw_idx = self.get_view_item(self.view_start_index)[2]
+		# Ensure last_displayed_raw_idx doesn't go beyond total lines
+		last_displayed_raw_idx = self.get_view_item(min(self.view_start_index + self.current_displayed_lines - 1, self.get_total_count() - 1))[2]
 
-		# Store the draw function for external calls
-		self.timeline_draw_func = draw_timeline
-		draw_timeline() # Initial draw
+				t_log_start = self.get_approx_time(first_displayed_raw_idx)
+				t_log_end = self.get_approx_time(last_displayed_raw_idx)
+				
+				if t_log_start and t_log_end:
+					offset_start = (t_log_start - t_timeline_view_start).total_seconds()
+					offset_end = (t_log_end - t_timeline_view_start).total_seconds()
+					
+					x1 = (offset_start / visible_duration) * width
+					x2 = (offset_end / visible_duration) * width
+					
+					# Clamp to canvas width
+					x1 = max(0, x1)
+					x2 = min(width, x2)
+					
+					if x2 - x1 < 1: # Ensure it has at least 1 pixel width to be visible
+						# If range is too small, make it a single pixel line at x1
+						x2 = x1 + 1 
+					
+					is_dark = self.dark_mode.get()
+					indicator_fill_color = "#cccccc" if is_dark else "#333333" # Greyish color
+					indicator_outline_color = "#ffffff" if is_dark else "#000000"
+					
+					# Use fill with a thin outline, possibly with stipple for transparency if desired
+					self.timeline_canvas.create_rectangle(x1, 0, x2, height, 
+														fill=indicator_fill_color, # Solid fill for now
+														outline=indicator_outline_color, 
+														width=1, tags="viewport") # Thinner outline
+	def update_timeline_viewport(self):
+		"""Only redraws the viewport indicator (fast)."""
+		width = self.timeline_canvas.winfo_width()
+		height = self.timeline_canvas.winfo_height()
+		if width <= 1: return
+		self._draw_timeline_viewport_layer(width, height)
 
-	def _on_timeline_window_close(self):
-		self.timeline_win.destroy(); self.timeline_win = None; self.timeline_draw_func = None
+	def on_timeline_resize(self, event):
+		self.draw_timeline()
+
+	def on_timeline_motion(self, event):
+		x = event.x
+		width = self.timeline_canvas.winfo_width()
+		
+		# Check bounds and data existence
+		if not hasattr(self, 'timeline_buckets') or x < 0 or x >= len(self.timeline_buckets):
+			self.timeline_tooltip.place_forget()
+			return
+			
+		bucket = self.timeline_buckets[x]
+		if not bucket:
+			self.timeline_tooltip.place_forget()
+			return
+			
+		# Prepare tooltip info
+		count = len(bucket)
+		start_t = bucket[0][0].strftime("%H:%M:%S")
+		end_t = bucket[-1][0].strftime("%H:%M:%S")
+		
+		from collections import Counter
+		texts = [e[1] for e in bucket]
+		top_text_item = Counter(texts).most_common(1)[0] # (text, count)
+		
+		msg = f"Time: {start_t} - {end_t}\nTotal Events: {count}\nTop: {top_text_item[0]} ({top_text_item[1]})"
+		
+		# Calculate Position (Avoid clipping)
+		rx, ry = self.timeline_canvas.winfo_rootx(), self.timeline_canvas.winfo_rooty()
+		tx = rx + x + 15
+		ty = ry - 60 # Above the cursor
+		
+		# Adjust if off-screen right
+		screen_w = self.root.winfo_screenwidth()
+		# Or just root width if not fullscreen. Use root geometry.
+		root_x = self.root.winfo_rootx()
+		root_w = self.root.winfo_width()
+		
+		if tx + 200 > root_x + root_w:
+			tx = rx + x - 210
+			
+		# Place relative to root
+		rel_x = tx - root_x
+		rel_y = ty - self.root.winfo_rooty()
+		
+		self.timeline_tooltip.config(text=msg)
+		self.timeline_tooltip.place(x=rel_x, y=rel_y)
+		self.timeline_tooltip.lift()
+
+	def on_timeline_zoom(self, event):
+		if not self.timeline_events_by_time: return
+		
+		# Determine direction
+		if event.num == 4 or event.delta > 0:
+			zoom_factor = 1.1
+		else:
+			zoom_factor = 0.9
+			
+		new_zoom = self.timeline_zoom * zoom_factor
+		if new_zoom < 1.0: new_zoom = 1.0 # Min zoom 1.0 (fit all)
+		
+		# Zoom centered on mouse X
+		width = self.timeline_canvas.winfo_width()
+		start_time = self.timeline_events_by_time[0][0]
+		end_time = self.timeline_events_by_time[-1][0]
+		total_duration = (end_time - start_time).total_seconds()
+		if total_duration <= 0: return
+		
+		# Time at cursor before zoom
+		old_visible_duration = total_duration / self.timeline_zoom
+		cursor_ratio = event.x / width
+		time_offset_at_cursor = self.timeline_view_offset + (cursor_ratio * old_visible_duration)
+		
+		self.timeline_zoom = new_zoom
+		new_visible_duration = total_duration / self.timeline_zoom
+		
+		# Adjust offset so time_offset_at_cursor remains at cursor_ratio
+		new_view_offset = time_offset_at_cursor - (cursor_ratio * new_visible_duration)
+		
+		# Clamp
+		max_offset = total_duration - new_visible_duration
+		self.timeline_view_offset = max(0.0, min(new_view_offset, max_offset))
+		
+		self.draw_timeline()
+		return "break"
+
+	def on_timeline_pan_start(self, event):
+		self.timeline_pan_start_x = event.x
+		self.timeline_pan_start_offset = self.timeline_view_offset
+		self.timeline_canvas.config(cursor="fleur")
+
+	def on_timeline_pan_drag(self, event):
+		width = self.timeline_canvas.winfo_width()
+		if not self.timeline_events_by_time: return
+		start_time = self.timeline_events_by_time[0][0]
+		end_time = self.timeline_events_by_time[-1][0]
+		total_duration = (end_time - start_time).total_seconds()
+		if total_duration <= 0: return
+
+		visible_duration = total_duration / self.timeline_zoom
+		
+		dx = self.timeline_pan_start_x - event.x # Drag left to move view right
+		dt_per_pixel = visible_duration / width
+		
+		new_offset = self.timeline_pan_start_offset + (dx * dt_per_pixel)
+		
+		# Clamp
+		max_offset = total_duration - visible_duration
+		self.timeline_view_offset = max(0.0, min(new_offset, max_offset))
+		
+		self.draw_timeline()
+
+	def on_timeline_pan_release(self, event):
+		self.timeline_canvas.config(cursor="hand2")
+
+	def on_timeline_click(self, event):
+		self._handle_timeline_nav(event.x)
+
+	def on_timeline_drag(self, event):
+		self._handle_timeline_nav(event.x)
+
+	def _handle_timeline_nav(self, x):
+		if not self.timeline_events_by_time: return
+		width = self.timeline_canvas.winfo_width()
+		if width <= 0: return
+		
+		# Map x to time considering zoom/offset
+		start_time = self.timeline_events_by_time[0][0]
+		end_time = self.timeline_events_by_time[-1][0]
+		total_duration = (end_time - start_time).total_seconds()
+		visible_duration = total_duration / self.timeline_zoom
+		
+		ratio = x / width
+		offset_in_view = ratio * visible_duration
+		target_time_offset = self.timeline_view_offset + offset_in_view
+		
+		target_time = start_time + datetime.timedelta(seconds=target_time_offset)
+		
+		# Find index
+		target_idx = self.get_approx_index_from_time(target_time)
+		
+		# Jump
+		self.jump_to_line(target_idx)
+
+	def toggle_timeline_pane(self):
+		"""Toggles the visibility of the timeline pane."""
+		# If mapped (visible), hide it.
+		if self.timeline_frame.winfo_manager():
+			self.paned_window.forget(self.timeline_frame)
+		else:
+			# Show it. Insert at index 1 (between Log View [0] and Filter View [Last])       
+			# If Filter View is hidden/removed, it might be the last one.
+			# But PanedWindow index logic is simple.
+			# We want it below the content frame.
+			
+			# Current panes:
+			panes = self.paned_window.panes()
+			
+			# We assume top pane is always there (index 0).
+			# We insert at index 1.
+			if len(panes) >= 1:
+				self.paned_window.add(self.timeline_frame, after=panes[0], minsize=40, height=60, stretch="never")
+			else:
+				self.paned_window.add(self.timeline_frame, minsize=40, height=60, stretch="never")
+		
+		# Force a redraw if showing
+		if self.timeline_frame.winfo_manager():
+			self.draw_timeline()
+
 
 	# --- Rendering ---
 	def render_viewport(self):
@@ -1972,12 +2125,16 @@ class LogAnalyzerApp:
 
 		self.text_area.tag_raise("current_line")
 		self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED)
+		self.current_displayed_lines = int(self.text_area.index('end-1c').split('.')[0]) # Get actual number of lines displayed
+		self.update_timeline_viewport()
 
 	def update_scrollbar_thumb(self):
 		total = self.get_total_count()
 		if total == 0: self.scrollbar_y.set(0, 1)
 		else:
-			page_size = self.visible_rows / total
+			# Use the number of lines actually displayed in the text area for page_size
+			displayed_lines = self.current_displayed_lines if hasattr(self, 'current_displayed_lines') else 1
+			page_size = displayed_lines / total
 			start = self.view_start_index / total
 			end = start + page_size
 			self.scrollbar_y.set(start, end)
@@ -1988,11 +2145,12 @@ class LogAnalyzerApp:
 		op = args[0]
 		if op == "scroll":
 			units = int(args[1]); what = args[2]
-			step = self.visible_rows if what == "pages" else 1
+			page_size = self.current_displayed_lines if hasattr(self, 'current_displayed_lines') else 1
+			step = page_size if what == "pages" else 1
 			new_start = self.view_start_index + (units * step)
 		elif op == "moveto":
 			fraction = float(args[1]); new_start = int(total * fraction)
-		new_start = max(0, min(new_start, total - self.visible_rows))
+		new_start = max(0, min(new_start, total - (self.current_displayed_lines if hasattr(self, 'current_displayed_lines') else 1)))
 		if new_start != self.view_start_index:
 			self.view_start_index = int(new_start)
 			self.render_viewport(); self.update_scrollbar_thumb()
@@ -2004,7 +2162,7 @@ class LogAnalyzerApp:
 		if event.num == 5 or event.delta < 0: scroll_dir = 1
 		elif event.num == 4 or event.delta > 0: scroll_dir = -1
 		step = 3; new_start = self.view_start_index + (scroll_dir * step)
-		new_start = max(0, min(new_start, total - self.visible_rows))
+		new_start = max(0, min(new_start, total - (self.current_displayed_lines if hasattr(self, 'current_displayed_lines') else 1)))
 		if new_start != self.view_start_index:
 			self.view_start_index = int(new_start)
 			self.render_viewport(); self.update_scrollbar_thumb()

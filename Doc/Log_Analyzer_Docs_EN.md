@@ -77,11 +77,15 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 ### 🖥️ Intuitive UI
 
-* **Progress Bar**: A status bar at the bottom provides real-time visual feedback on loading and filtering progress.
 
-* **Detailed Statistics**: The status bar displays current Load Time, Filter Time, and displayed line count statistics.
 
-* **Drag-and-Drop Sorting**: Filter priority can be adjusted simply by dragging the filter list items.
+*   **Integrated Event Timeline**: A powerful, interactive timeline embedded directly into the main interface. It features density heatmap visualization, zoom, pan, and real-time synchronization with the log view for efficient event analysis.
+
+*   **Progress Bar**: A status bar at the bottom provides real-time visual feedback on loading and filtering progress.
+
+*   **Detailed Statistics**: The status bar displays current Load Time, Filter Time, and displayed line count statistics.
+
+*   **Drag-and-Drop Sorting**: Filter priority can be adjusted simply by dragging the filter list items.
 
 ## 3. User Guide
 
@@ -114,15 +118,9 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 #### View
 
 *   **Find... (Ctrl+F)**: Opens a search bar at the top of the log view to find text within the entire log file.
-
 *   **Go to Line... (Ctrl+G)**: Opens a dialog to jump directly to a specific line number.
-
 *   **Dark Mode**: Toggles a persistent, application-wide dark theme for improved viewing in low-light environments.
-
-*   **Show Timeline**: Opens a new window displaying a graphical timeline of events.
-    *   This option is only enabled if the loaded log file contains recognizable timestamps.
-    *   Events are filters that have been marked with the **"As Event"** property. The color of the event point on the timeline corresponds to the filter's background color.
-    *   Hovering over an event point shows its timestamp, line number, and content; clicking it jumps to that line in the log view.
+*   **Toggle Timeline**: Shows or hides the integrated Event Timeline panel. When visible, this interactive timeline provides a visual overview of events, allowing for zooming, panning, and quick navigation within the log file.
 
 #### Notes
 
@@ -171,6 +169,21 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 #### 🛠 Fixes
 
 *   **UI Stability**: Fixed an issue where the filter list would not refresh correctly if no log file was loaded.
+
+### Version 1.6.4 (TBD) - *Timeline & UI Enhancements*
+
+#### ✨ Event Timeline
+*   **Integrated Display:** The Timeline is now embedded within the main application window, providing an always-available overview of log events.
+*   **Density Heatmap:** Events are displayed as a density heatmap, making it easy to spot clusters or anomalies in large log files.
+*   **Interactive Navigation:** Features include mouse scroll wheel Zoom, right-click Pan, and click-to-jump navigation.
+*   **Enhanced Visibility:** Smart color mapping ensures event highlights are clear in both light and dark themes.
+*   **Bi-directional Synchronization:** The timeline visually tracks the visible log area, and interaction with the timeline scrolls the log view.
+
+#### 🛠 General Fixes
+*   **Scrolling Stability:** Improved scrolling accuracy and stability in filtered log views.
+*   **Theme Integration:** Ensured the timeline's appearance correctly adapts to Dark Mode changes.
+*   **Default Behavior:** The timeline is now hidden by default on startup and can be toggled via the View menu.
+*   **Viewport Indicator:** Stabilized the timeline's viewport indicator for precise tracking of the visible log range.
 
 ### Version 1.6.2 (2025-12-22)
 
