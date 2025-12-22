@@ -146,12 +146,12 @@ class LogAnalyzerApp:
 
 		# Modern Treeview Style
 		style.configure("Treeview", rowheight=28, font=("Consolas", 11), borderwidth=1, relief="solid")
-		style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), borderwidth=1, relief="groove")
+		style.configure("Treeview.Heading", font=("Consolas", 10, "bold"), borderwidth=1, relief="groove")
 
 		style.configure("TLabelFrame", padding=5)
-		style.configure("TLabelFrame.Label", font=("Segoe UI", 10, "bold"))
+		style.configure("TLabelFrame.Label", font=("Consolas", 10, "bold"))
 
-		style.configure("TButton", padding=4, font=("Segoe UI", 10))
+		style.configure("TButton", padding=4, font=("Consolas", 10))
 
 		style.configure("TLabel", font=("Consolas", 12))
 		style.configure("TCheckbutton", font=("Consolas", 12))
@@ -303,9 +303,6 @@ class LogAnalyzerApp:
 		status_frame = ttk.Frame(root, relief=tk.SUNKEN)
 		status_frame.pack(side=tk.BOTTOM, fill=tk.X)
 
-		self.progress_bar = ttk.Progressbar(status_frame, orient="horizontal", mode="determinate", length=200)
-		self.progress_bar.pack(side=tk.RIGHT, padx=5, pady=5)
-
 		self.status_label = ttk.Label(status_frame, text="Ready", anchor=tk.W)
 		self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
@@ -347,7 +344,7 @@ class LogAnalyzerApp:
 
 		# Welcome Label (Empty State)
 		self.welcome_label = tk.Label(self.text_area, text="Drag & Drop Log File Here\nor use File > Open Log",
-									  font=("Segoe UI", 14), fg="#888888", bg="#ffffff")
+									  font=("Consolas", 14), fg="#888888", bg="#ffffff")
 		self.welcome_label.place(relx=0.5, rely=0.5, anchor="center")
 
 		# Configure default selection tag immediately
@@ -646,13 +643,7 @@ class LogAnalyzerApp:
 				msg = self.msg_queue.get_nowait()
 				msg_type = msg[0]
 
-				if msg_type == 'progress':
-					current, total, text = msg[1], msg[2], msg[3]
-					self.progress_bar["maximum"] = total
-					self.progress_bar["value"] = current
-					self.update_status(text)
-
-				elif msg_type == 'load_complete':
+				if msg_type == 'load_complete':
 					lines, duration, filepath, rust_eng = msg[1], msg[2], msg[3], msg[4]
 					self.rust_engine = rust_eng
 					self.raw_lines = lines
@@ -714,7 +705,6 @@ class LogAnalyzerApp:
 					self.view_menu.entryconfig("Show Timeline", state="normal" if self.timestamps_found else "disabled")
 
 					self.set_ui_busy(False)
-					self.progress_bar["value"] = 0
 
 				elif msg_type == 'status':
 					self.update_status(msg[1])
@@ -749,7 +739,7 @@ class LogAnalyzerApp:
 
 			toast.config(bg=bg)
 			# Use tk.Label for direct color control
-			lbl = tk.Label(toast, text=message, bg=bg, fg=fg, font=("Segoe UI", 10), padx=15, pady=8)
+			lbl = tk.Label(toast, text=message, bg=bg, fg=fg, font=("Consolas", 10), padx=15, pady=8)
 			lbl.pack()
 
 			# Center horizontally, near bottom
@@ -980,7 +970,6 @@ class LogAnalyzerApp:
 
 		self.config["last_log_dir"] = os.path.dirname(filepath); self.save_config()
 		self._add_to_recent_files(filepath) # Add to recent list
-		self.progress_bar["value"] = 0
 		t = threading.Thread(target=self._worker_load_log, args=(filepath,))
 		t.daemon = True
 		t.start()
@@ -989,7 +978,6 @@ class LogAnalyzerApp:
 		try:
 			t_start = time.time()
 			file_size = os.path.getsize(filepath)
-			self.msg_queue.put(('progress', 0, 100, f"Loading {os.path.basename(filepath)}..."))
 
 			lines = []
 			rust_eng = None
@@ -1010,7 +998,6 @@ class LogAnalyzerApp:
 
 		self._add_to_recent_files(filepath) # Add to recent list
 		self.set_ui_busy(True)
-		self.progress_bar["value"] = 0
 		t = threading.Thread(target=self._worker_load_log, args=(filepath,))
 		t.daemon = True
 		t.start()
