@@ -231,7 +231,11 @@ class LogAnalyzerApp:
 		self.load_duration_str = "0.000s"
 		self.filter_duration_str = "0.000s"
 
+		# Drag & Drop State
 		self.drag_start_index = None
+		self.drag_target_id = None
+		self.drag_position = None # 'before' or 'after'
+		self.drop_indicator = None # Will be created after tree
 
 		# --- UI Layout ---
 
@@ -443,6 +447,10 @@ class LogAnalyzerApp:
 		self.tree.bind("<Button-3>", self.on_tree_right_click)
 		self.tree.bind("<Button-1>", self.on_tree_click)
 		self.tree.bind("<ButtonRelease-1>", self.on_tree_release)
+		self.tree.bind("<B1-Motion>", self.on_tree_drag_motion)
+
+		# Create Drop Indicator (Hidden by default)
+		self.drop_indicator = tk.Frame(self.tree, height=2, bg="black")
 
 		# Context Menu
 		self.event_menu_var = tk.BooleanVar()
@@ -452,6 +460,9 @@ class LogAnalyzerApp:
 		self.context_menu.add_command(label="Remove Filter", command=self.on_filter_delete)
 		self.context_menu.add_command(label="Edit Filter", command=self.edit_selected_filter)
 		self.context_menu.add_command(label="Add Filter", command=self.add_filter_dialog)
+		self.context_menu.add_separator()
+		self.context_menu.add_command(label="Move to Top", command=self.move_filter_to_top)
+		self.context_menu.add_command(label="Move to Bottom", command=self.move_filter_to_bottom)
 
 		self.paned_window.add(filter_frame, minsize=100, stretch="never")
 
@@ -937,6 +948,10 @@ class LogAnalyzerApp:
 		# Status Bar
 		self.status_label.config(background=c["bg"], foreground=c["fg"])
 
+		# Drop Indicator
+		if self.drop_indicator:
+			self.drop_indicator.config(bg=c["fg"])
+
 		# Apply Stripes to Notes Treeview if it exists
 		if hasattr(self, 'notes_tree') and self.notes_tree.winfo_exists():
 			self.notes_tree.tag_configure("odd", background=c["stripe_odd"])
@@ -1036,6 +1051,7 @@ class LogAnalyzerApp:
 		# We now rely solely on the Rust engine for filtering.
 		# If rust_engine is not loaded (no file), we can't filter.
 		if not self.rust_engine:
+			self.refresh_filter_list()
 			self.set_ui_busy(False)
 			return
 
@@ -2314,33 +2330,76 @@ class LogAnalyzerApp:
 				item_id = self.tree.identify_row(event.y)
 				if item_id: self.drag_start_index = self.tree.index(item_id)
 
-	def on_tree_release(self, event):
-		if self.is_processing: return
+	def on_tree_drag_motion(self, event):
 		if self.drag_start_index is None: return
 		target_id = self.tree.identify_row(event.y)
-		if target_id:
-			target_index = self.tree.index(target_id)
-			if target_index != self.drag_start_index:
+
+		if not target_id:
+			self.drop_indicator.place_forget()
+			self.drag_target_id = None
+			return
+
+		bbox = self.tree.bbox(target_id)
+		if not bbox: return
+
+		# bbox = (x, y, width, height)
+		y, h = bbox[1], bbox[3]
+
+		# Determine if we are in the top half or bottom half
+		if event.y < y + h / 2:
+			self.drag_position = 'before'
+			y_line = y
+		else:
+			self.drag_position = 'after'
+			y_line = y + h
+
+		self.drop_indicator.place(x=0, y=y_line, width=self.tree.winfo_width(), height=2)
+		self.drop_indicator.lift()
+		self.drag_target_id = target_id
+
+	def on_tree_release(self, event):
+		self.drop_indicator.place_forget()
+		if self.is_processing: return
+		if self.drag_start_index is None: return
+
+		if self.drag_target_id:
+			start_idx = self.drag_start_index
+			target_idx = self.tree.index(self.drag_target_id)
+
+			if self.drag_position == 'after':
+				target_idx += 1
+
+			# Adjust index if moving downwards
+			if target_idx > start_idx:
+				target_idx -= 1
+
+			if start_idx != target_idx:
 				item = self.filters.pop(self.drag_start_index)
-				self.filters.insert(target_index, item)
+				self.filters.insert(target_idx, item)
 				self.recalc_filtered_data() # Order changed, must full recalc
 		self.drag_start_index = None
+		self.drag_target_id = None
 
 	def on_tree_right_click(self, event):
 		item_id = self.tree.identify_row(event.y)
 		if item_id:
-			self.tree.selection_set(item_id)
+			if item_id not in self.tree.selection():
+				self.tree.selection_set(item_id)
 			# Update the context menu's checkbutton state based on the selected filter
 			idx = self.tree.index(item_id)
 			self.event_menu_var.set(self.filters[idx].is_event)
 			self.context_menu.entryconfig("Set as Event", state="normal")
 			self.context_menu.entryconfig("Remove Filter", state="normal")
 			self.context_menu.entryconfig("Edit Filter", state="normal")
+			self.context_menu.entryconfig("Move to Top", state="normal")
+			self.context_menu.entryconfig("Move to Bottom", state="normal")
 		else:
 			self.tree.selection_remove(self.tree.selection())
 			self.context_menu.entryconfig("Set as Event", state="disabled")
 			self.context_menu.entryconfig("Remove Filter", state="disabled")
 			self.context_menu.entryconfig("Edit Filter", state="disabled")
+			self.context_menu.entryconfig("Move to Top", state="disabled")
+			self.context_menu.entryconfig("Move to Bottom", state="disabled")
 		self.context_menu.post(event.x_root, event.y_root)
 
 	def toggle_selected_filters_as_event(self):
@@ -2352,6 +2411,36 @@ class LogAnalyzerApp:
 		for item_id in selected_items:
 			idx = self.tree.index(item_id)
 			self.filters[idx].is_event = new_state
+		self.recalc_filtered_data()
+
+	def move_filter_to_top(self):
+		if self.is_processing: return
+		selected_items = self.tree.selection()
+		if not selected_items: return
+
+		indices = sorted([self.tree.index(item) for item in selected_items])
+		items_to_move = []
+		# Remove in reverse order to keep indices valid
+		for idx in reversed(indices):
+			items_to_move.insert(0, self.filters.pop(idx))
+
+		# Insert at top
+		for item in reversed(items_to_move):
+			self.filters.insert(0, item)
+		self.recalc_filtered_data()
+
+	def move_filter_to_bottom(self):
+		if self.is_processing: return
+		selected_items = self.tree.selection()
+		if not selected_items: return
+
+		indices = sorted([self.tree.index(item) for item in selected_items])
+		items_to_move = []
+		for idx in reversed(indices):
+			items_to_move.insert(0, self.filters.pop(idx))
+
+		# Append to bottom
+		self.filters.extend(items_to_move)
 		self.recalc_filtered_data()
 
 	def edit_selected_filter(self):
