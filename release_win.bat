@@ -99,7 +99,6 @@ echo [Step 5/7] Staging files for commit...
 
 :: Define old/new filenames
 set "OLD_HTML_FILE=Doc\Log_Analyzer_%OLD_VER%_Docs_EN.html"
-set "OLD_EXE_FILE=release\windows\LogAnalyzer_%OLD_VER%.exe"
 set "NEW_HTML_FILE=Doc\Log_Analyzer_%NEW_VER%_Docs_EN.html"
 set "NEW_EXE_FILE=release\windows\LogAnalyzer_%NEW_VER%.exe"
 
@@ -111,16 +110,10 @@ if exist "%OLD_HTML_FILE%" (
     )
 )
 
-if exist "%OLD_EXE_FILE%" (
-    if /I "%OLD_EXE_FILE%" neq "%NEW_EXE_FILE%" (
-        echo      Removing old doc file from Git: %OLD_EXE_FILE%
-        git rm "%OLD_EXE_FILE%" > nul
-    )
-)
-
 :: Add all new/modified files
 echo      Adding new release files to Git...
-git add loganalyzer.py "%NEW_HTML_FILE%" "%NEW_EXE_FILE%"
+git add loganalyzer.py "%NEW_HTML_FILE%"
+git add loganalyzer.py "%NEW_HTML_FILE%"
 
 :: --- 6. Commit ---
 set "GIT_COMMIT_MSG=Release %NEW_VER%"
