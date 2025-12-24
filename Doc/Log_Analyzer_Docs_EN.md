@@ -71,21 +71,25 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 ### 📂 File & Compatibility
 
-* **TAT Format Support**: Fully compatible with `TextAnalysisTool.NET`'s `.tat` file format, allowing for seamless import/export of existing filter rules.
+*   **Multi-Log Management**: Simultaneously load and switch between multiple log files using a dedicated sidebar. Files are automatically sorted by their start time for chronological analysis.
 
-* **JSON Support**: Built-in functionality for importing/exporting filter rules in JSON format (Advanced feature).
+*   **High-Performance Merged View**: Combine multiple logs into a single, unified view. Utilizing a smart Proxy-Based architecture, the tool can merge tens of millions of lines with minimal memory usage while maintaining full support for filtering and the timeline.
+
+*   **TAT Format Support**: Fully compatible with `TextAnalysisTool.NET`'s `.tat` file format, allowing for seamless import/export of existing filter rules.
+
+*   **JSON Support**: Built-in functionality for importing/exporting filter rules in JSON format (Advanced feature).
 
 ### 🖥️ Intuitive UI
 
+*   **Dynamic Sidebar**: A collapsible log list panel that automatically appears when multiple files are loaded, featuring right-click management and auto-width adjustment.
 
+*   **Integrated Event Timeline**: A powerful, interactive timeline embedded directly into the main interface. It features density heatmap visualization, auto-focusing on active time ranges, block-style event rendering, and a time axis for precise context.
 
-*   **Integrated Event Timeline**: A powerful, interactive timeline embedded directly into the main interface. It features density heatmap visualization, zoom, pan, and real-time synchronization with the log view for efficient event analysis.
+*   **Find History**: Remembers up to 10 most recent search queries in a convenient dropdown menu.
 
-*   **Progress Bar**: A status bar at the bottom provides real-time visual feedback on loading and filtering progress.
+*   **Progress Feedback**: The status bar provides real-time statistics on Load Time, Filter Time, and processing progress for massive merge operations.
 
-*   **Detailed Statistics**: The status bar displays current Load Time, Filter Time, and displayed line count statistics.
-
-*   **Drag-and-Drop Sorting**: Filter priority can be adjusted simply by dragging the filter list items.
+*   **Data Safety**: Includes an unsaved changes warning when exiting to prevent accidental loss of filter rules.
 
 ## 3. User Guide
 
@@ -93,34 +97,37 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 #### File
 
-* **Open Log...**: Open a log file (.log, .txt, *.*).
+* **Open Log...**: Open a log file (.log, .txt, *.*). Loading a single file clears the current multi-log session.
 
-* **Open Recent**: Provides a list of the last 10 opened files for quick access. Includes an option to clear the list.
+* **Open Multiple Logs...**: Select and load multiple files. These will appear in the Log List sidebar. Duplicates are automatically ignored.
+
+* **Open Recent**: Provides a list of the last 10 opened files for quick access.
 
 * **Load Filters**: Import filter rule files in `.tat` or `.xml` format.
 
-* **Save Filters**: Save current filter rules to the file (overwrites the current file).
+* **Save Filters**: Save current filter rules.
 
-* **Save Filters As**: Save current filter rules as a new file.
+#### Sidebar & Merged View
 
-* **Exit**: Close the application.
+*   **Log List Sidebar**: Displays all loaded files sorted chronologically.
+    *   **Right-Click**: Access options to remove a specific file or clear the entire list.
+    *   **Selection**: Click any file to switch focus to its individual content.
+*   **Merge All Logs**: Clicking the button at the bottom of the sidebar creates a unified, time-sorted view of all loaded logs. This view supports full filtering and timeline analysis.
 
 #### Filter
 
 * **Add Filter**: Open the dialog to add a new filter rule.
 
 * **Show Filtered Only (Ctrl+H)**:
-
-  * **Checked**: Displays only lines that match the filter rules.
-
-  * **Unchecked**: Displays all original log lines, but keeps keyword highlighting (Raw Mode).
+  * **Checked**: Displays only lines that match enabled filter rules. Works in both single and merged views.
+  * **Unchecked**: Displays all lines with keyword highlighting.
 
 #### View
 
-*   **Find... (Ctrl+F)**: Opens a search bar at the top of the log view to find text within the entire log file.
-*   **Go to Line... (Ctrl+G)**: Opens a dialog to jump directly to a specific line number.
-*   **Dark Mode**: Toggles a persistent, application-wide dark theme for improved viewing in low-light environments.
-*   **Toggle Timeline**: Shows or hides the integrated Event Timeline panel. When visible, this interactive timeline provides a visual overview of events, allowing for zooming, panning, and quick navigation within the log file.
+*   **Find... (Ctrl+F)**: Opens the search bar. Use the dropdown menu to access recent search history (up to 10 queries).
+*   **Show Log List**: Manually toggle the visibility of the sidebar.
+*   **Dark Mode**: Toggles the dark theme.
+*   **Toggle Timeline**: Shows or hides the interactive timeline. Now features block-style events and a time axis.
 
 #### Notes
 
@@ -156,6 +163,41 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 * **Ctrl + Left/Right Arrow**: Jumps to the previous/next match in the filtered results.
 
 ## 4. Release Notes
+
+### Version 1.7 (2025-12-24)
+
+#### 📂 Multi-Log Management & Merged View
+
+*   **Multi-Log Support**:
+    *   Added a dynamic **Log List Sidebar** to manage multiple loaded files simultaneously.
+    *   Files in the sidebar are automatically sorted chronologically based on their start time.
+    *   **Sidebar Automation**: Automatically shows when 2+ files are loaded and hides for single files or empty state.
+    *   **Right-Click Context Menu**: Quickly remove specific files or clear all logs from the session.
+*   **High-Performance Merged View**:
+    *   New **"Merge All Logs"** feature to combine all loaded files into a single, seamless chronological view.
+    *   **Proxy-Based Architecture**: Optimized for massive datasets (e.g., 18M+ lines) using a reference-based system that significantly reduces memory overhead.
+    *   **Full Feature Parity**: Merged View now supports the complete Filtering and Event Timeline systems across all combined files.
+
+#### 🔍 Enhanced Search & Navigation
+
+*   **Find History**: The Find bar now features a **Search History** (Combobox), storing up to 10 most recent queries for quick access.
+*   **Cross-File Search**: Searching in Merged View automatically scans all constituent files using the parallel Rust engine.
+*   **Improved Feedback**: The status bar provides real-time progress updates during massive merge operations and reverts to normal state upon closing search.
+
+#### 🎨 UI & UX Polish
+
+*   **Sidebar Optimization**: Implemented dynamic width adjustment based on the longest filename and reduced font size for a cleaner look.
+*   **Timeline Upgrades**:
+    *   **Auto-Focus Range**: The timeline now automatically crops empty time periods to focus on actual log events.
+    *   **Block-Style Visualization**: Sparse events are now rendered as prominent blocks instead of thin lines for better visibility.
+    *   **Time Axis**: Added "HH:MM:SS" scale labels at the bottom of the timeline for better temporal context.
+*   **Data Protection**: Added an **Unsaved Changes Warning** when closing the application if filter rules have been modified.
+
+#### 🛠 Fixes & Stability
+
+*   **Robust FFI Handling**: Fixed a critical infinite loop issue during large file iterations via the Rust extension.
+*   **Race Condition Fixes**: Resolved UI crashes (TclErrors) related to concurrent file loading and duplicate entry insertions.
+*   **General Polish**: Fixed multiple indentation-related syntax errors and stabilized status bar timing displays.
 
 ### Version 1.6.3 (2025-12-22)
 

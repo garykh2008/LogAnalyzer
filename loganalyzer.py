@@ -99,6 +99,33 @@ class Filter:
 		self.is_regex = is_regex
 		self.is_exclude = is_exclude
 		self.is_event = is_event
+		self.hit_count = 0 # Added for multi-log
+
+	def to_dict(self): # Added for multi-log to save/load filter state
+		return {
+			"text": self.text,
+			"fore_color": self.fore_color,
+			"back_color": self.back_color,
+			"enabled": self.enabled,
+			"is_regex": self.is_regex,
+			"is_exclude": self.is_exclude,
+			"is_event": self.is_event
+		}
+
+class LogFileState:
+	def __init__(self, filepath, raw_lines, rust_engine):
+		self.filepath = filepath
+		self.raw_lines = raw_lines
+		self.rust_engine = rust_engine
+		self.all_line_tags = None # Initialize to None
+		self.filtered_indices = []
+		self.timeline_events = []
+		self.timeline_events_by_time = [] # Sorted by time
+		self.timeline_events_by_index = [] # Sorted by raw_index
+		self.timestamps_found = False
+		self.filter_hit_counts = [0] * len(self.raw_lines) # Needs to be updated based on filters.
+		# For multi-log, each LogFileState will need its own filtered_cache and timeline_events
+		# when it's not the active one.
 		self.hit_count = 0
 
 	def to_dict(self):
@@ -115,9 +142,12 @@ class RustLinesProxy:
 		return self.engine.line_count()
 
 	def __getitem__(self, idx):
+		if idx < 0 or idx >= len(self):
+			raise IndexError("Index out of bounds")
 		return self.engine.get_line(idx)
 
 class LogAnalyzerApp:
+	MERGED_VIEW_ID = "MERGED_VIEW_ID" # Constant for merged view
 	def __init__(self, root):
 		self.root = root
 
@@ -149,6 +179,7 @@ class LogAnalyzerApp:
 		# Modern Treeview Style
 		style.configure("Treeview", rowheight=28, font=("Consolas", 11), borderwidth=1, relief="solid")
 		style.configure("Treeview.Heading", font=("Consolas", 10, "bold"), borderwidth=1, relief="groove")
+		style.configure("LogFiles.Treeview", font=("Consolas", 9), rowheight=20, indent=0)
 
 		style.configure("TLabelFrame", padding=5)
 		style.configure("TLabelFrame.Label", font=("Consolas", 10, "bold"))
@@ -172,24 +203,38 @@ class LogAnalyzerApp:
 		# Threading & Queue
 		self.msg_queue = queue.Queue()
 		self.is_processing = False
+		self.pending_load_count = 0
 
 		self.dark_mode = tk.BooleanVar(value=self.config.get("dark_mode", False))
+		self.log_files_panel_visible = tk.BooleanVar(value=False) # Sidebar visibility state
 
-		self.filters = []
-		self.raw_lines = []
-		self.rust_engine = None # Instance of log_engine_rs.LogEngine
+		self.filters = [] # Store filter definitions
+		self.filters_dirty = False # Track if filters have unsaved changes
 
-		# Cache structure: [(line_content, tags, raw_index), ...]
-		# If None, it means "Raw Mode"
+		# --- Multi-Log Management ---
+		self.loaded_log_files = {} # {filepath: LogFileState instance}
+		self.currently_loading = set() # Track files being loaded to avoid duplicates
+		self.has_active_log_been_set = False # New flag to track if an active log has been set
+		self.active_log_filepath = None # Key for the currently displayed LogFileState, or special value for merged view.
+		self.merged_log_data = None # Special LogFileState for merged view
+
+		# --- Active View Proxy ---
+		# These will point to the relevant properties of the active LogFileState (or merged)
+		self.active_raw_lines = []
+		self.active_rust_engine = None
+		self.active_filtered_indices = []
+		self.active_timeline_events = []
+		self.active_timeline_events_by_time = []
+		self.active_timeline_events_by_index = []
+		self.active_timestamps_found = False
+
+		# Filtered cache is specific to the active view
 		self.filtered_cache = None
 
 		# Store result of regex scan for ALL lines
-		self.all_line_tags = []
+		self.active_all_line_tags = []
 
-		# Pre-computed indices for filtered view [idx1, idx2, ...]
-		self.filtered_indices = []
-
-		self.current_log_path = None
+		self.current_log_path = None # The path of the primary active log
 
 		# Search Cache
 		self.last_search_query = None
@@ -199,15 +244,13 @@ class LogAnalyzerApp:
 		self.current_tat_path = None
 
 		# Notes System
-		self.notes = {}  # { raw_index (int): note_text (str) }
+		# Notes are global, but context-aware. Maybe tie them to raw_index regardless of file.
+		self.notes = {}  # { (filepath, raw_index): note_text (str) }
 		self.notes_window = None
 
 		# Timeline System
-		self.timeline_events = [] # List of (datetime_obj, filter_text, raw_index)
-		self.timeline_events_by_time = []
-		self.timeline_events_by_index = []
-		self.timestamps_found = False
-		
+		# Timeline state is now driven by active_timeline_events
+
 		# Timeline Zoom/Pan State
 		self.timeline_zoom = 1.0
 		self.timeline_view_offset = 0.0 # Seconds from start
@@ -220,6 +263,7 @@ class LogAnalyzerApp:
 		# Font management
 		self.font_size = self.config.get("font_size", 12)
 		self.font_object = tkFont.Font(family="Consolas", size=self.font_size)
+		self.small_font_object = tkFont.Font(family="Consolas", size=9) # For sidebar measurement
 
 		# Dynamic Style for Notes (Scalable)
 		style.configure("Notes.Treeview", font=("Consolas", self.font_size), rowheight=int(max(20, self.font_size * 2.0)))
@@ -254,6 +298,7 @@ class LogAnalyzerApp:
 		self.menubar.add_cascade(label="File", menu=self.file_menu)
 
 		self.file_menu.add_command(label="Open Log...", command=self.load_log)
+		self.file_menu.add_command(label="Open Multiple Logs...", command=self.load_multiple_logs)
 		self.recent_files_menu = tk.Menu(self.file_menu, tearoff=0)
 		self.file_menu.add_cascade(label="Open Recent", menu=self.recent_files_menu, state="disabled")
 		self.file_menu.add_separator()
@@ -287,6 +332,7 @@ class LogAnalyzerApp:
 		self.view_menu.add_command(label="Go to Line...", accelerator="Ctrl+G", command=self.show_goto_dialog)
 		self.view_menu.add_separator()
 		self.view_menu.add_checkbutton(label="Dark Mode", variable=self.dark_mode, command=self.toggle_dark_mode)
+		self.view_menu.add_checkbutton(label="Show Log List", variable=self.log_files_panel_visible, command=self.toggle_log_panel)
 		self.view_menu.add_separator()
 		self.view_menu.add_command(label="Toggle Timeline", command=self.toggle_timeline_pane, state="disabled")
 
@@ -322,15 +368,41 @@ class LogAnalyzerApp:
 		self.update_title()
 		self.update_status("Ready")
 
-		# 3. Main Content Area (PanedWindow)
+		# 3. Main Content Area (PanedWindow) - Vertical Split
 		self.paned_window = tk.PanedWindow(root, orient=tk.VERTICAL, sashwidth=4, sashrelief=tk.FLAT, bg="#d9d9d9")
 		self.paned_window.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-		# --- Upper: Log View ---
-		# --- Upper Pane: Contains both Log View and Note View ---
-		top_pane = tk.PanedWindow(self.paned_window, orient=tk.HORIZONTAL, sashwidth=4, sashrelief=tk.FLAT, bg="#d9d9d9")
+		# --- Top Horizontal Pane: Log Files List | Log View + Note View ---
+		self.top_horizontal_pane = tk.PanedWindow(self.paned_window, orient=tk.HORIZONTAL, sashwidth=4, sashrelief=tk.FLAT, bg="#d9d9d9")
 
-		# --- Upper-Left: Log View ---
+		# --- Left Side: Log Files List Panel ---
+		self.log_files_panel = ttk.Frame(self.top_horizontal_pane)
+
+		# Inner container for Tree + Scrollbar
+		tree_frame = ttk.Frame(self.log_files_panel)
+		tree_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+		self.log_files_tree = ttk.Treeview(tree_frame, columns=("file",), show="headings", selectmode="browse", style="LogFiles.Treeview")
+		self.log_files_tree.heading("file", text="File List")
+		self.log_files_tree.column("file", anchor="w", width=150)
+		self.log_files_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+		self.log_files_tree.bind("<<TreeviewSelect>>", self.on_log_file_select)
+
+		# Scrollbar for log files tree (attached to tree_frame)
+		self.log_files_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.log_files_tree.yview)
+		self.log_files_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+		self.log_files_tree.configure(yscrollcommand=self.log_files_scroll.set)
+
+		# Merge Button at bottom of panel (outside tree_frame)
+		self.merge_btn = ttk.Button(self.log_files_panel, text="Merge All Logs", command=lambda: self._set_active_log_state(self.MERGED_VIEW_ID))
+		# Pack it at the bottom, but only show if >= 2 files
+		self.merge_btn.pack(side=tk.BOTTOM, fill=tk.X, padx=2, pady=2)
+		self.merge_btn.pack_forget() # Hide initially
+
+		# --- Right Side: Main Log View + Note View --- (This is the existing 'top_pane' logic)
+		top_pane = tk.PanedWindow(self.top_horizontal_pane, orient=tk.HORIZONTAL, sashwidth=4, sashrelief=tk.FLAT, bg="#d9d9d9")
+
+		# --- Upper-Left (within top_pane): Log View ---
 		self.content_frame = ttk.Frame(top_pane)
 
 		self.scrollbar_y = ttk.Scrollbar(self.content_frame, command=self.on_scroll_y)
@@ -396,6 +468,7 @@ class LogAnalyzerApp:
 		# --- Find Bar State ---
 		self.find_window = None
 		self.find_entry = None
+		self.find_history = [] # Store up to 10 search queries
 		self.find_case_var = tk.BooleanVar(value=False)
 		self.find_wrap_var = tk.BooleanVar(value=True)
 
@@ -404,20 +477,27 @@ class LogAnalyzerApp:
 
 		top_pane.add(self.content_frame, width=750, minsize=300, stretch="always")
 
-		# --- Upper-Right: Note View (Placeholder) ---
+		# --- Upper-Right (within top_pane): Note View (Placeholder) ---
 		# The actual notes_frame will be created dynamically
 		self.notes_frame = None
-		self.top_pane = top_pane
+		self.top_pane = top_pane # Store reference to the inner top_pane
 
 		# Initial setup: Hide the notes view by default
 		self.toggle_note_view_visibility(initial_setup=True)
 
-		self.paned_window.add(top_pane, height=450, minsize=100, stretch="always")
+		self.top_horizontal_pane.add(top_pane, stretch="always") # Add the existing top_pane to the new horizontal pane
+		self.paned_window.add(self.top_horizontal_pane, stretch="always") # Add the new horizontal pane to the main vertical pane
 
 		# Context Menu for Notes Tree
 		self.notes_context_menu = tk.Menu(self.root, tearoff=0)
 		self.notes_context_menu.add_command(label="Edit Note", command=self.edit_note_from_tree)
 		self.notes_context_menu.add_command(label="Remove Note", command=self.remove_note_from_tree)
+
+		# Context Menu for Log Files List
+		self.log_files_context_menu = tk.Menu(self.root, tearoff=0)
+		self.log_files_context_menu.add_command(label="Remove Selected File", command=self.remove_selected_log)
+		self.log_files_context_menu.add_command(label="Clear All Logs", command=self._clear_all_logs)
+		self.log_files_tree.bind("<Button-3>", self.on_log_files_right_click)
 
 		# Log Context Menu
 		self.log_context_menu = tk.Menu(self.root, tearoff=0)
@@ -438,7 +518,7 @@ class LogAnalyzerApp:
 		self.timeline_canvas.bind("<ButtonPress-3>", self.on_timeline_pan_start)
 		self.timeline_canvas.bind("<B3-Motion>", self.on_timeline_pan_drag)
 		self.timeline_canvas.bind("<ButtonRelease-3>", self.on_timeline_pan_release)
-		
+
 		self.timeline_tooltip = ttk.Label(self.root, text="", background="#333333", foreground="#ffffff", relief="solid", borderwidth=1, padding=(5, 2))
 
 		self.paned_window.add(self.timeline_frame, minsize=40, height=60, stretch="never")
@@ -502,13 +582,82 @@ class LogAnalyzerApp:
 			self.root.drop_target_register(DND_FILES)
 			self.root.dnd_bind('<<Drop>>', self.on_drop)
 
-		# Apply initial theme
 		self._apply_theme()
 		self._update_recent_files_menu()
+
+		# Initial Sidebar State: Hidden by default
+		self.toggle_log_panel()
 
 		self.root.bind("<Configure>", self.on_root_configure)
 		self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 		self.root.after(200, self._restore_layout)
+
+	def _clear_all_logs(self):
+		"""Clears all loaded logs and resets the UI state."""
+		self.loaded_log_files.clear()
+		if hasattr(self, 'log_files_tree'):
+			self.log_files_tree.delete(*self.log_files_tree.get_children())
+		self.merged_log_data = None
+		self.active_log_filepath = None
+		self.has_active_log_been_set = False
+
+		# Clear view proxies
+		self.active_raw_lines = []
+		self.active_rust_engine = None
+		self.active_filtered_indices = []
+		self.active_timeline_events = []
+		self.active_timeline_events_by_time = []
+		self.active_timeline_events_by_index = []
+		self.active_timestamps_found = False
+
+		if hasattr(self, 'marker_canvas'):
+			self.marker_canvas.delete("all")
+		if hasattr(self, 'welcome_label') and self.welcome_label:
+			self.welcome_label.place(relx=0.5, rely=0.5, anchor="center")
+
+	def toggle_log_panel(self):
+		"""Toggles the visibility of the log files list panel with auto-width and dynamic scrollbar."""
+		if self.log_files_panel_visible.get():
+			# 1. Calculate required width based on longest filename
+			max_w = 100 # Minimum width
+			for fp in self.loaded_log_files.keys():
+				name = os.path.basename(fp)
+				text_w = self.small_font_object.measure(name)
+				if text_w > max_w: max_w = text_w
+
+			# Add buffer for scrollbar (approx 20px) + padding (20px) = 40px
+			final_w = min(450, max_w + 40)
+
+			# 2. Update Column Width (for 'file' column in headings mode)
+			self.log_files_tree.column("file", width=final_w)
+
+			# 3. Dynamic Scrollbar: Only show if items exceed a reasonable count (e.g., 10)
+			# (Or more accurately, compare with panel height if realized)
+			if len(self.loaded_log_files) > 15: # Threshold for showing scrollbar
+				self.log_files_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+			else:
+				self.log_files_scroll.pack_forget()
+
+			# Show panel
+			try:
+				self.top_horizontal_pane.add(self.log_files_panel, before=self.top_pane, width=final_w, minsize=50, stretch="never")
+			except Exception: pass
+		else:
+			# Hide
+			try:
+				self.top_horizontal_pane.forget(self.log_files_panel)
+			except Exception: pass
+
+	def _decrement_pending_load_count(self):
+		if hasattr(self, 'pending_load_count'):
+			self.pending_load_count -= 1
+			if self.pending_load_count <= 0:
+				self.pending_load_count = 0
+				self.set_ui_busy(False)
+				self.update_status("All files loaded.")
+		else:
+			# Fallback if counter not initialized
+			self.set_ui_busy(False)
 
 	def _create_notes_view_widgets(self, parent_frame):
 		"""Helper to create all widgets for the notes view inside a given parent."""
@@ -552,6 +701,28 @@ class LogAnalyzerApp:
 			except Exception: pass
 
 	def on_close(self):
+		# --- Check for Unsaved Filter Changes ---
+		if self.filters_dirty and self.filters:
+			ans = messagebox.askyesnocancel("Unsaved Changes", "Your filters have been modified.\n\nDo you want to save the changes before exiting?")
+			if ans is True: # Yes: Save and close
+				if self.current_tat_path:
+					if not self._write_tat_file(self.current_tat_path):
+						return # Save failed, stay open
+				else:
+					# Save As...
+					init_dir = self.config.get("last_filter_dir", ".")
+					filepath = filedialog.asksaveasfilename(initialdir=init_dir, defaultextension=".tat", filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")])
+					if filepath:
+						if self._write_tat_file(filepath):
+							self.current_tat_path = filepath
+						else:
+							return # Save failed
+					else:
+						return # Cancelled Save As dialog
+			elif ans is None: # Cancel: Don't close
+				return
+			# Else (ans is False): Discard and close (fall through)
+
 		self._save_notes_window_geometry()
 
 		is_maximized = False
@@ -695,68 +866,131 @@ class LogAnalyzerApp:
 				msg_type = msg[0]
 
 				if msg_type == 'load_complete':
-					lines, duration, filepath, rust_eng = msg[1], msg[2], msg[3], msg[4]
-					self.rust_engine = rust_eng
-					self.raw_lines = lines
+					log_state, duration = msg[1], msg[2]
+					self.loaded_log_files[log_state.filepath] = log_state
+					self.currently_loading.discard(log_state.filepath)
+					self.merged_log_data = None # Invalidate merged data
 
-					# Adjust line number area width based on total lines
-					max_digits = len(str(len(lines)))
-					self.line_number_area.config(width=max(7, max_digits))
+					# 1. Get all loaded files and their start times for sorting the list
+					ts_pattern = re.compile(r'(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b)')
 
-					self.load_duration_str = f"{duration:.4f}s"
-					self.current_log_path = filepath
-					self.update_title()
-					self.selected_raw_index = -1
-					self.selection_offset = 0
-					self.last_search_query = None
-					self.last_search_results = None
-					self.marker_canvas.delete("all")
-					self.welcome_label.place_forget()
+					file_info = []
+					for fp, state in self.loaded_log_files.items():
+						start_ts = "9999" # Default for no timestamp
+						first_line = state.rust_engine.get_line(0)
+						match = ts_pattern.search(first_line)
+						if match: start_ts = match.group(1)
+						file_info.append((start_ts, fp))
 
-					self.notes = {} # Clear notes
-					self.check_and_import_notes() # Auto-import notes
+					# Sort by start timestamp
+					file_info.sort()
+
+					# 2. Update Treeview order
+					# Remove existing
+					for item in self.log_files_tree.get_children():
+						self.log_files_tree.delete(item)
+
+					# Re-insert in sorted order
+					for _, fp in file_info:
+						self.log_files_tree.insert("", "end", iid=fp, values=(os.path.basename(fp),))
+
+					# Update panel width and scrollbar if visible
+					if self.log_files_panel_visible.get():
+						self.toggle_log_panel()
+
+					# Show/Hide Merge Button based on file count
+					if len(self.loaded_log_files) >= 2:
+						self.merge_btn.pack(side=tk.BOTTOM, fill=tk.X, padx=2, pady=2)
+					else:
+						self.merge_btn.pack_forget()
+
+					if not self.has_active_log_been_set:
+						self._set_active_log_state(log_state.filepath, load_duration=duration)
+						self.has_active_log_been_set = True
+
 					self.refresh_notes_window()
-					self.set_ui_busy(False)
-					self.update_status(f"Loaded {len(lines)} lines")
-					self.recalc_filtered_data()
+					self._decrement_pending_load_count()
+
+					# Auto-show log list if more than 1 file is loaded
+					if len(self.loaded_log_files) > 1 and not self.log_files_panel_visible.get():
+						self.log_files_panel_visible.set(True)
+						self.toggle_log_panel()
+					elif len(self.loaded_log_files) <= 1 and self.log_files_panel_visible.get():
+						self.log_files_panel_visible.set(False)
+						self.toggle_log_panel()
 
 				elif msg_type == 'load_error':
-					self.set_ui_busy(False)
-					messagebox.showerror("Load Error", msg[1])
+					err_msg = msg[1]
+					messagebox.showerror("Load Error", err_msg)
 					self.update_status("Load failed")
+					self._decrement_pending_load_count()
 
 				elif msg_type == 'filter_complete':
-					line_tags, filtered_idx, duration, counts = msg[1], msg[2], msg[3], msg[4]
+					line_tags, filtered_idx, duration, counts, source_filepath, timeline_events_processed, timestamps_found = msg[1], msg[2], msg[3], msg[4], msg[5], msg[6], msg[7]
 
-					self.timeline_events, self.timestamps_found = msg[6], msg[7]
-					self._update_timeline_data()
+					if source_filepath not in self.loaded_log_files: return
 
-					self.all_line_tags = line_tags
-					self.filtered_indices = filtered_idx
-					self.filter_duration_str = f"{duration:.4f}s"
+					log_state = self.loaded_log_files[source_filepath]
+					log_state.all_line_tags = line_tags
+					log_state.filtered_indices = filtered_idx
+					log_state.filter_hit_counts = counts
+					log_state.timeline_events = timeline_events_processed
+					log_state.timestamps_found = timestamps_found
+					self._update_timeline_data(log_state)
 
-					for i, count in enumerate(counts):
-						if i < len(self.filters):
-							self.filters[i].hit_count = count
+					# Check if we are aggregating for Merged View
+					self.pending_filter_count -= 1
 
-					self.apply_tag_styles()
-					self.refresh_filter_list()
-					self.refresh_view_fast()
-					
-					self.draw_timeline()
-					
-					self.view_menu.entryconfig("Toggle Timeline", state="normal" if self.timestamps_found else "disabled")
+					if self.pending_filter_count <= 0:
+						self.pending_filter_count = 0
 
-					self.set_ui_busy(False)
+						# Update overall filter duration
+						if hasattr(self, 'filter_op_start_time'):
+							total_duration = time.time() - self.filter_op_start_time
+							self.filter_duration_str = f"{total_duration:.4f}s"
+
+						if self.active_log_filepath == self.MERGED_VIEW_ID:
+							self._aggregate_merged_filter_results()
+						elif self.active_log_filepath == source_filepath:
+							# Single file active, update UI normally
+							self.active_all_line_tags = log_state.all_line_tags
+							self.active_filtered_indices = log_state.filtered_indices
+							self.active_timeline_events = log_state.timeline_events
+							self.active_timeline_events_by_time = log_state.timeline_events_by_time
+							self.active_timeline_events_by_index = log_state.timeline_events_by_index
+							self.active_timestamps_found = log_state.timestamps_found
+
+							for i, count in enumerate(self.filters):
+								if i < len(log_state.filter_hit_counts):
+									count.hit_count = log_state.filter_hit_counts[i]
+
+							self.apply_tag_styles()
+							self.refresh_filter_list()
+							self.refresh_view_fast()
+							self.draw_timeline()
+							self.view_menu.entryconfig("Toggle Timeline", state="normal" if log_state.timestamps_found else "disabled")
+
+						self.set_ui_busy(False)
 
 				elif msg_type == 'status':
 					self.update_status(msg[1])
+
+				elif msg_type == 'merge_complete':
+					merged_state, duration = msg[1], msg[2]
+					self.merged_log_data = merged_state
+
+					self.update_status(f"Merged View built in {duration:.4f}s")
+					self.set_ui_busy(False) # Unblock UI before setting active state so recalc can run
+
+					# Now that data is ready, set it as active
+					self._set_active_log_state(self.MERGED_VIEW_ID, load_duration=duration)
 
 		except queue.Empty:
 			pass
 		finally:
 			self.root.after(100, self.check_queue)
 
+	# --- Toast Notifications ---
 	def set_ui_busy(self, is_busy):
 		self.is_processing = is_busy
 		state = tk.DISABLED if is_busy else tk.NORMAL
@@ -769,7 +1003,6 @@ class LogAnalyzerApp:
 		self.tree.state(("disabled",) if is_busy else ("!disabled",))
 		self.root.config(cursor="watch" if is_busy else "")
 
-	# --- Toast Notifications ---
 	def show_toast(self, message, duration=2000, is_error=False):
 		try:
 			toast = tk.Toplevel(self.root)
@@ -976,7 +1209,7 @@ class LogAnalyzerApp:
 		if hasattr(self, 'notes_tree') and self.notes_tree.winfo_exists():
 			self.notes_tree.tag_configure("odd", background=c["stripe_odd"])
 			self.notes_tree.tag_configure("even", background=c["stripe_even"])
-		
+
 		# Redraw timeline to apply theme changes
 		self.draw_timeline()
 
@@ -986,30 +1219,136 @@ class LogAnalyzerApp:
 
 	# --- Title Update ---
 	def update_title(self):
-		log_name = os.path.basename(self.current_log_path) if self.current_log_path else "No file load"
+		log_name = os.path.basename(self.active_log_filepath) if self.active_log_filepath else "No file load"
 		filter_name = os.path.basename(self.current_tat_path) if self.current_tat_path else "No filter file"
 		self.root.title(f"[{log_name}] - [{filter_name}] - {self.APP_NAME} {self.VERSION}")
 
 	# --- [Data Access Helpers] ---
 	def get_total_count(self):
-		if self.filtered_cache is not None:
-			return len(self.filtered_cache)
-		return len(self.raw_lines)
+		if self.show_only_filtered_var.get():
+			return len(self.active_filtered_indices)
+		return len(self.active_raw_lines)
 
 	def get_view_item(self, index):
-		if self.filtered_cache is not None:
-			if 0 <= index < len(self.filtered_cache):
-				return self.filtered_cache[index]
-			return ("", [], -1)
+		"""Returns (line, tags, raw_index) for the given index in the current view."""
+		if self.show_only_filtered_var.get():
+			if not self.active_filtered_indices: return "", [], -1
+			raw_idx = self.active_filtered_indices[index]
 		else:
-			if 0 <= index < len(self.raw_lines):
-				tags = []
-				if self.all_line_tags and index < len(self.all_line_tags):
-					tag = self.all_line_tags[index]
-					if tag and tag != 'EXCLUDED':
-						tags = [tag]
-				return (self.raw_lines[index], tags, index)
-			return ("", [], -1)
+			raw_idx = index
+
+		if 0 <= raw_idx < len(self.active_raw_lines):
+			line = self.active_raw_lines[raw_idx]
+			tags = []
+			if self.active_all_line_tags is not None:
+				try:
+					tag_val = self.active_all_line_tags[raw_idx]
+					if tag_val and tag_val != 'EXCLUDED':
+						tags.append(tag_val)
+				except (IndexError, KeyError, TypeError):
+					pass
+			return line, tags, raw_idx
+		return ("", [], -1)
+
+	def _clear_all_logs(self):
+		"""Clears all loaded logs and resets the UI state."""
+		self.loaded_log_files.clear()
+		self.log_files_tree.delete(*self.log_files_tree.get_children())
+		self.merged_log_data = None
+		self.active_log_filepath = None
+		self.has_active_log_been_set = False
+
+		# Clear view proxies
+		self.active_raw_lines = []
+		self.active_rust_engine = None
+		self.active_filtered_indices = []
+		self.active_timeline_events = []
+		self.active_timeline_events_by_time = []
+		self.active_timeline_events_by_index = []
+		self.active_timestamps_found = False
+
+		self.marker_canvas.delete("all")
+		self.welcome_label.place(relx=0.5, rely=0.5, anchor="center")
+
+		self.render_viewport() # Clear view
+		self.update_title()
+		self.update_status("Ready")
+
+		# Clear timeline
+		self.draw_timeline()
+
+		# Hide log list panel and merge button on clear
+		if hasattr(self, 'merge_btn'):
+			self.merge_btn.pack_forget()
+		self.log_files_panel_visible.set(False)
+		self.toggle_log_panel()
+
+	def _aggregate_merged_filter_results(self):
+		"""Aggregates filter results from all loaded files into the merged view state."""
+		if not self.merged_log_data: return
+
+		# 1. Sum hit counts
+		total_hits = [0] * len(self.filters)
+		for log_state in self.loaded_log_files.values():
+			for i, count in enumerate(log_state.filter_hit_counts):
+				if i < len(total_hits):
+					total_hits[i] += count
+
+		for i, flt in enumerate(self.filters):
+			flt.hit_count = total_hits[i]
+
+		self.merged_log_data.filter_hit_counts = total_hits
+
+		# 2. Merge Filtered Indices and Timeline Events with Offsets
+		merged_filtered_indices = []
+		merged_timeline_events = []
+		current_offset = 0
+
+		# Use the pre-stored ordered file list
+		for fp in self.merged_log_data.ordered_files:
+			if fp not in self.loaded_log_files: continue
+			log_state = self.loaded_log_files[fp]
+
+			# Filtered Indices
+			for local_idx in log_state.filtered_indices:
+				merged_filtered_indices.append(current_offset + local_idx)
+
+			for dt, text, local_raw_idx in log_state.timeline_events:
+				merged_timeline_events.append((dt, text, current_offset + local_raw_idx))
+
+			current_offset += len(log_state.raw_lines)
+
+		# 3. Update Merged View State
+		self.merged_log_data.filtered_indices = merged_filtered_indices
+		self.merged_log_data.timeline_events = merged_timeline_events
+		self._update_timeline_data(self.merged_log_data)
+		self.merged_log_data.timestamps_found = bool(merged_timeline_events)
+
+		# 4. Update UI Proxies
+		self.active_all_line_tags = self.merged_log_data.all_line_tags # This is the MergedTagsProxy
+
+		self.active_filtered_indices = self.merged_log_data.filtered_indices
+		self.active_timeline_events = self.merged_log_data.timeline_events
+		self.active_timeline_events_by_time = self.merged_log_data.timeline_events_by_time
+		self.active_timeline_events_by_index = self.merged_log_data.timeline_events_by_index
+		self.active_timestamps_found = self.merged_log_data.timestamps_found
+
+		# 5. Refresh UI
+		self.apply_tag_styles()
+		self.refresh_filter_list()
+		self.refresh_view_fast()
+		self.draw_timeline()
+		self.view_menu.entryconfig("Toggle Timeline", state="normal" if self.active_timestamps_found else "disabled")
+
+	def _decrement_pending_load_count(self):
+		if hasattr(self, 'pending_load_count'):
+			self.pending_load_count -= 1
+			if self.pending_load_count <= 0:
+				self.pending_load_count = 0
+				self.set_ui_busy(False)
+				self.update_status("All files loaded.")
+		else:
+			self.set_ui_busy(False)
 
 	# --- File Loading (Threaded) ---
 	def load_log(self):
@@ -1019,48 +1358,99 @@ class LogAnalyzerApp:
 		if not filepath: return
 
 		self.config["last_log_dir"] = os.path.dirname(filepath); self.save_config()
-		self._add_to_recent_files(filepath) # Add to recent list
-		t = threading.Thread(target=self._worker_load_log, args=(filepath,))
-		t.daemon = True
-		t.start()
+
+		# Single file mode: Clear existing logs first
+		self._clear_all_logs()
+
+		self.set_ui_busy(True)
+		self.pending_load_count = 1
+		self._load_log_file_into_state(filepath)
+
+	def load_multiple_logs(self):
+		if self.is_processing: return
+		init_dir = self.config.get("last_log_dir", ".")
+		filepaths = filedialog.askopenfilenames(initialdir=init_dir, filetypes=[("Log Files", "*.log *.txt"), ("All Files", "*.*")])
+		if not filepaths: return
+
+		self.config["last_log_dir"] = os.path.dirname(filepaths[0]); self.save_config()
+
+		# Filter out duplicates (already loaded OR currently loading)
+		new_filepaths = [fp for fp in filepaths if fp not in self.loaded_log_files and fp not in self.currently_loading]
+
+		if not new_filepaths:
+			self.update_status("No new files to load (duplicates ignored).")
+			return
+
+		self.set_ui_busy(True)
+		self.pending_load_count += len(new_filepaths)
+
+		# Load each new file
+		for fp in new_filepaths:
+			self.currently_loading.add(fp)
+			self._load_log_file_into_state(fp)
 
 	def _worker_load_log(self, filepath):
 		try:
 			t_start = time.time()
-			file_size = os.path.getsize(filepath)
-
-			lines = []
-			rust_eng = None
-
-			# Use Rust to load file (Zero-copy for Python)
-			# We assume HAS_RUST is True or handled at startup
 			rust_eng = log_engine_rs.LogEngine(filepath)
 			lines = RustLinesProxy(rust_eng)
-
+			log_state = LogFileState(filepath, lines, rust_eng)
 			t_end = time.time()
-			self.msg_queue.put(('load_complete', lines, t_end - t_start, filepath, rust_eng))
+			self.msg_queue.put(('load_complete', log_state, t_end - t_start))
 		except Exception as e:
-			self.msg_queue.put(('load_error', str(e)))
+			self.msg_queue.put(('load_error', str(e), filepath))
 
 	def _load_log_from_path(self, filepath):
-		if self.is_processing: return
-		if not filepath or not os.path.exists(filepath): return
+		# Default to single file load behavior (replace)
+		if filepath in self.loaded_log_files:
+			self._set_active_log_state(filepath)
+			return
 
-		self._add_to_recent_files(filepath) # Add to recent list
+		if filepath in self.currently_loading:
+			return
+
+		self._clear_all_logs()
 		self.set_ui_busy(True)
+		self.pending_load_count = 1
+		self.currently_loading.add(filepath)
+		self._load_log_file_into_state(filepath)
+
+	def _load_log_file_into_state(self, filepath, is_initial_load=False):
+		"""
+		Initiates the loading of a single log file into a LogFileState object.
+		"""
+		if not filepath or not os.path.exists(filepath):
+			if not is_initial_load:
+				messagebox.showerror("File Error", f"Log file not found: {filepath}", parent=self.root)
+			self._decrement_pending_load_count()
+			return
+
+		self._add_to_recent_files(filepath)
 		t = threading.Thread(target=self._worker_load_log, args=(filepath,))
 		t.daemon = True
 		t.start()
 
 	def on_drop(self, event):
 		try:
-			# The root.tk.splitlist handles paths with spaces (they are wrapped in {})
 			files = self.root.tk.splitlist(event.data)
-			if files:
-				# We only process the first file dropped
+			if not files: return
+
+			if len(files) == 1:
 				self._load_log_from_path(files[0])
+			else:
+				# Multiple files dropped: Add new ones
+				new_filepaths = [fp for fp in files if fp not in self.loaded_log_files and fp not in self.currently_loading]
+				if not new_filepaths:
+					self.update_status("No new files to load (duplicates ignored).")
+					return
+
+				self.set_ui_busy(True)
+				self.pending_load_count += len(new_filepaths)
+				for fp in new_filepaths:
+					self.currently_loading.add(fp)
+					self._load_log_file_into_state(fp)
 		except Exception as e:
-			messagebox.showerror("Drag & Drop Error", f"Could not open dropped file:\n{e}")
+			messagebox.showerror("Drag & Drop Error", f"Could not open dropped file(s):\n{e}")
 
 	# --- Filter Logic (Threaded) ---
 	def smart_update_filter(self, idx, is_enabling):
@@ -1069,21 +1459,53 @@ class LogAnalyzerApp:
 
 	def recalc_filtered_data(self):
 		if self.is_processing: return
-		if not self.is_processing: self.set_ui_busy(True)
 
-		# We now rely solely on the Rust engine for filtering.
-		# If rust_engine is not loaded (no file), we can't filter.
-		if not self.rust_engine:
-			self.refresh_filter_list()
+		# Mark filters as dirty (unsaved changes)
+		self.filters_dirty = True
+
+		# If no active log file or no log files loaded, clear everything
+		if not self.active_log_filepath or not self.loaded_log_files:
+			self._reset_active_filter_state()
 			self.set_ui_busy(False)
 			return
 
-		# Start the Rust filter thread
-		self._start_rust_filter_thread()
+		self.set_ui_busy(True)
+		self.filter_op_start_time = time.time() # Record start time
 
-	def _start_rust_filter_thread(self):
+		# Handle Merged View
+		if self.active_log_filepath == self.MERGED_VIEW_ID:
+			if self.merged_log_data:
+				# Trigger filtering for ALL loaded files
+				self.pending_filter_count = len(self.loaded_log_files)
+				for log_state in self.loaded_log_files.values():
+					self._start_rust_filter_thread(log_state)
+			else:
+				self._reset_active_filter_state()
+				self.set_ui_busy(False)
+			return
+
+		# Handle Individual Log Files
+		if not self.active_rust_engine:
+			self._reset_active_filter_state()
+			self.set_ui_busy(False)
+			return
+
+		self.pending_filter_count = 1
+		self._start_rust_filter_thread(self.loaded_log_files[self.active_log_filepath])
+
+	def _reset_active_filter_state(self):
+		self.active_filtered_indices = []
+		self.active_all_line_tags = []
+		self.active_timeline_events = []
+		self.active_timeline_events_by_time = []
+		self.active_timeline_events_by_index = []
+		self.active_timestamps_found = False
+		self.refresh_filter_list()
+		self.refresh_view_fast()
+		self.draw_timeline()
+
+	def _start_rust_filter_thread(self, log_state): # Accepts LogFileState object
 		# Prepare filter data for Rust: List of (text, is_regex, is_exclude, is_event, original_idx)
-		# Note: Rust expects this specific tuple structure
 		rust_filters = []
 		for i, f in enumerate(self.filters):
 			if f.enabled:
@@ -1092,9 +1514,8 @@ class LogAnalyzerApp:
 		def run_rust():
 			try:
 				t_start = time.time()
-				# Call Rust
-				# Returns: (tag_codes, filtered_indices, hit_counts, timeline_events) - matches dict is empty/removed
-				tag_codes, filtered_indices, subset_counts, timeline_raw = self.rust_engine.filter(rust_filters)
+				# Call Rust with the log_state's rust_engine
+				tag_codes, filtered_indices, subset_counts, timeline_raw = log_state.rust_engine.filter(rust_filters)
 
 				# Map subset counts back to full filter list
 				full_counts = [0] * len(self.filters)
@@ -1104,19 +1525,13 @@ class LogAnalyzerApp:
 						full_counts[original_idx] = count
 
 				# Convert tag_codes (u8) back to string tags for Python UI
-				# 0 -> None, 1 -> 'EXCLUDED', 2+i -> 'filter_{i}'
-				# We need to map the 'i' back to the original filter index from rust_filters
-
-				# Create a map for fast lookup: code -> tag_string
 				code_map = {0: None, 1: 'EXCLUDED'}
 				for idx, (_, _, _, _, original_idx) in enumerate(rust_filters):
 					code_map[2 + idx] = f"filter_{original_idx}"
 
-				# Convert all tags (Fast list comprehension)
 				line_tags = [code_map.get(c, None) for c in tag_codes]
 
 				# Process timeline events
-				# Rust returns (ts_str, filter_text, raw_idx)
 				timeline_events_processed = []
 				ts_formats = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y-%H:%M:%S.%f", "%I:%M:%S.%f %p", "%H:%M:%S"]
 
@@ -1129,10 +1544,11 @@ class LogAnalyzerApp:
 						except ValueError: continue
 
 				t_end = time.time()
-				self.msg_queue.put(('filter_complete', line_tags, filtered_indices, t_end - t_start, full_counts, {}, timeline_events_processed, bool(timeline_events_processed)))
+				# Send all processed data along with the log_state.filepath
+				self.msg_queue.put(('filter_complete', line_tags, filtered_indices, t_end - t_start, full_counts, log_state.filepath, timeline_events_processed, bool(timeline_events_processed)))
 
 			except Exception as e:
-				self.msg_queue.put(('load_error', f"Rust Engine Error: {e}"))
+				self.msg_queue.put(('load_error', f"Rust Engine Filter Error for {log_state.filepath}: {e}"))
 
 		threading.Thread(target=run_rust, daemon=True).start()
 
@@ -1141,14 +1557,14 @@ class LogAnalyzerApp:
 		show_only = self.show_only_filtered_var.get()
 
 		if show_only:
-			if not self.all_line_tags:
+			if not self.active_all_line_tags:
 				self.filtered_cache = None
 			else:
 				new_cache = []
-				raw = self.raw_lines
-				tags = self.all_line_tags
+				raw = self.active_raw_lines
+				tags = self.active_all_line_tags
 
-				for r_idx in self.filtered_indices:
+				for r_idx in self.active_filtered_indices:
 					t = tags[r_idx]
 					new_cache.append((raw[r_idx], [t] if t else [], r_idx))
 				self.filtered_cache = new_cache
@@ -1158,8 +1574,8 @@ class LogAnalyzerApp:
 		self.restore_view_position()
 
 		mode_text = "Filtered" if show_only else "Full View"
-		count_text = len(self.filtered_cache) if self.filtered_cache else len(self.raw_lines)
-		self.update_status(f"[{mode_text}] Showing {count_text} lines (Total {len(self.raw_lines)})")
+		count_text = len(self.filtered_cache) if self.filtered_cache else len(self.active_raw_lines)
+		self.update_status(f"[{mode_text}] Showing {count_text} lines (Total {len(self.active_raw_lines)})")
 
 	def toggle_show_filtered(self, event=None):
 		if self.is_processing: return "break"
@@ -1185,9 +1601,9 @@ class LogAnalyzerApp:
 				found_idx = -1
 				if self.filtered_cache is not None:
 					try:
-						found_idx = self.filtered_indices.index(target_raw_index)
+						found_idx = self.active_filtered_indices.index(target_raw_index)
 					except ValueError:
-						for i, idx in enumerate(self.filtered_indices):
+						for i, idx in enumerate(self.active_filtered_indices):
 							if idx >= target_raw_index:
 								found_idx = i; break
 
@@ -1300,10 +1716,15 @@ class LogAnalyzerApp:
 		return "break" # Prevents the key press from propagating
 
 	def add_note_dialog(self, target_index=None):
+		if not self.active_log_filepath:
+			messagebox.showinfo("Add Note", "Please load a log file first to add notes.", parent=self.root)
+			return
+
 		idx = target_index if target_index is not None else self.selected_raw_index
 		if idx == -1: return
 
-		current_note = self.notes.get(idx, "")
+		note_key = (self.active_log_filepath, idx)
+		current_note = self.notes.get(note_key, "")
 
 		dialog = tk.Toplevel(self.root)
 		dialog.title(f"Note for Line {idx + 1}")
@@ -1320,12 +1741,12 @@ class LogAnalyzerApp:
 		def save():
 			content = txt_input.get("1.0", tk.END).strip()
 			if content:
-				self.notes[idx] = content
+				self.notes[note_key] = content
 			else:
-				if idx in self.notes:
-					del self.notes[idx]
-
-			self.render_viewport() # Refresh to show/hide note style
+				# If content is empty, delete the note
+				if note_key in self.notes:
+					del self.notes[note_key]
+			self.render_viewport()
 			self.refresh_notes_window()
 			dialog.destroy()
 
@@ -1342,23 +1763,29 @@ class LogAnalyzerApp:
 		txt_input.focus_set()
 
 	def remove_note(self):
-		if self.selected_raw_index in self.notes:
-			del self.notes[self.selected_raw_index]
+		if not self.active_log_filepath or self.selected_raw_index == -1: return
+
+		note_key = (self.active_log_filepath, self.selected_raw_index)
+		if note_key in self.notes:
+			del self.notes[note_key]
 			self.render_viewport()
 			self.refresh_notes_window()
 
 	def export_notes(self):
-		if not self.notes:
-			messagebox.showinfo("Export Notes", "There are no notes to export.", parent=self.root)
-			return
-
-		if not self.current_log_path:
+		if not self.active_log_filepath:
 			messagebox.showerror("Export Error", "A log file must be loaded to save notes.", parent=self.root)
 			return
 
+		# Filter notes to only include those for the active log file
+		notes_to_export = {str(raw_idx): content for (filepath, raw_idx), content in self.notes.items() if filepath == self.active_log_filepath}
+
+		if not notes_to_export:
+			messagebox.showinfo("Export Notes", "There are no notes for the active log file to export.", parent=self.root)
+			return
+
 		# Construct the file path directly in the log's directory
-		log_dir = os.path.dirname(self.current_log_path)
-		log_basename = os.path.basename(self.current_log_path)
+		log_dir = os.path.dirname(self.active_log_filepath)
+		log_basename = os.path.basename(self.active_log_filepath)
 		log_name_without_ext, _ = os.path.splitext(log_basename)
 		note_filename = f"{log_name_without_ext}.note"
 		filepath = os.path.join(log_dir, note_filename)
@@ -1370,21 +1797,23 @@ class LogAnalyzerApp:
 
 		try:
 			with open(filepath, 'w', encoding='utf-8') as f:
-				json.dump(self.notes, f, indent=4, sort_keys=True)
-			messagebox.showinfo("Success", f"Successfully exported {len(self.notes)} notes to:\n{filepath}", parent=self.root)
+				json.dump(notes_to_export, f, indent=4, sort_keys=True)
+			messagebox.showinfo("Success", f"Successfully exported {len(notes_to_export)} notes to:\n{filepath}", parent=self.root)
 		except Exception as e:
 			messagebox.showerror("Export Error", f"Failed to save notes file:\n{e}", parent=self.root)
 
 	def save_notes_to_text(self):
-		if not self.notes:
-			messagebox.showinfo("Save Notes", "There are no notes to save.", parent=self.root)
+		if not self.active_log_filepath:
+			messagebox.showinfo("Save Notes", "Please load a log file first to save notes.", parent=self.root)
 			return
 
-		if not self.current_log_path:
-			messagebox.showerror("Save Error", "A log file must be loaded to generate a file name.", parent=self.root)
+		# Filter notes to only include those for the active log file
+		active_notes = {k: v for (filepath, k), v in self.notes.items() if filepath == self.active_log_filepath}
+		if not active_notes:
+			messagebox.showinfo("Save Notes", "There are no notes for the active log file to save.", parent=self.root)
 			return
 
-		log_basename = os.path.basename(self.current_log_path)
+		log_basename = os.path.basename(self.active_log_filepath)
 		log_name_without_ext, _ = os.path.splitext(log_basename)
 		default_filename = f"{log_name_without_ext}.txt"
 
@@ -1401,17 +1830,20 @@ class LogAnalyzerApp:
 
 		try:
 			lines_to_write = []
-			sorted_indices = sorted(self.notes.keys())
+			# Sort by raw index
+			sorted_indices = sorted(active_notes.keys())
 			for idx in sorted_indices:
 				line_num = idx + 1
 				timestamp_str = ""
-				if idx < len(self.raw_lines):
-					log_line = self.raw_lines[idx]
+				if idx < len(self.active_raw_lines):
+					log_line = self.active_raw_lines[idx]
+					# Regex to find common timestamp formats.
+					# (Same logic as in refresh_notes_window)
 					match = re.search(r'(\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,6})?|\b\d{2}:\d{2}:\d{2}(?:[.,]\d{1,6})?\b)', log_line)
 					if match:
 						timestamp_str = match.group(1)
 
-				content = self.notes[idx].replace("\n", " ") # Flatten content
+				content = active_notes[idx].replace("\n", " ") # Flatten for display
 				lines_to_write.append(f"{line_num}\t{timestamp_str}\t{content}")
 
 			with open(filepath, 'w', encoding='utf-8') as f:
@@ -1528,7 +1960,7 @@ class LogAnalyzerApp:
 		selected = self.notes_tree.selection()
 		if not selected: return
 		tags = self.notes_tree.item(selected[0], "tags")
-		if tags:
+		if tags and self.active_log_filepath: # Ensure active_log_filepath is available
 			raw_idx = int(tags[0])
 			self.add_note_dialog(target_index=raw_idx)
 
@@ -1536,10 +1968,11 @@ class LogAnalyzerApp:
 		selected = self.notes_tree.selection()
 		if not selected: return
 		tags = self.notes_tree.item(selected[0], "tags")
-		if tags:
+		if tags and self.active_log_filepath:
 			raw_idx = int(tags[0])
-			if raw_idx in self.notes:
-				del self.notes[raw_idx]
+			note_key = (self.active_log_filepath, raw_idx)
+			if note_key in self.notes:
+				del self.notes[note_key]
 				self.render_viewport()
 				self.refresh_notes_window()
 
@@ -1549,14 +1982,19 @@ class LogAnalyzerApp:
 		for item in self.notes_tree.get_children():
 			self.notes_tree.delete(item)
 
-		sorted_indices = sorted(self.notes.keys())
+		if not self.active_log_filepath: return
+
+		# Filter notes for the active log file
+		active_notes = {k: v for (fp, k), v in self.notes.items() if fp == self.active_log_filepath}
+		sorted_indices = sorted(active_notes.keys())
+
 		for i, idx in enumerate(sorted_indices):
 			line_num = idx + 1
 
 			# Extract timestamp from the raw log line
 			timestamp_str = ""
-			if idx < len(self.raw_lines):
-				log_line = self.raw_lines[idx]
+			if idx < len(self.active_raw_lines):
+				log_line = self.active_raw_lines[idx]
 				# Regex to find common timestamp formats.
 				# 1. HH:MM:SS.MS AM/PM
 				# 2. MM/DD/YYYY-HH:MM:SS.ms
@@ -1566,7 +2004,7 @@ class LogAnalyzerApp:
 				if match:
 					timestamp_str = match.group(1)
 
-			content = self.notes[idx].replace("\n", " ") # Flatten for display
+			content = active_notes[(self.active_log_filepath, idx)].replace("\n", " ") # Flatten for display
 			tag_stripe = "even" if i % 2 == 0 else "odd"
 			self.notes_tree.insert("", "end", values=(line_num, timestamp_str, content), tags=(str(idx), tag_stripe))
 
@@ -1583,32 +2021,35 @@ class LogAnalyzerApp:
 		except Exception as e: print(e)
 
 	def check_and_import_notes(self):
-		if not self.current_log_path:
+		if not self.active_log_filepath:
 			return
 
-		log_basename = os.path.basename(self.current_log_path)
+		log_basename = os.path.basename(self.active_log_filepath)
 		log_name_without_ext, _ = os.path.splitext(log_basename)
 		note_filename = f"{log_name_without_ext}.note"
 
 		# Look for the note file in the same directory as the log file
-		log_dir = os.path.dirname(self.current_log_path)
+		log_dir = os.path.dirname(self.active_log_filepath)
 		potential_path = os.path.join(log_dir, note_filename)
 
 		if os.path.exists(potential_path):
 			if messagebox.askyesno("Import Notes", f"Found a matching notes file:\n'{note_filename}'\n\nDo you want to import the notes?"):
 				try:
 					with open(potential_path, 'r', encoding='utf-8') as f:
-						# JSON keys are strings, convert them back to int
+						# JSON keys are strings, convert them back to int, and associate with filepath
 						str_keyed_notes = json.load(f)
-						self.notes = {int(k): v for k, v in str_keyed_notes.items()}
+						for raw_idx_str, note_content in str_keyed_notes.items():
+							raw_idx = int(raw_idx_str)
+							self.notes[(self.active_log_filepath, raw_idx)] = note_content
 
-					self.update_status(f"Imported {len(self.notes)} notes.")
+					self.update_status(f"Imported {len(str_keyed_notes)} notes for {os.path.basename(self.active_log_filepath)}.")
 
 					# Auto-show notes window on successful import
 					if not self.note_view_visible_var.get():
 						self.note_view_visible_var.set(True)
 						self.toggle_note_view_visibility()
 					# The calling function will handle UI refresh
+					self.refresh_notes_window()
 
 				except Exception as e:
 					messagebox.showerror("Import Error", f"Failed to import notes:\n{e}")
@@ -1616,12 +2057,15 @@ class LogAnalyzerApp:
 
 
 	def jump_to_line(self, raw_index):
+		if not self.active_log_filepath: return
+		if self.active_log_filepath != self.MERGED_VIEW_ID and self.active_log_filepath not in self.loaded_log_files: return
+
 		# Check if line is in filtered view
 		found_in_view = False
-		if self.filtered_cache is not None:
+		if self.show_only_filtered_var.get(): # Check if currently in filtered mode
 			try:
-				view_idx = self.filtered_indices.index(raw_index)
-				total_in_view = len(self.filtered_indices)
+				view_idx = self.active_filtered_indices.index(raw_index)
+				total_in_view = len(self.active_filtered_indices)
 				# Center it
 				half = self.visible_rows // 2
 				new_start = max(0, view_idx - half)
@@ -1633,15 +2077,15 @@ class LogAnalyzerApp:
 				# Line is filtered out
 				if messagebox.askyesno("Navigation", "The selected line is currently hidden by filters.\nDo you want to switch to 'Full View' to see it?"):
 					self.show_only_filtered_var.set(False)
-					self.refresh_view_fast()
+					self.recalc_filtered_data() # Recalculate and refresh view in full mode
 					found_in_view = False # Will fall through to raw view handling
 				else:
 					return
 
-		if not found_in_view:
+		if not found_in_view: # This also covers the case where show_only_filtered is False
 			# Full view
 			self.selected_raw_index = raw_index
-			total_in_view = len(self.raw_lines)
+			total_in_view = len(self.active_raw_lines)
 			half = self.visible_rows // 2
 			new_start = max(0, raw_index - half)
 			new_start = min(new_start, max(0, total_in_view - self.visible_rows))
@@ -1702,45 +2146,43 @@ class LogAnalyzerApp:
 
 	# --- Embedded Timeline Logic ---
 
-	def _update_timeline_data(self):
+	def _update_timeline_data(self, log_state): # Accepts LogFileState object
 		"""Sorts events for the timeline."""
-		if self.timeline_events:
-			# Sort by time for drawing
-			self.timeline_events_by_time = sorted(self.timeline_events, key=lambda x: x[0])
-			# Sort by index for lookups
-			self.timeline_events_by_index = sorted(self.timeline_events, key=lambda x: x[2])
+		if log_state.timeline_events:
+			log_state.timeline_events_by_time = sorted(log_state.timeline_events, key=lambda x: x[0])
+			log_state.timeline_events_by_index = sorted(log_state.timeline_events, key=lambda x: x[2])
 		else:
-			self.timeline_events_by_time = []
-			self.timeline_events_by_index = []
+			log_state.timeline_events_by_time = []
+			log_state.timeline_events_by_index = []
 
 	def get_approx_time(self, raw_idx):
 		"""Estimates the timestamp for a given raw line index using event data, with interpolation."""
-		if not self.timeline_events_by_index: return None
-		
+		if not self.active_timeline_events_by_index: return None
+
 		# Events are (time, filter_text, raw_index)
-		event_indices = [e[2] for e in self.timeline_events_by_index]
-		
+		event_indices = [e[2] for e in self.active_timeline_events_by_index]
+
 		idx = bisect.bisect_left(event_indices, raw_idx)
-		
+
 		if idx < len(event_indices) and event_indices[idx] == raw_idx:
 			# Exact match
-			return self.timeline_events_by_index[idx][0]
+			return self.active_timeline_events_by_index[idx][0]
 		elif idx == 0:
 			# raw_idx is before or at the first event's raw_index
-			return self.timeline_events_by_index[0][0]
+			return self.active_timeline_events_by_index[0][0]
 		elif idx >= len(event_indices): # raw_idx is after or at the last event's raw_index
-			return self.timeline_events_by_index[-1][0]
+			return self.active_timeline_events_by_index[-1][0]
 		else:
-			# raw_idx is between timeline_events_by_index[idx-1] and timeline_events_by_index[idx]
-			event_before = self.timeline_events_by_index[idx-1]
-			event_after = self.timeline_events_by_index[idx]
-			
+			# raw_idx is between active_timeline_events_by_index[idx-1] and active_timeline_events_by_index[idx]
+			event_before = self.active_timeline_events_by_index[idx-1]
+			event_after = self.active_timeline_events_by_index[idx]
+
 			time_before, raw_idx_before = event_before[0], event_before[2]
 			time_after, raw_idx_after = event_after[0], event_after[2]
-			
+
 			if raw_idx_after == raw_idx_before: # Safeguard against division by zero
 				return time_before
-			
+
 			# Linear interpolation of time based on raw_index
 			fraction = (raw_idx - raw_idx_before) / (raw_idx_after - raw_idx_before)
 			interpolated_timedelta = (time_after - time_before) * fraction
@@ -1748,15 +2190,15 @@ class LogAnalyzerApp:
 
 	def get_approx_index_from_time(self, target_time):
 		"""Finds the nearest line index for a given timestamp."""
-		if not self.timeline_events_by_time: return 0
-		
+		if not self.active_timeline_events_by_time: return 0
+
 		# Bisect to find time
-		idx = bisect.bisect_left(self.timeline_events_by_time, target_time, key=lambda x: x[0])
-		
-		if idx < len(self.timeline_events_by_time):
-			return self.timeline_events_by_time[idx][2]
+		idx = bisect.bisect_left(self.active_timeline_events_by_time, target_time, key=lambda x: x[0])
+
+		if idx < len(self.active_timeline_events_by_time):
+			return self.active_timeline_events_by_time[idx][2]
 		elif idx > 0:
-			return self.timeline_events_by_time[idx-1][2]
+			return self.active_timeline_events_by_time[idx-1][2]
 		return 0
 
 	def draw_timeline(self):
@@ -1764,111 +2206,136 @@ class LogAnalyzerApp:
 		self.timeline_canvas.delete("all")
 		width = self.timeline_canvas.winfo_width()
 		height = self.timeline_canvas.winfo_height()
-		
+
 		if width <= 1: return
 
 		is_dark = self.dark_mode.get()
 		bg_color = "#2e2e2e" if is_dark else "#ffffff"
 		self.timeline_canvas.config(bg=bg_color)
-		
-		if not self.timeline_events_by_time:
+
+		if not self.active_timeline_events_by_time:
 			self.timeline_canvas.create_text(width//2, height//2, text="No events marked", fill="#888888")
 			return
 
 		# Draw Events
 		self._draw_timeline_events_layer(width, height)
-		
+
 		# Draw Viewport
 		self._draw_timeline_viewport_layer(width, height)
 
 	def _draw_timeline_events_layer(self, width, height):
-		self.timeline_buckets = [ [] for _ in range(width) ]
-		
-		start_time = self.timeline_events_by_time[0][0]
-		end_time = self.timeline_events_by_time[-1][0]
+		if not self.active_timeline_events_by_time: return
+
+		# 1. Determine Actual Event Range (Cropping empty time)
+		first_event_time = self.active_timeline_events_by_time[0][0]
+		last_event_time = self.active_timeline_events_by_time[-1][0]
+
+		# Add 1% padding to the range
+		total_range_sec = (last_event_time - first_event_time).total_seconds()
+		if total_range_sec <= 0: total_range_sec = 1
+
+		padding = total_range_sec * 0.01
+		start_time = first_event_time - datetime.timedelta(seconds=padding)
+		end_time = last_event_time + datetime.timedelta(seconds=padding)
 		total_duration = (end_time - start_time).total_seconds()
-		if total_duration <= 0: total_duration = 1
-		
-		# Zoom logic
+
+		# Zoom logic (on top of the cropped range)
 		visible_duration = total_duration / self.timeline_zoom
-		view_start_time_offset = self.timeline_view_offset # Seconds from start
-		
+		view_start_time_offset = self.timeline_view_offset
+		t_view_start = start_time + datetime.timedelta(seconds=view_start_time_offset)
+		t_view_end = t_view_start + datetime.timedelta(seconds=visible_duration)
+
+		# 2. Setup Colors
+		is_dark = self.dark_mode.get()
 		filter_color_map = {}
 		for f in self.filters:
-			# Smart Color Logic: Use FG if BG is white/default
-			bg_lower = f.back_color.lower()
-			fg_lower = f.fore_color.lower()
-			if bg_lower in ("#ffffff", "#fff", "white", "#d9d9d9"):
-				# Use FG, but if FG is black, force a blue
-				if fg_lower in ("#000000", "#000", "black"):
-					filter_color_map[f.text] = "#0078D7"
+			key = f.text.strip()
+			bg = fix_color(f.back_color, "#FFFFFF")
+			fg = fix_color(f.fore_color, "#000000")
+
+			rgb_bg = hex_to_rgb(bg)
+			lum_bg = (0.299 * rgb_bg[0] + 0.587 * rgb_bg[1] + 0.114 * rgb_bg[2]) / 255.0
+
+			use_fg = False
+			if not is_dark and lum_bg > 0.9: use_fg = True
+			elif is_dark and lum_bg < 0.2: use_fg = True
+
+			if use_fg:
+				rgb_fg = hex_to_rgb(fg)
+				lum_fg = (0.299 * rgb_fg[0] + 0.587 * rgb_fg[1] + 0.114 * rgb_fg[2]) / 255.0
+				if (not is_dark and lum_fg > 0.9) or (is_dark and lum_fg < 0.2):
+					filter_color_map[key] = "#0078D7"
 				else:
-					filter_color_map[f.text] = f.fore_color
+					filter_color_map[key] = fg
 			else:
-				filter_color_map[f.text] = f.back_color
+				filter_color_map[key] = bg
 
-		# Calculate visible time range
-		t_start = start_time + datetime.timedelta(seconds=view_start_time_offset)
-		t_end = t_start + datetime.timedelta(seconds=visible_duration)
+		# 3. Draw Axis/Labels (Bottom 15px)
+		axis_height = 15
+		plot_height = height - axis_height
+		label_color = "#888888" if is_dark else "#555555"
 
-		# 1. Bucket events (Optimization: Binary search for start/end index)
+		# Draw 3 markers (Start, Middle, End)
+		for i in range(3):
+			ratio = i / 2.0
+			x = int(ratio * width)
+			t_marker = t_view_start + datetime.timedelta(seconds=ratio * visible_duration)
+			t_str = t_marker.strftime("%H:%M:%S")
+			anchor = "w" if i == 0 else ("e" if i == 2 else "center")
+			self.timeline_canvas.create_text(x, height - 5, text=t_str, fill=label_color, font=("Consolas", 8), anchor=anchor)
+			self.timeline_canvas.create_line(x, plot_height, x, plot_height + 5, fill=label_color)
+
+		# 4. Bucket and Draw Events (Block style)
+		self.timeline_buckets = [ [] for _ in range(width) ]
 		import bisect
-		idx_start = bisect.bisect_left(self.timeline_events_by_time, t_start, key=lambda x: x[0])
-		
-		for i in range(idx_start, len(self.timeline_events_by_time)):
-			dt, f_text, r_idx = self.timeline_events_by_time[i]
-			if dt > t_end: break # Out of view
-			
-			offset_in_view = (dt - t_start).total_seconds()
+		idx_start = bisect.bisect_left(self.active_timeline_events_by_time, t_view_start, key=lambda x: x[0])
+
+		for i in range(idx_start, len(self.active_timeline_events_by_time)):
+			dt, f_text, r_idx = self.active_timeline_events_by_time[i]
+			if dt > t_view_end: break
+
+			offset_in_view = (dt - t_view_start).total_seconds()
 			x = int((offset_in_view / visible_duration) * width)
-			
 			if 0 <= x < width:
 				self.timeline_buckets[x].append((dt, f_text, r_idx))
-				
-		# 2. Draw buckets (Density Bars)
+
 		max_count = 0
 		for b in self.timeline_buckets:
 			if len(b) > max_count: max_count = len(b)
-			
 		if max_count == 0: return
 
 		from collections import Counter
-
 		for x, events in enumerate(self.timeline_buckets):
 			if not events: continue
 			count = len(events)
-			
-			# Height calculation (Linear density)
-			bar_height = int((count / max_count) * height)
-			if bar_height < 3: bar_height = 3 # Minimum visibility
-			
-			# Determine dominant color
-			colors = [filter_color_map.get(e[1], "#0078D7") for e in events]
-			if colors:
-				most_common_color = Counter(colors).most_common(1)[0][0]
-			else:
-				most_common_color = "#0078D7"
-			
-			# Draw bar from bottom
-			y1 = height
-			y2 = height - bar_height
-			
-			self.timeline_canvas.create_line(x, y1, x, y2, fill=most_common_color, width=1, tags="events")
+
+			bar_h = int((count / max_count) * plot_height)
+			if bar_h < 5: bar_h = 5 # Minimum height for visibility
+
+			event_colors = [filter_color_map.get(e[1].strip(), "#0078D7") for e in events]
+			most_common_color = Counter(event_colors).most_common(1)[0][0]
+
+			# Draw rectangle (2px wide) for better visibility
+			x1 = x - 1
+			x2 = x + 1
+			y1 = plot_height
+			y2 = plot_height - bar_h
+			self.timeline_canvas.create_rectangle(x1, y1, x2, y2, fill=most_common_color, outline="", tags="events")
 
 	def _draw_timeline_viewport_layer(self, width, height):
 		self.timeline_canvas.delete("viewport")
-		
-		if not self.timeline_events_by_time: return
+
+		if not self.active_timeline_events_by_time: return
 		if not hasattr(self, 'view_start_index') or not hasattr(self, 'current_displayed_lines'): return
 
-		start_time = self.timeline_events_by_time[0][0]
-		end_time = self.timeline_events_by_time[-1][0]
+		start_time = self.active_timeline_events_by_time[0][0]
+		end_time = self.active_timeline_events_by_time[-1][0]
 		total_duration = (end_time - start_time).total_seconds()
 		if total_duration <= 0: return
 
 		visible_duration = total_duration / self.timeline_zoom
 		view_start_time_offset = self.timeline_view_offset
-		
+
 		# Viewport Window Time - current view on timeline
 		t_timeline_view_start = start_time + datetime.timedelta(seconds=view_start_time_offset)
 
@@ -1877,33 +2344,33 @@ class LogAnalyzerApp:
 		# Ensure last_displayed_raw_idx doesn't go beyond total lines
 		last_displayed_raw_idx = self.get_view_item(min(self.view_start_index + self.current_displayed_lines - 1, self.get_total_count() - 1))[2]
 
-				t_log_start = self.get_approx_time(first_displayed_raw_idx)
-				t_log_end = self.get_approx_time(last_displayed_raw_idx)
-				
-				if t_log_start and t_log_end:
-					offset_start = (t_log_start - t_timeline_view_start).total_seconds()
-					offset_end = (t_log_end - t_timeline_view_start).total_seconds()
-					
-					x1 = (offset_start / visible_duration) * width
-					x2 = (offset_end / visible_duration) * width
-					
-					# Clamp to canvas width
-					x1 = max(0, x1)
-					x2 = min(width, x2)
-					
-					if x2 - x1 < 1: # Ensure it has at least 1 pixel width to be visible
-						# If range is too small, make it a single pixel line at x1
-						x2 = x1 + 1 
-					
-					is_dark = self.dark_mode.get()
-					indicator_fill_color = "#cccccc" if is_dark else "#333333" # Greyish color
-					indicator_outline_color = "#ffffff" if is_dark else "#000000"
-					
-					# Use fill with a thin outline, possibly with stipple for transparency if desired
-					self.timeline_canvas.create_rectangle(x1, 0, x2, height, 
-														fill=indicator_fill_color, # Solid fill for now
-														outline=indicator_outline_color, 
-														width=1, tags="viewport") # Thinner outline
+		t_log_start = self.get_approx_time(first_displayed_raw_idx)
+		t_log_end = self.get_approx_time(last_displayed_raw_idx)
+
+		if t_log_start and t_log_end:
+			offset_start = (t_log_start - t_timeline_view_start).total_seconds()
+			offset_end = (t_log_end - t_timeline_view_start).total_seconds()
+
+			x1 = (offset_start / visible_duration) * width
+			x2 = (offset_end / visible_duration) * width
+
+			# Clamp to canvas width
+			x1 = max(0, x1)
+			x2 = min(width, x2)
+
+			if x2 - x1 < 1: # Ensure it has at least 1 pixel width to be visible
+				# If range is too small, make it a single pixel line at x1
+				x2 = x1 + 1
+
+			is_dark = self.dark_mode.get()
+			indicator_fill_color = "#cccccc" if is_dark else "#333333" # Greyish color
+			indicator_outline_color = "#ffffff" if is_dark else "#000000"
+
+			# Use fill with a thin outline, possibly with stipple for transparency if desired
+			self.timeline_canvas.create_rectangle(x1, 0, x2, height,
+												fill=indicator_fill_color, # Solid fill for now
+												outline=indicator_outline_color,
+												width=1, tags="viewport") # Thinner outline
 	def update_timeline_viewport(self):
 		"""Only redraws the viewport indicator (fast)."""
 		width = self.timeline_canvas.winfo_width()
@@ -1917,84 +2384,84 @@ class LogAnalyzerApp:
 	def on_timeline_motion(self, event):
 		x = event.x
 		width = self.timeline_canvas.winfo_width()
-		
+
 		# Check bounds and data existence
 		if not hasattr(self, 'timeline_buckets') or x < 0 or x >= len(self.timeline_buckets):
 			self.timeline_tooltip.place_forget()
 			return
-			
+
 		bucket = self.timeline_buckets[x]
 		if not bucket:
 			self.timeline_tooltip.place_forget()
 			return
-			
+
 		# Prepare tooltip info
 		count = len(bucket)
 		start_t = bucket[0][0].strftime("%H:%M:%S")
 		end_t = bucket[-1][0].strftime("%H:%M:%S")
-		
+
 		from collections import Counter
 		texts = [e[1] for e in bucket]
 		top_text_item = Counter(texts).most_common(1)[0] # (text, count)
-		
+
 		msg = f"Time: {start_t} - {end_t}\nTotal Events: {count}\nTop: {top_text_item[0]} ({top_text_item[1]})"
-		
+
 		# Calculate Position (Avoid clipping)
 		rx, ry = self.timeline_canvas.winfo_rootx(), self.timeline_canvas.winfo_rooty()
 		tx = rx + x + 15
 		ty = ry - 60 # Above the cursor
-		
+
 		# Adjust if off-screen right
 		screen_w = self.root.winfo_screenwidth()
 		# Or just root width if not fullscreen. Use root geometry.
 		root_x = self.root.winfo_rootx()
 		root_w = self.root.winfo_width()
-		
+
 		if tx + 200 > root_x + root_w:
 			tx = rx + x - 210
-			
+
 		# Place relative to root
 		rel_x = tx - root_x
 		rel_y = ty - self.root.winfo_rooty()
-		
+
 		self.timeline_tooltip.config(text=msg)
 		self.timeline_tooltip.place(x=rel_x, y=rel_y)
 		self.timeline_tooltip.lift()
 
 	def on_timeline_zoom(self, event):
-		if not self.timeline_events_by_time: return
-		
+		if not self.active_timeline_events_by_time: return
+
 		# Determine direction
 		if event.num == 4 or event.delta > 0:
 			zoom_factor = 1.1
 		else:
 			zoom_factor = 0.9
-			
+
 		new_zoom = self.timeline_zoom * zoom_factor
 		if new_zoom < 1.0: new_zoom = 1.0 # Min zoom 1.0 (fit all)
-		
+
 		# Zoom centered on mouse X
 		width = self.timeline_canvas.winfo_width()
-		start_time = self.timeline_events_by_time[0][0]
-		end_time = self.timeline_events_by_time[-1][0]
+		start_time = self.active_timeline_events_by_time[0][0]
+		end_time = self.active_timeline_events_by_time[-1][0]
 		total_duration = (end_time - start_time).total_seconds()
 		if total_duration <= 0: return
-		
+
 		# Time at cursor before zoom
 		old_visible_duration = total_duration / self.timeline_zoom
 		cursor_ratio = event.x / width
 		time_offset_at_cursor = self.timeline_view_offset + (cursor_ratio * old_visible_duration)
-		
+
 		self.timeline_zoom = new_zoom
 		new_visible_duration = total_duration / self.timeline_zoom
-		
+
 		# Adjust offset so time_offset_at_cursor remains at cursor_ratio
 		new_view_offset = time_offset_at_cursor - (cursor_ratio * new_visible_duration)
-		
+
 		# Clamp
 		max_offset = total_duration - new_visible_duration
 		self.timeline_view_offset = max(0.0, min(new_view_offset, max_offset))
-		
+
 		self.draw_timeline()
 		return "break"
 
@@ -2005,23 +2472,23 @@ class LogAnalyzerApp:
 
 	def on_timeline_pan_drag(self, event):
 		width = self.timeline_canvas.winfo_width()
-		if not self.timeline_events_by_time: return
-		start_time = self.timeline_events_by_time[0][0]
-		end_time = self.timeline_events_by_time[-1][0]
+		if not self.active_timeline_events_by_time: return
+		start_time = self.active_timeline_events_by_time[0][0]
+		end_time = self.active_timeline_events_by_time[-1][0]
 		total_duration = (end_time - start_time).total_seconds()
 		if total_duration <= 0: return
 
 		visible_duration = total_duration / self.timeline_zoom
-		
+
 		dx = self.timeline_pan_start_x - event.x # Drag left to move view right
 		dt_per_pixel = visible_duration / width
-		
+
 		new_offset = self.timeline_pan_start_offset + (dx * dt_per_pixel)
-		
+
 		# Clamp
 		max_offset = total_duration - visible_duration
 		self.timeline_view_offset = max(0.0, min(new_offset, max_offset))
-		
+
 		self.draw_timeline()
 
 	def on_timeline_pan_release(self, event):
@@ -2034,25 +2501,25 @@ class LogAnalyzerApp:
 		self._handle_timeline_nav(event.x)
 
 	def _handle_timeline_nav(self, x):
-		if not self.timeline_events_by_time: return
+		if not self.active_timeline_events_by_time: return
 		width = self.timeline_canvas.winfo_width()
 		if width <= 0: return
-		
+
 		# Map x to time considering zoom/offset
-		start_time = self.timeline_events_by_time[0][0]
-		end_time = self.timeline_events_by_time[-1][0]
+		start_time = self.active_timeline_events_by_time[0][0]
+		end_time = self.active_timeline_events_by_time[-1][0]
 		total_duration = (end_time - start_time).total_seconds()
 		visible_duration = total_duration / self.timeline_zoom
-		
+
 		ratio = x / width
 		offset_in_view = ratio * visible_duration
 		target_time_offset = self.timeline_view_offset + offset_in_view
-		
+
 		target_time = start_time + datetime.timedelta(seconds=target_time_offset)
-		
+
 		# Find index
 		target_idx = self.get_approx_index_from_time(target_time)
-		
+
 		# Jump
 		self.jump_to_line(target_idx)
 
@@ -2062,52 +2529,135 @@ class LogAnalyzerApp:
 		if self.timeline_frame.winfo_manager():
 			self.paned_window.forget(self.timeline_frame)
 		else:
-			# Show it. Insert at index 1 (between Log View [0] and Filter View [Last])       
+			# Show it. Insert at index 1 (between Log View [0] and Filter View [Last])
 			# If Filter View is hidden/removed, it might be the last one.
 			# But PanedWindow index logic is simple.
 			# We want it below the content frame.
-			
+
 			# Current panes:
 			panes = self.paned_window.panes()
-			
+
 			# We assume top pane is always there (index 0).
 			# We insert at index 1.
 			if len(panes) >= 1:
 				self.paned_window.add(self.timeline_frame, after=panes[0], minsize=40, height=60, stretch="never")
 			else:
 				self.paned_window.add(self.timeline_frame, minsize=40, height=60, stretch="never")
-		
+
 		# Force a redraw if showing
 		if self.timeline_frame.winfo_manager():
 			self.draw_timeline()
 
 
 	# --- Rendering ---
+		def render_viewport(self):
+			# Use active_raw_lines for total count when not filtered
+			total = self.get_total_count()
+
+			self.text_area.config(state=tk.NORMAL); self.text_area.delete("1.0", tk.END)
+			self.line_number_area.config(state=tk.NORMAL); self.line_number_area.delete("1.0", tk.END)
+
+			if total == 0:
+				self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED); return
+
+			# Ensure we have a valid active log or merged view
+			if not self.active_log_filepath:
+				self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED); return
+
+			if self.active_log_filepath != self.MERGED_VIEW_ID and self.active_log_filepath not in self.loaded_log_files:
+				self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED); return
+
+			end_index = min(self.view_start_index + self.visible_rows, total)
+			display_buffer = []
+			line_nums_buffer = []
+			tag_buffer = []
+
+			for i in range(self.view_start_index, end_index):
+				line, tags, raw_idx = self.get_view_item(i)
+				display_buffer.append(line)
+				line_nums_buffer.append(str(raw_idx + 1))
+				relative_idx = i - self.view_start_index + 1
+				if tags: tag_buffer.append((relative_idx, tags))
+
+				# Check notes for the current active file and raw_idx
+				if (self.active_log_filepath, raw_idx) in self.notes:
+					tag_buffer.append((relative_idx, ["note_line"]))
+
+				if raw_idx == self.selected_raw_index:
+					tag_buffer.append((relative_idx, ["current_line"]))
+
+			full_text = "".join(display_buffer)
+			self.text_area.insert("1.0", full_text)
+
+			line_nums_text = "\n".join(line_nums_buffer)
+			self.line_number_area.insert("1.0", line_nums_text)
+			self.line_number_area.tag_add("right_align", "1.0", "end")
+
+			# Re-enable tags
+			for rel_idx, tags in tag_buffer:
+				for tag in tags: self.text_area.tag_add(tag, f"{rel_idx}.0", f"{rel_idx+1}.0")
+
+		# Highlight all search matches
+		if self.last_search_query:
+			query = self.last_search_query
+			case_sensitive = self.last_search_case
+			start_index = "1.0"
+			while True:
+				pos = self.text_area.search(query, start_index, stopindex=tk.END, nocase=not case_sensitive)
+				if not pos: break
+				end_pos = f"{pos}+{len(query)}c"
+				self.text_area.tag_add("find_match_all", pos, end_pos)
+				start_index = end_pos
+
+		self.text_area.tag_raise("current_line")
+		self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED)
+		self.current_displayed_lines = int(self.text_area.index('end-1c').split('.')[0]) # Get actual number of lines displayed
+		self.update_timeline_viewport()
+
 	def render_viewport(self):
+		# Use active_raw_lines for total count when not filtered
+		total = self.get_total_count()
+
 		self.text_area.config(state=tk.NORMAL); self.text_area.delete("1.0", tk.END)
 		self.line_number_area.config(state=tk.NORMAL); self.line_number_area.delete("1.0", tk.END)
-		total = self.get_total_count()
+
 		if total == 0:
 			self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED); return
+
+		# Ensure we have a valid active log or merged view
+		if not self.active_log_filepath:
+			self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED); return
+
+		if self.active_log_filepath != self.MERGED_VIEW_ID and self.active_log_filepath not in self.loaded_log_files:
+			self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED); return
+
 		end_index = min(self.view_start_index + self.visible_rows, total)
 		display_buffer = []
 		line_nums_buffer = []
 		tag_buffer = []
+
 		for i in range(self.view_start_index, end_index):
 			line, tags, raw_idx = self.get_view_item(i)
 			display_buffer.append(line)
 			line_nums_buffer.append(str(raw_idx + 1))
 			relative_idx = i - self.view_start_index + 1
 			if tags: tag_buffer.append((relative_idx, tags))
-			if raw_idx in self.notes:
+
+			# Check notes for the current active file and raw_idx
+			if (self.active_log_filepath, raw_idx) in self.notes:
 				tag_buffer.append((relative_idx, ["note_line"]))
+
 			if raw_idx == self.selected_raw_index:
 				tag_buffer.append((relative_idx, ["current_line"]))
+
 		full_text = "".join(display_buffer)
 		self.text_area.insert("1.0", full_text)
+
 		line_nums_text = "\n".join(line_nums_buffer)
 		self.line_number_area.insert("1.0", line_nums_text)
 		self.line_number_area.tag_add("right_align", "1.0", "end")
+
+		# Re-enable tags
 		for rel_idx, tags in tag_buffer:
 			for tag in tags: self.text_area.tag_add(tag, f"{rel_idx}.0", f"{rel_idx+1}.0")
 
@@ -2224,12 +2774,12 @@ class LogAnalyzerApp:
 		frame.pack(fill=tk.BOTH, expand=True)
 
 		ttk.Label(frame, text="Find:").pack(side=tk.LEFT, padx=(0, 5))
-		self.find_entry = ttk.Entry(frame, width=25)
+		self.find_entry = ttk.Combobox(frame, values=self.find_history, width=25)
 		self.find_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 		self.find_entry.bind("<Return>", self.on_find_confirm)
 		if self.last_search_query:
-			self.find_entry.insert(0, self.last_search_query)
-			self.find_entry.select_range(0, tk.END)
+			self.find_entry.set(self.last_search_query)
+			self.find_entry.selection_range(0, tk.END)
 
 		ttk.Button(frame, text="Find", command=self.on_find_confirm, width=6).pack(side=tk.LEFT, padx=2)
 
@@ -2252,6 +2802,7 @@ class LogAnalyzerApp:
 			self.find_window = None
 			self.find_entry = None
 		self.text_area.focus_set()
+		self.update_status(f"Showing {self.get_total_count()} lines (Total {len(self.active_raw_lines)})")
 		return "break"
 
 	def cancel_search(self, event=None):
@@ -2271,6 +2822,7 @@ class LogAnalyzerApp:
 			self.render_viewport()
 
 		self.marker_canvas.delete("all") # Clear markers
+		self.update_status(f"Showing {self.get_total_count()} lines (Total {len(self.active_raw_lines)})")
 		return "break"
 
 	def on_escape(self, event=None):
@@ -2283,9 +2835,9 @@ class LogAnalyzerApp:
 	def _is_visible(self, raw_idx):
 		"""Check if a raw line index is currently visible (not filtered out)."""
 		if not self.show_only_filtered_var.get(): return True
-		# Check if raw_idx is in filtered_indices (which is sorted)
-		i = bisect.bisect_left(self.filtered_indices, raw_idx)
-		if i != len(self.filtered_indices) and self.filtered_indices[i] == raw_idx:
+		# Check if raw_idx is in active_filtered_indices (which is sorted)
+		i = bisect.bisect_left(self.active_filtered_indices, raw_idx)
+		if i != len(self.active_filtered_indices) and self.active_filtered_indices[i] == raw_idx:
 			return True
 		return False
 
@@ -2325,13 +2877,13 @@ class LogAnalyzerApp:
 			for i in range(0, len(results), step):
 				raw_idx = results[i]
 				# Check visibility
-				idx = bisect.bisect_left(self.filtered_indices, raw_idx)
-				if idx < len(self.filtered_indices) and self.filtered_indices[idx] == raw_idx:
+				idx = bisect.bisect_left(self.active_filtered_indices, raw_idx)
+				if idx < len(self.active_filtered_indices) and self.active_filtered_indices[idx] == raw_idx:
 					y = int((idx / total_view_items) * h)
 					unique_y.add(y)
 		else:
 			# Full mode: raw_idx is directly useful
-			total_raw = len(self.raw_lines)
+			total_raw = len(self.active_raw_lines)
 			for i in range(0, len(results), step):
 				raw_idx = results[i]
 				y = int((raw_idx / total_raw) * h)
@@ -2368,6 +2920,14 @@ class LogAnalyzerApp:
 
 		if not query: return
 
+		# 1. Update Search History
+		if query in self.find_history:
+			self.find_history.remove(query)
+		self.find_history.insert(0, query)
+		self.find_history = self.find_history[:10]
+		if self.find_entry and self.find_entry.winfo_exists():
+			self.find_entry.config(values=self.find_history)
+
 		case_sensitive = self.find_case_var.get()
 
 		# 1. Perform Search (if query changed or cache missing)
@@ -2377,10 +2937,24 @@ class LogAnalyzerApp:
 
 			self.set_ui_busy(True)
 			try:
-				if self.rust_engine:
+				if self.active_log_filepath == self.MERGED_VIEW_ID:
+					# Merged View: Aggregate search results from all files
+					all_results = []
+					current_offset = 0
+					# Follow the same order as in Merged View build
+					for fp in self.merged_log_data.ordered_files:
+						if fp in self.loaded_log_files:
+							log_state = self.loaded_log_files[fp]
+							# Search in original file's engine
+							local_results = log_state.rust_engine.search(query, False, case_sensitive)
+							# Offset results
+							for r in local_results:
+								all_results.append(current_offset + r)
+							current_offset += len(log_state.raw_lines)
+					self.last_search_results = all_results
+				elif self.active_rust_engine: # Use active rust engine (Single File)
 					# Call Rust: search(query, is_regex, case_sensitive)
-					# Note: UI Find bar currently assumes text search (is_regex=False)
-					self.last_search_results = self.rust_engine.search(query, False, case_sensitive)
+					self.last_search_results = self.active_rust_engine.search(query, False, case_sensitive)
 				else:
 					self.last_search_results = []
 
@@ -2460,11 +3034,27 @@ class LogAnalyzerApp:
 	def refresh_filter_list(self):
 		for item in self.tree.get_children(): self.tree.delete(item)
 		is_dark = self.dark_mode.get()
+
+		# Get hit counts from the active log file state
+		active_log_hit_counts = []
+		is_merged = (self.active_log_filepath == self.MERGED_VIEW_ID)
+
+		if not is_merged and self.active_log_filepath and self.active_log_filepath in self.loaded_log_files:
+			active_log_hit_counts = self.loaded_log_files[self.active_log_filepath].filter_hit_counts
+
 		for idx, flt in enumerate(self.filters):
 			en_str = "☑" if flt.enabled else "☐"
 			type_str = "Excl" if flt.is_exclude else ("Regex" if flt.is_regex else "Text")
+
+			if is_merged:
+				hit_count_str = str(flt.hit_count)
+			else:
+				hit_count_str = "0"
+				if idx < len(active_log_hit_counts):
+					hit_count_str = str(active_log_hit_counts[idx])
+
 			event_str = "✓" if flt.is_event else ""
-			item_id = self.tree.insert("", "end", values=(en_str, type_str, flt.text, str(flt.hit_count), event_str))
+			item_id = self.tree.insert("", "end", values=(en_str, type_str, flt.text, hit_count_str, event_str))
 			tag_name = f"row_{idx}"
 			self.tree.item(item_id, tags=(tag_name,))
 
@@ -2731,6 +3321,7 @@ class LogAnalyzerApp:
 				f_node.set("description", "")
 			tree = ET.ElementTree(root)
 			tree.write(filepath, encoding="utf-8", xml_declaration=True)
+			self.filters_dirty = False # Changes saved
 			return True
 		except Exception as e: messagebox.showerror("Write Error", str(e)); return False
 
@@ -2770,6 +3361,7 @@ class LogAnalyzerApp:
 				is_event = is_true(f.get('is_event')) # Read our custom attribute, defaults to False if not found
 				if text: new_filters.append(Filter(text, fore, back, enabled, is_regex, is_exclude, is_event=is_event))
 			self.filters = new_filters
+			self.filters_dirty = False # Newly loaded, not dirty
 			self.current_tat_path = filepath; self.update_title()
 			self.recalc_filtered_data()
 			self.show_toast(f"Imported {len(new_filters)} filters")
@@ -2797,6 +3389,233 @@ class LogAnalyzerApp:
 				self.filters = [Filter(**item) for item in data]
 			self.recalc_filtered_data()
 		except Exception as e: messagebox.showerror("Error", f"JSON Import Failed: {e}")
+
+	# --- Multi-Log File Support ---
+	def load_multiple_logs(self):
+		if self.is_processing: return
+		init_dir = self.config.get("last_log_dir", ".")
+		filepaths = filedialog.askopenfilenames(initialdir=init_dir, filetypes=[("Log Files", "*.log *.txt"), ("All Files", "*.*")])
+		if not filepaths: return
+
+		self.config["last_log_dir"] = os.path.dirname(filepaths[0]); self.save_config()
+		self.set_ui_busy(True) # Set busy once for the whole multi-load operation
+
+		# Load each selected file
+		for fp in filepaths:
+			self._load_log_file_into_state(fp)
+
+	def _set_active_log_state(self, filepath, load_duration=None):
+		"""Sets the specified log file as the active one, updating all proxy variables and refreshing UI."""
+		if filepath == self.MERGED_VIEW_ID:
+			if not self.merged_log_data: # If merged data not built yet
+				self.set_ui_busy(True)
+				self.update_status("Building Merged View... This may take a moment.")
+				self.show_toast("Building Merged View...", duration=3000)
+				self.root.update_idletasks()
+				threading.Thread(target=self._worker_build_merged_view, daemon=True).start()
+				return
+
+			active_state = self.merged_log_data
+			self.active_log_filepath = self.MERGED_VIEW_ID
+			display_log_name = "Merged View"
+		elif filepath not in self.loaded_log_files:
+			print(f"ERROR: Attempted to set active log to unknown filepath: {filepath}")
+			return
+		else:
+			active_state = self.loaded_log_files[filepath]
+			self.active_log_filepath = filepath
+			display_log_name = os.path.basename(filepath)
+
+		# Update all proxy variables
+		self.active_raw_lines = active_state.raw_lines
+		self.active_rust_engine = active_state.rust_engine
+		self.active_all_line_tags = active_state.all_line_tags
+		self.active_filtered_indices = active_state.filtered_indices
+		self.active_timeline_events = active_state.timeline_events
+		self.active_timeline_events_by_time = active_state.timeline_events_by_time
+		self.active_timeline_events_by_index = active_state.timeline_events_by_index
+		self.active_timestamps_found = active_state.timestamps_found
+		self.current_log_path = active_state.filepath # Keep for consistency with original current_log_path (or virtual for merged)
+
+		# Reset view
+		self.view_start_index = 0
+		self.selected_raw_index = -1
+		self.selection_offset = 0
+		self.last_search_query = None
+		self.last_search_results = None
+		self.marker_canvas.delete("all")
+		self.welcome_label.place_forget()
+
+		# Adjust line number area width
+		max_digits = len(str(len(self.active_raw_lines)))
+		self.line_number_area.config(width=max(7, max_digits))
+
+		# Update UI components
+		self.update_title()
+		if load_duration is not None:
+			self.load_duration_str = f"{load_duration:.4f}s"
+
+		self.update_status(f"Loaded {len(self.active_raw_lines)} lines from {display_log_name}")
+
+		# Recalculate filters for the new active state
+		self.recalc_filtered_data() # This will update filter_complete and draw_timeline
+
+		# Select in treeview if not already selected (Skip for MERGED_VIEW_ID)
+		if filepath != self.MERGED_VIEW_ID and self.log_files_tree.selection() != (filepath,):
+			if self.log_files_tree.exists(filepath):
+				self.log_files_tree.selection_set(filepath)
+
+		# Ensure the timeline has the correct active data (this is implicitly handled by recalc_filtered_data now)
+		# self._update_timeline_data(active_state) # Explicitly update timeline data for active_state
+		# self.draw_timeline()
+
+
+
+	def _worker_build_merged_view(self):
+		"""Builds a merged view sorted by file start times (Concatenation Mode)."""
+		try:
+			t_start = time.time()
+			self.msg_queue.put(('status', "Merging logs: Sorting files by start time..."))
+
+			ts_pattern = re.compile(r'(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b)')
+
+			file_info = []
+			for fp, log_state in self.loaded_log_files.items():
+				# Get start time from the very first line
+				first_line = log_state.rust_engine.get_line(0)
+				match = ts_pattern.search(first_line)
+				start_ts = match.group(1) if match else "9999"
+				file_info.append((start_ts, fp))
+
+			# Sort file paths by their start timestamp
+			file_info.sort()
+
+			merged_refs = []
+			total_files = len(file_info)
+			for i, (ts, fp) in enumerate(file_info, 1):
+				self.msg_queue.put(('status', f"Merging logs: Adding file {i}/{total_files}..."))
+				log_state = self.loaded_log_files[fp]
+				count = log_state.rust_engine.line_count()
+				# Efficiently add all line references for this file
+				for raw_idx in range(count):
+					merged_refs.append((fp, raw_idx))
+
+			if not merged_refs:
+				self.msg_queue.put(('load_error', "No lines found to merge."))
+				return
+
+			# Create proxies (Dynamic fetching)
+			class MergedLinesProxy:
+				def __init__(self, app_ref, data):
+					self.app = app_ref
+					self.data = data # List of (fp, raw_idx)
+				def __len__(self):
+					return len(self.data)
+				def __getitem__(self, idx):
+					if idx < 0 or idx >= len(self.data):
+						raise IndexError("Index out of bounds")
+					fp, raw_idx = self.data[idx]
+					if fp in self.app.loaded_log_files:
+						return self.app.loaded_log_files[fp].rust_engine.get_line(raw_idx)
+					return "<Error: File not loaded>"
+				def get_original_ref(self, idx):
+					if 0 <= idx < len(self.data): return self.data[idx]
+					return None, None
+
+			merged_raw_lines_proxy = MergedLinesProxy(self, merged_refs)
+
+			# Proxy for line tags in merged view
+			class MergedTagsProxy:
+				def __init__(self, app_ref, data):
+					self.app = app_ref
+					self.data = data # List of (fp, raw_idx)
+				def __len__(self):
+					return len(self.data)
+				def __getitem__(self, idx):
+					if idx < 0 or idx >= len(self.data): return None
+					fp, raw_idx = self.data[idx]
+					if fp in self.app.loaded_log_files:
+						state = self.app.loaded_log_files[fp]
+						tags = state.all_line_tags
+						if tags and raw_idx < len(tags):
+							return tags[raw_idx]
+					return None
+
+			merged_tags_proxy = MergedTagsProxy(self, merged_refs)
+
+			class MergedRustEngineStub:
+				def __init__(self, count): self._count = count
+				def line_count(self): return self._count
+				def filter(self, rust_filters): return [], [], [], []
+
+			merged_state = LogFileState(self.MERGED_VIEW_ID, merged_raw_lines_proxy, MergedRustEngineStub(len(merged_refs)))
+			merged_state.all_line_tags = merged_tags_proxy
+			merged_state.ordered_files = [item[1] for item in file_info] # Store sorted file paths
+			merged_state.timestamps_found = True
+			merged_state.filtered_indices = list(range(len(merged_refs)))
+			merged_state.filter_hit_counts = [0] * len(self.filters)
+
+			t_end = time.time()
+			self.msg_queue.put(('merge_complete', merged_state, t_end - t_start))
+		except Exception as e:
+			self.msg_queue.put(('load_error', f"Merge failed: {e}"))
+
+
+	def on_log_files_right_click(self, event):
+		item_id = self.log_files_tree.identify_row(event.y)
+		if item_id:
+			self.log_files_tree.selection_set(item_id)
+			# Disable "Remove" for Merged View node
+			state = "disabled" if item_id == self.MERGED_VIEW_ID else "normal"
+			self.log_files_context_menu.entryconfig(0, state=state)
+			self.log_files_context_menu.post(event.x_root, event.y_root)
+
+	def remove_selected_log(self):
+		selected = self.log_files_tree.selection()
+		if not selected: return
+
+		filepath = selected[0]
+		if filepath == self.MERGED_VIEW_ID: return
+
+		if filepath in self.loaded_log_files:
+			# Remove from state
+			del self.loaded_log_files[filepath]
+			self.log_files_tree.delete(filepath)
+
+			# Invalidate merged view
+			self.merged_log_data = None
+
+			# 1. Update list and sidebar visibility
+			if len(self.loaded_log_files) < 2:
+				self.merge_btn.pack_forget()
+
+				if self.log_files_panel_visible.get():
+					self.log_files_panel_visible.set(False)
+					self.toggle_log_panel()
+
+			# 2. Handle View Switching
+			if self.active_log_filepath == filepath:
+				remaining = self.log_files_tree.get_children()
+				if remaining:
+					self._set_active_log_state(remaining[0])
+				else:
+					self._clear_all_logs()
+			else:
+				# If we didn't clear everything but changed the file set, redraw viewport to be safe
+				self.render_viewport()
+
+	def on_log_file_select(self, event):
+		selected_item = self.log_files_tree.selection()
+		if not selected_item: return
+
+		filepath = selected_item[0]
+		if filepath in self.loaded_log_files:
+			self._set_active_log_state(filepath)
+		elif filepath == self.MERGED_VIEW_ID:
+			self._set_active_log_state(self.MERGED_VIEW_ID)
+
+		# Hide the welcome label if a log is selected
+		self.welcome_label.place_forget()
 
 if __name__ == "__main__":
 	if HAS_DND:
