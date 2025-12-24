@@ -393,12 +393,6 @@ class LogAnalyzerApp:
 		self.log_files_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 		self.log_files_tree.configure(yscrollcommand=self.log_files_scroll.set)
 
-		# Merge Button at bottom of panel (outside tree_frame)
-		self.merge_btn = ttk.Button(self.log_files_panel, text="Merge All Logs", command=lambda: self._set_active_log_state(self.MERGED_VIEW_ID))
-		# Pack it at the bottom, but only show if >= 2 files
-		self.merge_btn.pack(side=tk.BOTTOM, fill=tk.X, padx=2, pady=2)
-		self.merge_btn.pack_forget() # Hide initially
-
 		# --- Right Side: Main Log View + Note View --- (This is the existing 'top_pane' logic)
 		top_pane = tk.PanedWindow(self.top_horizontal_pane, orient=tk.HORIZONTAL, sashwidth=4, sashrelief=tk.FLAT, bg="#d9d9d9")
 
@@ -591,29 +585,6 @@ class LogAnalyzerApp:
 		self.root.bind("<Configure>", self.on_root_configure)
 		self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 		self.root.after(200, self._restore_layout)
-
-	def _clear_all_logs(self):
-		"""Clears all loaded logs and resets the UI state."""
-		self.loaded_log_files.clear()
-		if hasattr(self, 'log_files_tree'):
-			self.log_files_tree.delete(*self.log_files_tree.get_children())
-		self.merged_log_data = None
-		self.active_log_filepath = None
-		self.has_active_log_been_set = False
-
-		# Clear view proxies
-		self.active_raw_lines = []
-		self.active_rust_engine = None
-		self.active_filtered_indices = []
-		self.active_timeline_events = []
-		self.active_timeline_events_by_time = []
-		self.active_timeline_events_by_index = []
-		self.active_timestamps_found = False
-
-		if hasattr(self, 'marker_canvas'):
-			self.marker_canvas.delete("all")
-		if hasattr(self, 'welcome_label') and self.welcome_label:
-			self.welcome_label.place(relx=0.5, rely=0.5, anchor="center")
 
 	def toggle_log_panel(self):
 		"""Toggles the visibility of the log files list panel with auto-width and dynamic scrollbar."""
@@ -891,6 +862,9 @@ class LogAnalyzerApp:
 						self.log_files_tree.delete(item)
 
 					# Re-insert in sorted order
+					if len(self.loaded_log_files) > 1:
+						self.log_files_tree.insert("", 0, iid=self.MERGED_VIEW_ID, values=("[ Merged View ]",))
+
 					for _, fp in file_info:
 						self.log_files_tree.insert("", "end", iid=fp, values=(os.path.basename(fp),))
 
@@ -898,15 +872,16 @@ class LogAnalyzerApp:
 					if self.log_files_panel_visible.get():
 						self.toggle_log_panel()
 
-					# Show/Hide Merge Button based on file count
-					if len(self.loaded_log_files) >= 2:
-						self.merge_btn.pack(side=tk.BOTTOM, fill=tk.X, padx=2, pady=2)
-					else:
-						self.merge_btn.pack_forget()
+					# Restore selection if active log exists
+					if self.active_log_filepath:
+						if self.log_files_tree.exists(self.active_log_filepath):
+							self.log_files_tree.selection_set(self.active_log_filepath)
 
 					if not self.has_active_log_been_set:
 						self._set_active_log_state(log_state.filepath, load_duration=duration)
 						self.has_active_log_been_set = True
+
+					self.check_and_import_notes(log_state.filepath) # Auto-check for notes on load
 
 					self.refresh_notes_window()
 					self._decrement_pending_load_count()
@@ -1253,6 +1228,7 @@ class LogAnalyzerApp:
 	def _clear_all_logs(self):
 		"""Clears all loaded logs and resets the UI state."""
 		self.loaded_log_files.clear()
+		self.notes.clear() # Clear all notes
 		self.log_files_tree.delete(*self.log_files_tree.get_children())
 		self.merged_log_data = None
 		self.active_log_filepath = None
@@ -1271,15 +1247,14 @@ class LogAnalyzerApp:
 		self.welcome_label.place(relx=0.5, rely=0.5, anchor="center")
 
 		self.render_viewport() # Clear view
+		self.refresh_notes_window() # Clear notes view
 		self.update_title()
 		self.update_status("Ready")
 
 		# Clear timeline
 		self.draw_timeline()
 
-		# Hide log list panel and merge button on clear
-		if hasattr(self, 'merge_btn'):
-			self.merge_btn.pack_forget()
+		# Hide log list panel on clear
 		self.log_files_panel_visible.set(False)
 		self.toggle_log_panel()
 
@@ -1724,6 +1699,11 @@ class LogAnalyzerApp:
 		if idx == -1: return
 
 		note_key = (self.active_log_filepath, idx)
+		if self.active_log_filepath == self.MERGED_VIEW_ID and hasattr(self.active_raw_lines, 'get_original_ref'):
+			orig_fp, orig_idx = self.active_raw_lines.get_original_ref(idx)
+			if orig_fp:
+				note_key = (orig_fp, orig_idx)
+
 		current_note = self.notes.get(note_key, "")
 
 		dialog = tk.Toplevel(self.root)
@@ -1766,6 +1746,11 @@ class LogAnalyzerApp:
 		if not self.active_log_filepath or self.selected_raw_index == -1: return
 
 		note_key = (self.active_log_filepath, self.selected_raw_index)
+		if self.active_log_filepath == self.MERGED_VIEW_ID and hasattr(self.active_raw_lines, 'get_original_ref'):
+			orig_fp, orig_idx = self.active_raw_lines.get_original_ref(self.selected_raw_index)
+			if orig_fp:
+				note_key = (orig_fp, orig_idx)
+
 		if note_key in self.notes:
 			del self.notes[note_key]
 			self.render_viewport()
@@ -1776,6 +1761,44 @@ class LogAnalyzerApp:
 			messagebox.showerror("Export Error", "A log file must be loaded to save notes.", parent=self.root)
 			return
 
+		if self.active_log_filepath == self.MERGED_VIEW_ID and self.merged_log_data:
+			# Merged View: Batch export for all loaded files
+			updated_count = 0
+			error_count = 0
+
+			for fp in self.merged_log_data.ordered_files:
+				# Filter notes for this specific file
+				notes_to_export = {str(raw_idx): content for (filepath, raw_idx), content in self.notes.items() if filepath == fp}
+
+				if not notes_to_export:
+					continue # No notes for this file, skip
+
+				log_dir = os.path.dirname(fp)
+				log_basename = os.path.basename(fp)
+				log_name_without_ext, _ = os.path.splitext(log_basename)
+				note_filename = f"{log_name_without_ext}.note"
+				filepath = os.path.join(log_dir, note_filename)
+
+				try:
+					# For batch export in merged view, we overwrite silently or maybe we should ask?
+					# To avoid spamming dialogs, we'll overwrite silently or log it.
+					# Let's overwrite silently for now as "Export" implies saving current state.
+					with open(filepath, 'w', encoding='utf-8') as f:
+						json.dump(notes_to_export, f, indent=4, sort_keys=True)
+					updated_count += 1
+				except Exception:
+					error_count += 1
+
+			if updated_count > 0 or error_count > 0:
+				msg = f"Batch Export Complete.\nUpdated notes for {updated_count} file(s)."
+				if error_count > 0:
+					msg += f"\nFailed to update {error_count} file(s)."
+				messagebox.showinfo("Export Notes", msg, parent=self.root)
+			else:
+				messagebox.showinfo("Export Notes", "No notes found to export for any of the merged files.", parent=self.root)
+			return
+
+		# Single File Export (Existing Logic)
 		# Filter notes to only include those for the active log file
 		notes_to_export = {str(raw_idx): content for (filepath, raw_idx), content in self.notes.items() if filepath == self.active_log_filepath}
 
@@ -1807,15 +1830,79 @@ class LogAnalyzerApp:
 			messagebox.showinfo("Save Notes", "Please load a log file first to save notes.", parent=self.root)
 			return
 
-		# Filter notes to only include those for the active log file
-		active_notes = {k: v for (filepath, k), v in self.notes.items() if filepath == self.active_log_filepath}
-		if not active_notes:
-			messagebox.showinfo("Save Notes", "There are no notes for the active log file to save.", parent=self.root)
+		lines_to_write = []
+		default_filename = "notes.txt"
+
+		if self.active_log_filepath == self.MERGED_VIEW_ID and self.merged_log_data:
+			# Merged View: Export notes as seen in the merged list
+			default_filename = "merged_notes.txt"
+
+			# We need to iterate through the merged view to get line numbers correct
+			# Similar to refresh_notes_window logic for merged view
+
+			current_offset = 0
+			for fp in self.merged_log_data.ordered_files:
+				if fp in self.loaded_log_files:
+					# Check for notes belonging to this file
+					file_notes = {k: v for (n_fp, k), v in self.notes.items() if n_fp == fp}
+					sorted_indices = sorted(file_notes.keys())
+
+					for raw_idx in sorted_indices:
+						merged_idx = current_offset + raw_idx
+						line_num = merged_idx + 1
+
+						# Get timestamp from the line in merged view
+						timestamp_str = ""
+						if merged_idx < len(self.active_raw_lines):
+							log_line = self.active_raw_lines[merged_idx]
+							match = re.search(r'(\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,6})?|\b\d{2}:\d{2}:\d{2}(?:[.,]\d{1,6})?\b)', log_line)
+							if match:
+								timestamp_str = match.group(1)
+
+						content = file_notes[raw_idx].replace("\n", " ")
+						# Optionally include filename for context in merged export
+						filename_str = os.path.basename(fp)
+						lines_to_write.append(f"{line_num}\t{timestamp_str}\t[{filename_str}] {content}")
+
+					current_offset += self.loaded_log_files[fp].rust_engine.line_count()
+
+			# Sort by merged line number (though our iteration order naturally does this if notes are sorted per file and files are sorted in merge)
+			# But to be safe if files overlap in time? Wait, merge view is currently just concatenated. So order is preserved.
+
+		else:
+			# Single File Export
+			active_notes = {k: v for (filepath, k), v in self.notes.items() if filepath == self.active_log_filepath}
+			if not active_notes:
+				messagebox.showinfo("Save Notes", "There are no notes for the active log file to save.", parent=self.root)
+				return
+
+			log_basename = os.path.basename(self.active_log_filepath)
+			log_name_without_ext, _ = os.path.splitext(log_basename)
+			default_filename = f"{log_name_without_ext}.txt"
+
+			sorted_indices = sorted(active_notes.keys())
+			for idx in sorted_indices:
+				line_num = idx + 1
+				timestamp_str = ""
+				if idx < len(self.active_raw_lines):
+					log_line = self.active_raw_lines[idx]
+					match = re.search(r'(\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,6})?|\b\d{2}:\d{2}:\d{2}(?:[.,]\d{1,6})?\b)', log_line)
+					if match:
+						timestamp_str = match.group(1)
+
+				content = active_notes[idx].replace("\n", " ") # Flatten for display
+				lines_to_write.append(f"{line_num}\t{timestamp_str}\t{content}")
+
+		if not lines_to_write and self.active_log_filepath != self.MERGED_VIEW_ID:
+			# For merged view, we might want to allow empty export or show message?
+			# Actually logic above returns early for single file if empty.
+			# For merged, check list
+			messagebox.showinfo("Save Notes", "No notes found to save.", parent=self.root)
+			return
+		elif not lines_to_write and self.active_log_filepath == self.MERGED_VIEW_ID:
+			messagebox.showinfo("Save Notes", "No notes found in any of the merged files.", parent=self.root)
 			return
 
-		log_basename = os.path.basename(self.active_log_filepath)
-		log_name_without_ext, _ = os.path.splitext(log_basename)
-		default_filename = f"{log_name_without_ext}.txt"
 
 		filepath = filedialog.asksaveasfilename(
 			parent=self.root,
@@ -1829,23 +1916,6 @@ class LogAnalyzerApp:
 			return
 
 		try:
-			lines_to_write = []
-			# Sort by raw index
-			sorted_indices = sorted(active_notes.keys())
-			for idx in sorted_indices:
-				line_num = idx + 1
-				timestamp_str = ""
-				if idx < len(self.active_raw_lines):
-					log_line = self.active_raw_lines[idx]
-					# Regex to find common timestamp formats.
-					# (Same logic as in refresh_notes_window)
-					match = re.search(r'(\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,6})?|\b\d{2}:\d{2}:\d{2}(?:[.,]\d{1,6})?\b)', log_line)
-					if match:
-						timestamp_str = match.group(1)
-
-				content = active_notes[idx].replace("\n", " ") # Flatten for display
-				lines_to_write.append(f"{line_num}\t{timestamp_str}\t{content}")
-
 			with open(filepath, 'w', encoding='utf-8') as f:
 				f.write("\n".join(lines_to_write))
 			messagebox.showinfo("Success", f"Successfully saved {len(lines_to_write)} notes to:\n{filepath}", parent=self.root)
@@ -1971,6 +2041,12 @@ class LogAnalyzerApp:
 		if tags and self.active_log_filepath:
 			raw_idx = int(tags[0])
 			note_key = (self.active_log_filepath, raw_idx)
+
+			if self.active_log_filepath == self.MERGED_VIEW_ID and hasattr(self.active_raw_lines, 'get_original_ref'):
+				orig_fp, orig_idx = self.active_raw_lines.get_original_ref(raw_idx)
+				if orig_fp:
+					note_key = (orig_fp, orig_idx)
+
 			if note_key in self.notes:
 				del self.notes[note_key]
 				self.render_viewport()
@@ -1984,8 +2060,29 @@ class LogAnalyzerApp:
 
 		if not self.active_log_filepath: return
 
-		# Filter notes for the active log file
-		active_notes = {k: v for (fp, k), v in self.notes.items() if fp == self.active_log_filepath}
+		active_notes = {} # {display_index: content}
+
+		if self.active_log_filepath == self.MERGED_VIEW_ID and self.merged_log_data:
+			# Merged View: iterate through all loaded files and find their notes
+			# We need to calculate offsets to map original index -> merged index
+			current_offset = 0
+			# self.merged_log_data.ordered_files contains the file paths in order
+			for fp in self.merged_log_data.ordered_files:
+				if fp in self.loaded_log_files:
+					# Check for notes belonging to this file
+					# Iterate all notes to find matches (could be optimized but self.notes is usually small)
+					for (note_fp, note_raw_idx), content in self.notes.items():
+						if note_fp == fp:
+							merged_idx = current_offset + note_raw_idx
+							active_notes[merged_idx] = content
+
+					current_offset += self.loaded_log_files[fp].rust_engine.line_count()
+		else:
+			# Single File View
+			for (fp, k), v in self.notes.items():
+				if fp == self.active_log_filepath:
+					active_notes[k] = v
+
 		sorted_indices = sorted(active_notes.keys())
 
 		for i, idx in enumerate(sorted_indices):
@@ -2004,7 +2101,7 @@ class LogAnalyzerApp:
 				if match:
 					timestamp_str = match.group(1)
 
-			content = active_notes[(self.active_log_filepath, idx)].replace("\n", " ") # Flatten for display
+			content = active_notes[idx].replace("\n", " ") # Flatten for display
 			tag_stripe = "even" if i % 2 == 0 else "odd"
 			self.notes_tree.insert("", "end", values=(line_num, timestamp_str, content), tags=(str(idx), tag_stripe))
 
@@ -2020,16 +2117,17 @@ class LogAnalyzerApp:
 				self.jump_to_line(raw_idx)
 		except Exception as e: print(e)
 
-	def check_and_import_notes(self):
-		if not self.active_log_filepath:
+	def check_and_import_notes(self, target_filepath=None):
+		filepath = target_filepath if target_filepath else self.active_log_filepath
+		if not filepath:
 			return
 
-		log_basename = os.path.basename(self.active_log_filepath)
+		log_basename = os.path.basename(filepath)
 		log_name_without_ext, _ = os.path.splitext(log_basename)
 		note_filename = f"{log_name_without_ext}.note"
 
 		# Look for the note file in the same directory as the log file
-		log_dir = os.path.dirname(self.active_log_filepath)
+		log_dir = os.path.dirname(filepath)
 		potential_path = os.path.join(log_dir, note_filename)
 
 		if os.path.exists(potential_path):
@@ -2040,16 +2138,16 @@ class LogAnalyzerApp:
 						str_keyed_notes = json.load(f)
 						for raw_idx_str, note_content in str_keyed_notes.items():
 							raw_idx = int(raw_idx_str)
-							self.notes[(self.active_log_filepath, raw_idx)] = note_content
+							self.notes[(filepath, raw_idx)] = note_content
 
-					self.update_status(f"Imported {len(str_keyed_notes)} notes for {os.path.basename(self.active_log_filepath)}.")
+					self.update_status(f"Imported {len(str_keyed_notes)} notes for {os.path.basename(filepath)}.")
 
-					# Auto-show notes window on successful import
-					if not self.note_view_visible_var.get():
-						self.note_view_visible_var.set(True)
-						self.toggle_note_view_visibility()
-					# The calling function will handle UI refresh
-					self.refresh_notes_window()
+					# Auto-show notes window on successful import if it's the active file
+					if filepath == self.active_log_filepath:
+						if not self.note_view_visible_var.get():
+							self.note_view_visible_var.set(True)
+							self.toggle_note_view_visibility()
+						self.refresh_notes_window()
 
 				except Exception as e:
 					messagebox.showerror("Import Error", f"Failed to import notes:\n{e}")
@@ -2549,70 +2647,6 @@ class LogAnalyzerApp:
 			self.draw_timeline()
 
 
-	# --- Rendering ---
-		def render_viewport(self):
-			# Use active_raw_lines for total count when not filtered
-			total = self.get_total_count()
-
-			self.text_area.config(state=tk.NORMAL); self.text_area.delete("1.0", tk.END)
-			self.line_number_area.config(state=tk.NORMAL); self.line_number_area.delete("1.0", tk.END)
-
-			if total == 0:
-				self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED); return
-
-			# Ensure we have a valid active log or merged view
-			if not self.active_log_filepath:
-				self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED); return
-
-			if self.active_log_filepath != self.MERGED_VIEW_ID and self.active_log_filepath not in self.loaded_log_files:
-				self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED); return
-
-			end_index = min(self.view_start_index + self.visible_rows, total)
-			display_buffer = []
-			line_nums_buffer = []
-			tag_buffer = []
-
-			for i in range(self.view_start_index, end_index):
-				line, tags, raw_idx = self.get_view_item(i)
-				display_buffer.append(line)
-				line_nums_buffer.append(str(raw_idx + 1))
-				relative_idx = i - self.view_start_index + 1
-				if tags: tag_buffer.append((relative_idx, tags))
-
-				# Check notes for the current active file and raw_idx
-				if (self.active_log_filepath, raw_idx) in self.notes:
-					tag_buffer.append((relative_idx, ["note_line"]))
-
-				if raw_idx == self.selected_raw_index:
-					tag_buffer.append((relative_idx, ["current_line"]))
-
-			full_text = "".join(display_buffer)
-			self.text_area.insert("1.0", full_text)
-
-			line_nums_text = "\n".join(line_nums_buffer)
-			self.line_number_area.insert("1.0", line_nums_text)
-			self.line_number_area.tag_add("right_align", "1.0", "end")
-
-			# Re-enable tags
-			for rel_idx, tags in tag_buffer:
-				for tag in tags: self.text_area.tag_add(tag, f"{rel_idx}.0", f"{rel_idx+1}.0")
-
-		# Highlight all search matches
-		if self.last_search_query:
-			query = self.last_search_query
-			case_sensitive = self.last_search_case
-			start_index = "1.0"
-			while True:
-				pos = self.text_area.search(query, start_index, stopindex=tk.END, nocase=not case_sensitive)
-				if not pos: break
-				end_pos = f"{pos}+{len(query)}c"
-				self.text_area.tag_add("find_match_all", pos, end_pos)
-				start_index = end_pos
-
-		self.text_area.tag_raise("current_line")
-		self.text_area.config(state=tk.DISABLED); self.line_number_area.config(state=tk.DISABLED)
-		self.current_displayed_lines = int(self.text_area.index('end-1c').split('.')[0]) # Get actual number of lines displayed
-		self.update_timeline_viewport()
 
 	def render_viewport(self):
 		# Use active_raw_lines for total count when not filtered
@@ -2644,7 +2678,13 @@ class LogAnalyzerApp:
 			if tags: tag_buffer.append((relative_idx, tags))
 
 			# Check notes for the current active file and raw_idx
-			if (self.active_log_filepath, raw_idx) in self.notes:
+			note_key = (self.active_log_filepath, raw_idx)
+			if self.active_log_filepath == self.MERGED_VIEW_ID and hasattr(self.active_raw_lines, 'get_original_ref'):
+				orig_fp, orig_idx = self.active_raw_lines.get_original_ref(raw_idx)
+				if orig_fp:
+					note_key = (orig_fp, orig_idx)
+
+			if note_key in self.notes:
 				tag_buffer.append((relative_idx, ["note_line"]))
 
 			if raw_idx == self.selected_raw_index:
@@ -3468,6 +3508,8 @@ class LogAnalyzerApp:
 		# Ensure the timeline has the correct active data (this is implicitly handled by recalc_filtered_data now)
 		# self._update_timeline_data(active_state) # Explicitly update timeline data for active_state
 		# self.draw_timeline()
+
+		self.refresh_notes_window()
 
 
 
