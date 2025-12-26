@@ -2326,6 +2326,8 @@ class LogAnalyzerApp:
 			self.selection_offset = raw_index - new_start
 
 		self.selected_raw_index = raw_index # Ensure selected
+		self.selected_indices.clear()
+		self.selected_indices.add(raw_index)
 		self.render_viewport()
 		self.update_scrollbar_thumb()
 
@@ -2937,7 +2939,7 @@ class LogAnalyzerApp:
 		self.find_window.protocol("WM_DELETE_WINDOW", self.close_find_bar)
 		self.find_window.config(bg=self.root.cget("bg"))
 
-		self.center_window(self.find_window, 400, 80)
+		self.center_window(self.find_window, 550, 80)
 
 		frame = ttk.Frame(self.find_window, padding=5)
 		frame.pack(fill=tk.BOTH, expand=True)
@@ -3168,15 +3170,18 @@ class LogAnalyzerApp:
 			if self.find_wrap_var.get():
 				candidates = list(candidates) + list(range(0, idx))
 
-		# Find the first candidate that is visible
-		for i in candidates:
-			raw_idx = matches[i]
-			if self._is_visible(raw_idx):
-				target_raw_index = raw_idx
-				found = True
-				break
+		# Find the first candidate (regardless of visibility)
+		if candidates:
+			target_raw_index = matches[candidates[0]]
+			found = True
 
 		if found:
+			# Check visibility and auto-disable filter mode if needed
+			if not self._is_visible(target_raw_index) and self.show_only_filtered_var.get():
+				self.show_only_filtered_var.set(False)
+				self.recalc_filtered_data() # Refresh view mode
+				self.update_status("Switched to Full View to show match.")
+
 			self.jump_to_line(target_raw_index)
 			if self.find_entry and self.find_entry.winfo_exists():
 				self.find_entry.config(foreground="black")
@@ -3187,16 +3192,12 @@ class LogAnalyzerApp:
 			self.root.after(50, lambda: self._highlight_find_match(query, case_sensitive))
 		else:
 			if self.find_entry and self.find_entry.winfo_exists():
-				self.find_entry.config(foreground="black")
-			# Use red text if wrapped and still not found (e.g. filtered out)
-			if self.show_only_filtered_var.get():
-				if self.find_entry and self.find_entry.winfo_exists():
-					self.find_entry.config(foreground="red")
-				self.update_status("Match found but hidden by filters.")
-			else:
-				if self.find_entry and self.find_entry.winfo_exists():
-					self.find_entry.config(foreground="red")
-				self.update_status("No more matches found.")
+				self.find_entry.config(foreground="black") # Reset color if wrapping around or starting new
+			
+			# If we didn't find anything in candidates, it means we hit the end/start and wrap is off
+			if self.find_entry and self.find_entry.winfo_exists():
+				self.find_entry.config(foreground="red")
+			self.update_status("No more matches found.")
 
 	def find_next(self, event=None): self._find(backward=False); return "break"
 	def find_previous(self, event=None): self._find(backward=True); return "break"
@@ -3405,7 +3406,7 @@ class LogAnalyzerApp:
 		self._apply_icon(dialog)
 		dialog.transient(self.root) # Make it a child of the main window
 		dialog.grab_set()
-		self.center_window(dialog, 400, 200)
+		self.center_window(dialog, 600, 200)
 		dialog.config(bg=self.root.cget("bg")) # Match theme
 
 		main_frame = ttk.Frame(dialog, padding=10)
@@ -3433,16 +3434,26 @@ class LogAnalyzerApp:
 		color_frame = ttk.Frame(main_frame)
 		color_frame.pack(fill=tk.BOTH, expand=True)
 
+		def get_contrast_color(hex_color):
+			rgb = hex_to_rgb(hex_color)
+			lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2])
+			return "#000000" if lum > 128 else "#FFFFFF"
+
 		def pick_fg():
 			c = colorchooser.askcolor(color=colors["fg"])[1]
-			if c: colors["fg"] = c; btn_fg.config(style="FG.TButton")
+			if c:
+				colors["fg"] = c
+				style.configure("FG.TButton", foreground=get_contrast_color(c), background=c)
+
 		def pick_bg():
 			c = colorchooser.askcolor(color=colors["bg"])[1]
-			if c: colors["bg"] = c; btn_bg.config(style="BG.TButton")
+			if c:
+				colors["bg"] = c
+				style.configure("BG.TButton", foreground=get_contrast_color(c), background=c)
 
 		style = ttk.Style(dialog)
-		style.configure("FG.TButton", foreground=colors["fg"], background=colors["fg"])
-		style.configure("BG.TButton", foreground=colors["bg"], background=colors["bg"])
+		style.configure("FG.TButton", foreground=get_contrast_color(colors["fg"]), background=colors["fg"])
+		style.configure("BG.TButton", foreground=get_contrast_color(colors["bg"]), background=colors["bg"])
 
 		btn_fg = ttk.Button(color_frame, text="Text Color", command=pick_fg, style="FG.TButton")
 		btn_fg.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
