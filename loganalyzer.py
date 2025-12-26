@@ -1458,13 +1458,11 @@ class LogAnalyzerApp:
 	# --- Filter Logic (Threaded) ---
 	def smart_update_filter(self, idx, is_enabling):
 		if self.is_processing: return
+		self.filters_dirty = True
 		self.recalc_filtered_data()
 
 	def recalc_filtered_data(self):
 		if self.is_processing: return
-
-		# Mark filters as dirty (unsaved changes)
-		self.filters_dirty = True
 
 		# If no active log file or no log files loaded, clear everything
 		if not self.active_log_filepath or not self.loaded_log_files:
@@ -3295,6 +3293,7 @@ class LogAnalyzerApp:
 			if start_idx != target_idx:
 				item = self.filters.pop(self.drag_start_index)
 				self.filters.insert(target_idx, item)
+				self.filters_dirty = True
 				self.recalc_filtered_data() # Order changed, must full recalc
 		self.drag_start_index = None
 		self.drag_target_id = None
@@ -3330,6 +3329,7 @@ class LogAnalyzerApp:
 		for item_id in selected_items:
 			idx = self.tree.index(item_id)
 			self.filters[idx].is_event = new_state
+		self.filters_dirty = True
 		self.recalc_filtered_data()
 
 	def move_filter_to_top(self):
@@ -3346,6 +3346,7 @@ class LogAnalyzerApp:
 		# Insert at top
 		for item in reversed(items_to_move):
 			self.filters.insert(0, item)
+		self.filters_dirty = True
 		self.recalc_filtered_data()
 
 	def move_filter_to_bottom(self):
@@ -3360,6 +3361,7 @@ class LogAnalyzerApp:
 
 		# Append to bottom
 		self.filters.extend(items_to_move)
+		self.filters_dirty = True
 		self.recalc_filtered_data()
 
 	def edit_selected_filter(self):
@@ -3385,6 +3387,7 @@ class LogAnalyzerApp:
 		indices_to_delete = sorted([self.tree.index(item) for item in selected_items], reverse=True)
 		for idx in indices_to_delete:
 			del self.filters[idx]
+		self.filters_dirty = True
 		self.recalc_filtered_data()
 
 	def on_filter_double_click(self, event):
@@ -3470,10 +3473,12 @@ class LogAnalyzerApp:
 				filter_obj.text = text; filter_obj.fore_color = colors["fg"]; filter_obj.back_color = colors["bg"]
 				filter_obj.is_regex = var_regex.get(); filter_obj.is_exclude = var_exclude.get()
 				filter_obj.is_event = var_event.get()
+				self.filters_dirty = True
 				self.recalc_filtered_data()
 			else:
 				new_filter = Filter(text, colors["fg"], colors["bg"], enabled=True, is_regex=var_regex.get(), is_exclude=var_exclude.get(), is_event=var_event.get())
 				self.filters.append(new_filter)
+				self.filters_dirty = True
 				self.recalc_filtered_data()
 			dialog.destroy()
 
