@@ -1,5 +1,28 @@
 # LogAnalyzer Project Changes - Session Summary
 
+## Date: 2025年12月26日
+
+### 1. Command-Line Interface (CLI) Support
+- **Features**:
+  - **Open Single/Multiple Logs**: Support passing one or more file paths directly (e.g., `python loganalyzer.py file1.log file2.log`).
+  - **Filter Loading**: Added `-f` / `--filter` argument to load a `.tat` filter file on startup.
+  - **Wildcard Support**: Implemented internal glob expansion to support `*.log` patterns even in Windows CMD.
+  - **Argument File**: Enabled `@filelist.txt` support to handle long file lists that exceed command-line length limits.
+- **Implementation Details**:
+  - Refactored `import_tat_filters` to extract core loading logic.
+  - Implemented robust "Smart Busy" state management to ensure filters are correctly applied even when multiple logs are still loading asynchronously (Fixed race condition).
+
+### 2. UI/UX Improvements
+- **Filter Dialog**:
+  - **Visual Feedback**: Fixed bug where color buttons didn't update immediately upon selection.
+  - **Smart Contrast**: Implemented auto-contrast (Black/White text) for color buttons to ensure label visibility against any background color.
+- **Unsaved Changes Logic**:
+  - **False Positive Fix**: Refactored `filters_dirty` logic. The warning now only triggers for actual filter modifications (Add, Delete, Edit, Reorder, Toggle), eliminating annoying prompts when simply switching logs or view modes.
+
+### 3. Documentation
+- **TOC Update**: Updated `Doc/Log_Analyzer_Docs_EN.md` Table of Contents to include missing version history (V1.6.1 - V1.7).
+- **Usage Guide**: Added a new "Command-Line Usage" section detailing CLI arguments and features.
+
 ## Date: 2025年12月22日
 
 ### 1. Documentation Update
