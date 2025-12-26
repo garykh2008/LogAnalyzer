@@ -13,12 +13,29 @@
   - [3. User Guide](#3-user-guide)
     - [Menu Bar](#menu-bar)
       - [File](#file)
+      - [Sidebar \& Merged View](#sidebar--merged-view)
       - [Filter](#filter)
       - [View](#view)
       - [Notes](#notes)
       - [Help](#help)
     - [Shortcuts \& Operations](#shortcuts--operations)
   - [4. Release Notes](#4-release-notes)
+    - [Version 1.7 (2025-12-26)](#version-17-2025-12-26)
+      - [📂 Multi-Log Management \& Merged View](#-multi-log-management--merged-view)
+      - [🔍 Enhanced Search \& Navigation](#-enhanced-search--navigation)
+      - [🎨 UI \& UX Polish](#-ui--ux-polish)
+      - [🛠 Fixes \& Stability](#-fixes--stability)
+    - [Version 1.6.4 (2025-12-24)](#version-164-2025-12-24)
+      - [✨ Event Timeline](#-event-timeline)
+      - [🛠 General Fixes](#-general-fixes)
+    - [Version 1.6.3 (2025-12-22)](#version-163-2025-12-22)
+      - [✨ Filter List Enhancements](#-filter-list-enhancements)
+      - [🛠 Fixes](#-fixes)
+    - [Version 1.6.2 (2025-12-22)](#version-162-2025-12-22)
+      - [🔍 Find Functionality Upgrade](#-find-functionality-upgrade)
+      - [🎨 UI Polish](#-ui-polish)
+    - [Version 1.6.1 (2025-12-19)](#version-161-2025-12-19)
+      - [⚡ Performance \& UI Optimization](#-performance--ui-optimization)
     - [Version 1.6 (2025-12-19)](#version-16-2025-12-19)
       - [⚡ Core Engine Update](#-core-engine-update)
     - [Version 1.5 (2025-12-18)](#version-15-2025-12-18)
@@ -164,7 +181,7 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 ## 4. Release Notes
 
-### Version 1.7 (2025-12-24)
+### Version 1.7 (2025-12-26)
 
 #### 📂 Multi-Log Management & Merged View
 
@@ -172,17 +189,21 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
     *   Added a dynamic **Log List Sidebar** to manage multiple loaded files simultaneously.
     *   Files in the sidebar are automatically sorted chronologically based on their start time.
     *   **Sidebar Automation**: Automatically shows when 2+ files are loaded and hides for single files or empty state.
-    *   **Right-Click Context Menu**: Quickly remove specific files or clear all logs from the session.
+    *   **Right-Click Context Menu**: Quickly remove specific files or **Clear All Logs** from the session.
 *   **High-Performance Merged View**:
     *   New **"Merge All Logs"** feature to combine all loaded files into a single, seamless chronological view.
     *   **Proxy-Based Architecture**: Optimized for massive datasets (e.g., 18M+ lines) using a reference-based system that significantly reduces memory overhead.
+    *   **Smart Persistence**: The Merged View automatically cleans itself up if the number of loaded files drops below two.
     *   **Full Feature Parity**: Merged View now supports the complete Filtering and Event Timeline systems across all combined files.
 
 #### 🔍 Enhanced Search & Navigation
 
 *   **Find History**: The Find bar now features a **Search History** (Combobox), storing up to 10 most recent queries for quick access.
 *   **Cross-File Search**: Searching in Merged View automatically scans all constituent files using the parallel Rust engine.
-*   **Improved Feedback**: The status bar provides real-time progress updates during massive merge operations and reverts to normal state upon closing search.
+*   **Keyboard Workflow**:
+    *   **Esc Key**: Now consistently closes the Find, Add/Edit Filter, and Keyboard Shortcuts windows.
+    *   **Enter Key**: Quickly save and apply changes in the Add/Edit Filter dialog.
+    *   **Focus Management**: Improved keyboard focus handling to ensure shortcuts like `Ctrl+C` (Copy) and `c` (Add Note) work reliably immediately after clicking a log line.
 
 #### 🎨 UI & UX Polish
 
@@ -197,22 +218,10 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 *   **Robust FFI Handling**: Fixed a critical infinite loop issue during large file iterations via the Rust extension.
 *   **Race Condition Fixes**: Resolved UI crashes (TclErrors) related to concurrent file loading and duplicate entry insertions.
+*   **Merged View Logic**: Fixed an issue where the Merged View entry would persist incorrectly after removing log files.
 *   **General Polish**: Fixed multiple indentation-related syntax errors and stabilized status bar timing displays.
 
-### Version 1.6.3 (2025-12-22)
-
-#### ✨ Filter List Enhancements
-
-*   **Drag-and-Drop Reordering**:
-    *   Filters can now be reordered simply by dragging and dropping them within the list.
-    *   Visual indicators show the insertion position during the drag operation.
-*   **Context Menu Options**: Added "Move to Top" and "Move to Bottom" options for quick reorganization.
-
-#### 🛠 Fixes
-
-*   **UI Stability**: Fixed an issue where the filter list would not refresh correctly if no log file was loaded.
-
-### Version 1.6.4 (TBD) - *Timeline & UI Enhancements*
+### Version 1.6.4 (2025-12-24)
 
 #### ✨ Event Timeline
 *   **Integrated Display:** The Timeline is now embedded within the main application window, providing an always-available overview of log events.
@@ -226,6 +235,19 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 *   **Theme Integration:** Ensured the timeline's appearance correctly adapts to Dark Mode changes.
 *   **Default Behavior:** The timeline is now hidden by default on startup and can be toggled via the View menu.
 *   **Viewport Indicator:** Stabilized the timeline's viewport indicator for precise tracking of the visible log range.
+
+### Version 1.6.3 (2025-12-22)
+
+#### ✨ Filter List Enhancements
+
+*   **Drag-and-Drop Reordering**:
+    *   Filters can now be reordered simply by dragging and dropping them within the list.
+    *   Visual indicators show the insertion position during the drag operation.
+*   **Context Menu Options**: Added "Move to Top" and "Move to Bottom" options for quick reorganization.
+
+#### 🛠 Fixes
+
+*   **UI Stability**: Fixed an issue where the filter list would not refresh correctly if no log file was loaded.
 
 ### Version 1.6.2 (2025-12-22)
 

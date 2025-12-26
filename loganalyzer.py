@@ -270,6 +270,7 @@ class LogAnalyzerApp:
 		style.configure("Notes.Treeview.Heading", font=("Consolas", 12, "bold")) # Headings stay fixed or scalable? Let's keep headings fixed 12 for consistency with UI
 
 		self.selected_raw_index = -1
+		self.selected_indices = set() # Set of raw indices for multi-selection
 		self.selection_offset = 0
 
 		self.note_view_visible_var = tk.BooleanVar(value=False)
@@ -387,6 +388,13 @@ class LogAnalyzerApp:
 		self.log_files_tree.column("file", anchor="w", width=150)
 		self.log_files_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 		self.log_files_tree.bind("<<TreeviewSelect>>", self.on_log_file_select)
+		self.log_files_tree.bind("<Button-3>", self.on_log_files_right_click)
+
+		# Context Menu for Log Files
+		self.log_files_context_menu = tk.Menu(self.root, tearoff=0)
+		self.log_files_context_menu.add_command(label="Remove", command=self.remove_selected_log)
+		self.log_files_context_menu.add_separator()
+		self.log_files_context_menu.add_command(label="Clear All Logs", command=self._clear_all_logs)
 
 		# Scrollbar for log files tree (attached to tree_frame)
 		self.log_files_scroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.log_files_tree.yview)
@@ -439,6 +447,8 @@ class LogAnalyzerApp:
 		self.text_area.bind("<Double-Button-1>", self.on_log_double_click)
 		self.text_area.bind("<Button-1>", self.on_log_single_click)
 		self.text_area.bind("<Button-3>", self.on_log_right_click)
+		self.text_area.bind("<Control-c>", self.copy_selection)
+		self.text_area.bind("<Control-C>", self.copy_selection)
 		self.text_area.bind("c", self.on_key_c_pressed)
 
 		self.line_number_area.bind("<MouseWheel>", self.on_mousewheel)
@@ -487,14 +497,10 @@ class LogAnalyzerApp:
 		self.notes_context_menu.add_command(label="Edit Note", command=self.edit_note_from_tree)
 		self.notes_context_menu.add_command(label="Remove Note", command=self.remove_note_from_tree)
 
-		# Context Menu for Log Files List
-		self.log_files_context_menu = tk.Menu(self.root, tearoff=0)
-		self.log_files_context_menu.add_command(label="Remove Selected File", command=self.remove_selected_log)
-		self.log_files_context_menu.add_command(label="Clear All Logs", command=self._clear_all_logs)
-		self.log_files_tree.bind("<Button-3>", self.on_log_files_right_click)
-
-		# Log Context Menu
+		# Context Menu for Log View
 		self.log_context_menu = tk.Menu(self.root, tearoff=0)
+		self.log_context_menu.add_command(label="Copy", command=self.copy_selection)
+		self.log_context_menu.add_separator()
 		self.log_context_menu.add_command(label="Add/Edit Note", command=self.add_note_dialog)
 		self.log_context_menu.add_command(label="Remove Note", command=self.remove_note)
 
@@ -797,6 +803,9 @@ class LogAnalyzerApp:
 				continue
 			ttk.Label(frame, text=key, font=("Consolas", 12, "bold")).grid(row=i, column=0, sticky='w', padx=(0, 10))
 			ttk.Label(frame, text=desc).grid(row=i, column=1, sticky='w')
+
+		win.bind("<Escape>", lambda e: win.destroy())
+		win.focus_set()
 
 	# --- Status Update ---
 	def update_status(self, msg):
@@ -1243,6 +1252,9 @@ class LogAnalyzerApp:
 		self.active_timeline_events_by_index = []
 		self.active_timestamps_found = False
 
+		self.selected_raw_index = -1
+		self.selected_indices.clear()
+
 		self.marker_canvas.delete("all")
 		self.welcome_label.place(relx=0.5, rely=0.5, anchor="center")
 
@@ -1637,23 +1649,115 @@ class LogAnalyzerApp:
 	def on_nav_prev_match(self, event): self.navigate_to_match(-1)
 
 	# --- Log Interaction ---
+	def _get_view_index_from_raw(self, raw_idx):
+		"""Returns the index in the current view (filtered/unfiltered) for a given raw_idx."""
+		if self.show_only_filtered_var.get() and self.active_filtered_indices:
+			import bisect
+			# self.active_filtered_indices is sorted.
+			idx = bisect.bisect_left(self.active_filtered_indices, raw_idx)
+			if idx != len(self.active_filtered_indices) and self.active_filtered_indices[idx] == raw_idx:
+				return idx
+			return None
+		else:
+			# Unfiltered view: raw_idx is the index (assuming line 0 is index 0)
+			return raw_idx
+
+	def copy_selection(self, event=None):
+		if not self.selected_indices: return "break"
+		
+		lines_to_copy = []
+		sorted_raw = sorted(list(self.selected_indices))
+		
+		# Use active_raw_lines or merged view logic
+		if self.active_log_filepath == self.MERGED_VIEW_ID and hasattr(self, 'active_raw_lines'):
+			# For merged view, we can access by index assuming active_raw_lines supports it
+			for ridx in sorted_raw:
+				if 0 <= ridx < len(self.active_raw_lines):
+					lines_to_copy.append(self.active_raw_lines[ridx])
+		elif self.active_rust_engine:
+			# Single file
+			for ridx in sorted_raw:
+				line = self.active_rust_engine.get_line(ridx)
+				if line is not None:
+					lines_to_copy.append(line)
+					
+		if lines_to_copy:
+			text = "\n".join(lines_to_copy)
+			self.root.clipboard_clear()
+			self.root.clipboard_append(text)
+			self.update_status(f"Copied {len(lines_to_copy)} lines to clipboard.")
+			
+		return "break"
+
 	def on_log_single_click(self, event):
+		self.text_area.focus_set()
 		self.text_area.tag_remove("current_line", "1.0", tk.END)
 		try:
 			index = self.text_area.index(f"@{event.x},{event.y}")
 			ui_row = int(index.split('.')[0])
 			self.text_area.mark_set(tk.INSERT, index)
-			self.text_area.tag_add("current_line", f"{ui_row}.0", f"{ui_row+1}.0")
-			self.text_area.tag_raise("current_line")
+			# self.text_area.tag_add("current_line", f"{ui_row}.0", f"{ui_row+1}.0") # Moved to render_viewport based on selection
+			# self.text_area.tag_raise("current_line")
+			
 			cache_index = self.view_start_index + (ui_row - 1)
 			total = self.get_total_count()
+			
 			if 0 <= cache_index < total:
 				_, _, raw_idx = self.get_view_item(cache_index)
-				self.selected_raw_index = raw_idx
+				
+				# Handle Multi-selection
+				# Check for modifier keys
+				# Standard Tkinter state masks: Shift=0x1, Control=0x4
+				ctrl_pressed = (event.state & 0x4) != 0
+				shift_pressed = (event.state & 0x1) != 0
+				
+				if shift_pressed and self.selected_raw_index != -1:
+					# Range selection
+					start_view_idx = self._get_view_index_from_raw(self.selected_raw_index)
+					end_view_idx = cache_index # Current view index
+					
+					if start_view_idx is not None:
+						low = min(start_view_idx, end_view_idx)
+						high = max(start_view_idx, end_view_idx)
+						
+						if not ctrl_pressed:
+							self.selected_indices.clear()
+						
+						# Add range
+						for i in range(low, high + 1):
+							_, _, r_idx = self.get_view_item(i)
+							self.selected_indices.add(r_idx)
+				
+				elif ctrl_pressed:
+					# Toggle selection
+					if raw_idx in self.selected_indices:
+						self.selected_indices.remove(raw_idx)
+					else:
+						self.selected_indices.add(raw_idx)
+					self.selected_raw_index = raw_idx # Update anchor
+					
+				else:
+					# Single selection
+					self.selected_indices.clear()
+					self.selected_indices.add(raw_idx)
+					self.selected_raw_index = raw_idx # Update anchor
+				
 				self.selection_offset = ui_row - 1
+				
 			else:
-				self.selected_raw_index = -1; self.selection_offset = 0
-		except Exception as e: print(e)
+				# Clicked empty space - clear selection unless modifier held?
+				# Standard behavior: clicking empty space usually deselects
+				if not (event.state & 0x4) and not (event.state & 0x1):
+					self.selected_raw_index = -1
+					self.selected_indices.clear()
+					self.selection_offset = 0
+
+			# Clear native selection to avoid visual conflicts
+			self.text_area.tag_remove("sel", "1.0", tk.END)
+			self.render_viewport()
+			return "break" # Prevent native selection behavior
+
+		except Exception as e: print(f"Click error: {e}")
 
 	def on_log_double_click(self, event):
 		try:
@@ -1670,15 +1774,28 @@ class LogAnalyzerApp:
 	# --- Notes System ---
 	def on_log_right_click(self, event):
 		try:
-			# Select the line under cursor
-			self.on_log_single_click(event)
-			# Enable/Disable menu items based on if note exists
+			# Determine which line was clicked
+			index = self.text_area.index(f"@{event.x},{event.y}")
+			ui_row = int(index.split('.')[0])
+			cache_index = self.view_start_index + (ui_row - 1)
+			total = self.get_total_count()
+			
+			clicked_raw_idx = -1
+			if 0 <= cache_index < total:
+				_, _, clicked_raw_idx = self.get_view_item(cache_index)
+
+			# If clicked line is not in selection, select it (exclusive)
+			if clicked_raw_idx != -1 and clicked_raw_idx not in self.selected_indices:
+				self.on_log_single_click(event)
+			
+			# Enable/Disable menu items based on if note exists for the ANCHOR line
+			# Menu indices: 0=Copy, 1=Sep, 2=Add/Edit Note, 3=Remove Note
 			if self.selected_raw_index in self.notes:
-				self.log_context_menu.entryconfig(0, label="Edit Note")
-				self.log_context_menu.entryconfig(1, state="normal")
+				self.log_context_menu.entryconfig(2, label="Edit Note")
+				self.log_context_menu.entryconfig(3, state="normal")
 			else:
-				self.log_context_menu.entryconfig(0, label="Add Note")
-				self.log_context_menu.entryconfig(1, state="disabled")
+				self.log_context_menu.entryconfig(2, label="Add Note")
+				self.log_context_menu.entryconfig(3, state="disabled")
 
 			self.log_context_menu.post(event.x_root, event.y_root)
 		except Exception as e: print(f"Right click error: {e}")
@@ -2687,7 +2804,7 @@ class LogAnalyzerApp:
 			if note_key in self.notes:
 				tag_buffer.append((relative_idx, ["note_line"]))
 
-			if raw_idx == self.selected_raw_index:
+			if raw_idx in self.selected_indices:
 				tag_buffer.append((relative_idx, ["current_line"]))
 
 		full_text = "".join(display_buffer)
@@ -2827,6 +2944,7 @@ class LogAnalyzerApp:
 		ttk.Checkbutton(frame, text="Wrap", variable=self.find_wrap_var).pack(side=tk.LEFT, padx=(5, 0))
 
 		self.find_entry.focus_set()
+		self.find_window.bind("<Escape>", self.close_find_bar)
 		return "break"
 
 	def on_find_confirm(self, event=None):
@@ -3337,6 +3455,10 @@ class LogAnalyzerApp:
 
 		ttk.Button(button_frame, text="Save", command=save).pack(side=tk.RIGHT)
 		ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
+		
+		entry_text.bind("<Return>", lambda e: save())
+		dialog.bind("<Escape>", lambda e: dialog.destroy())
+		
 		entry_text.focus_set()
 		dialog.wait_window()
 
@@ -3629,7 +3751,11 @@ class LogAnalyzerApp:
 
 			# 1. Update list and sidebar visibility
 			if len(self.loaded_log_files) < 2:
-				self.merge_btn.pack_forget()
+				if hasattr(self, 'merge_btn'):
+					self.merge_btn.pack_forget()
+
+				if self.log_files_tree.exists(self.MERGED_VIEW_ID):
+					self.log_files_tree.delete(self.MERGED_VIEW_ID)
 
 				if self.log_files_panel_visible.get():
 					self.log_files_panel_visible.set(False)
