@@ -4,7 +4,7 @@
 	<head>
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>Log Analyzer Documentation ( V1.6.3 )</title>
+		<title>Log Analyzer Documentation ( V1.7 )</title>
 		
 <style>
 	body {
@@ -46,6 +46,7 @@
 <li><a href="#3-user-guide">3. User Guide</a><ul>
 <li><a href="#menu-bar">Menu Bar</a></li>
 <li><a href="#file">File</a></li>
+<li><a href="#sidebar--merged-view">Sidebar \&amp; Merged View</a></li>
 <li><a href="#filter">Filter</a></li>
 <li><a href="#view">View</a></li>
 <li><a href="#notes">Notes</a></li>
@@ -54,6 +55,22 @@
 </ul>
 </li>
 <li><a href="#4-release-notes">4. Release Notes</a><ul>
+<li><a href="#version-17-2025-12-26">Version 1.7 (2025-12-26)</a></li>
+<li><a href="#-multi-log-management--merged-view">📂 Multi-Log Management \&amp; Merged View</a></li>
+<li><a href="#-enhanced-search--navigation">🔍 Enhanced Search \&amp; Navigation</a></li>
+<li><a href="#-ui--ux-polish">🎨 UI \&amp; UX Polish</a></li>
+<li><a href="#-fixes--stability">🛠 Fixes \&amp; Stability</a></li>
+<li><a href="#version-164-2025-12-24">Version 1.6.4 (2025-12-24)</a></li>
+<li><a href="#-event-timeline">✨ Event Timeline</a></li>
+<li><a href="#-general-fixes">🛠 General Fixes</a></li>
+<li><a href="#version-163-2025-12-22">Version 1.6.3 (2025-12-22)</a></li>
+<li><a href="#-filter-list-enhancements">✨ Filter List Enhancements</a></li>
+<li><a href="#-fixes">🛠 Fixes</a></li>
+<li><a href="#version-162-2025-12-22">Version 1.6.2 (2025-12-22)</a></li>
+<li><a href="#-find-functionality-upgrade">🔍 Find Functionality Upgrade</a></li>
+<li><a href="#-ui-polish">🎨 UI Polish</a></li>
+<li><a href="#version-161-2025-12-19">Version 1.6.1 (2025-12-19)</a></li>
+<li><a href="#-performance--ui-optimization">⚡ Performance \&amp; UI Optimization</a></li>
 <li><a href="#version-16-2025-12-19">Version 1.6 (2025-12-19)</a></li>
 <li><a href="#-core-engine-update">⚡ Core Engine Update</a></li>
 <li><a href="#version-15-2025-12-18">Version 1.5 (2025-12-18)</a></li>
@@ -115,6 +132,12 @@
 <h3 id="file-compatibility">📂 File &amp; Compatibility</h3>
 <ul>
 <li>
+<p><strong>Multi-Log Management</strong>: Simultaneously load and switch between multiple log files using a dedicated sidebar. Files are automatically sorted by their start time for chronological analysis.</p>
+</li>
+<li>
+<p><strong>High-Performance Merged View</strong>: Combine multiple logs into a single, unified view. Utilizing a smart Proxy-Based architecture, the tool can merge tens of millions of lines with minimal memory usage while maintaining full support for filtering and the timeline.</p>
+</li>
+<li>
 <p><strong>TAT Format Support</strong>: Fully compatible with <code>TextAnalysisTool.NET</code>'s <code>.tat</code> file format, allowing for seamless import/export of existing filter rules.</p>
 </li>
 <li>
@@ -124,13 +147,19 @@
 <h3 id="intuitive-ui">🖥️ Intuitive UI</h3>
 <ul>
 <li>
-<p><strong>Progress Bar</strong>: A status bar at the bottom provides real-time visual feedback on loading and filtering progress.</p>
+<p><strong>Dynamic Sidebar</strong>: A collapsible log list panel that automatically appears when multiple files are loaded, featuring right-click management and auto-width adjustment.</p>
 </li>
 <li>
-<p><strong>Detailed Statistics</strong>: The status bar displays current Load Time, Filter Time, and displayed line count statistics.</p>
+<p><strong>Integrated Event Timeline</strong>: A powerful, interactive timeline embedded directly into the main interface. It features density heatmap visualization, auto-focusing on active time ranges, block-style event rendering, and a time axis for precise context.</p>
 </li>
 <li>
-<p><strong>Drag-and-Drop Sorting</strong>: Filter priority can be adjusted simply by dragging the filter list items.</p>
+<p><strong>Find History</strong>: Remembers up to 10 most recent search queries in a convenient dropdown menu.</p>
+</li>
+<li>
+<p><strong>Progress Feedback</strong>: The status bar provides real-time statistics on Load Time, Filter Time, and processing progress for massive merge operations.</p>
+</li>
+<li>
+<p><strong>Data Safety</strong>: Includes an unsaved changes warning when exiting to prevent accidental loss of filter rules.</p>
 </li>
 </ul>
 <h2 id="3-user-guide">3. User Guide</h2>
@@ -138,23 +167,29 @@
 <h4 id="file">File</h4>
 <ul>
 <li>
-<p><strong>Open Log...</strong>: Open a log file (.log, .txt, <em>.</em>).</p>
+<p><strong>Open Log...</strong>: Open a log file (.log, .txt, <em>.</em>). Loading a single file clears the current multi-log session.</p>
 </li>
 <li>
-<p><strong>Open Recent</strong>: Provides a list of the last 10 opened files for quick access. Includes an option to clear the list.</p>
+<p><strong>Open Multiple Logs...</strong>: Select and load multiple files. These will appear in the Log List sidebar. Duplicates are automatically ignored.</p>
+</li>
+<li>
+<p><strong>Open Recent</strong>: Provides a list of the last 10 opened files for quick access.</p>
 </li>
 <li>
 <p><strong>Load Filters</strong>: Import filter rule files in <code>.tat</code> or <code>.xml</code> format.</p>
 </li>
 <li>
-<p><strong>Save Filters</strong>: Save current filter rules to the file (overwrites the current file).</p>
+<p><strong>Save Filters</strong>: Save current filter rules.</p>
 </li>
-<li>
-<p><strong>Save Filters As</strong>: Save current filter rules as a new file.</p>
+</ul>
+<h4 id="sidebar-merged-view">Sidebar &amp; Merged View</h4>
+<ul>
+<li><strong>Log List Sidebar</strong>: Displays all loaded files sorted chronologically.<ul>
+<li><strong>Right-Click</strong>: Access options to remove a specific file or clear the entire list.</li>
+<li><strong>Selection</strong>: Click any file to switch focus to its individual content.</li>
+</ul>
 </li>
-<li>
-<p><strong>Exit</strong>: Close the application.</p>
-</li>
+<li><strong>Merge All Logs</strong>: Clicking the button at the bottom of the sidebar creates a unified, time-sorted view of all loaded logs. This view supports full filtering and timeline analysis.</li>
 </ul>
 <h4 id="filter">Filter</h4>
 <ul>
@@ -164,32 +199,15 @@
 <li>
 <p><strong>Show Filtered Only (Ctrl+H)</strong>:</p>
 </li>
-<li>
-<p><strong>Checked</strong>: Displays only lines that match the filter rules.</p>
-</li>
-<li>
-<p><strong>Unchecked</strong>: Displays all original log lines, but keeps keyword highlighting (Raw Mode).</p>
-</li>
+<li><strong>Checked</strong>: Displays only lines that match enabled filter rules. Works in both single and merged views.</li>
+<li><strong>Unchecked</strong>: Displays all lines with keyword highlighting.</li>
 </ul>
 <h4 id="view">View</h4>
 <ul>
-<li>
-<p><strong>Find... (Ctrl+F)</strong>: Opens a search bar at the top of the log view to find text within the entire log file.</p>
-</li>
-<li>
-<p><strong>Go to Line... (Ctrl+G)</strong>: Opens a dialog to jump directly to a specific line number.</p>
-</li>
-<li>
-<p><strong>Dark Mode</strong>: Toggles a persistent, application-wide dark theme for improved viewing in low-light environments.</p>
-</li>
-<li>
-<p><strong>Show Timeline</strong>: Opens a new window displaying a graphical timeline of events.</p>
-<ul>
-<li>This option is only enabled if the loaded log file contains recognizable timestamps.</li>
-<li>Events are filters that have been marked with the <strong>"As Event"</strong> property. The color of the event point on the timeline corresponds to the filter's background color.</li>
-<li>Hovering over an event point shows its timestamp, line number, and content; clicking it jumps to that line in the log view.</li>
-</ul>
-</li>
+<li><strong>Find... (Ctrl+F)</strong>: Opens the search bar. Use the dropdown menu to access recent search history (up to 10 queries).</li>
+<li><strong>Show Log List</strong>: Manually toggle the visibility of the sidebar.</li>
+<li><strong>Dark Mode</strong>: Toggles the dark theme.</li>
+<li><strong>Toggle Timeline</strong>: Shows or hides the interactive timeline. Now features block-style events and a time axis.</li>
 </ul>
 <h4 id="notes">Notes</h4>
 <ul>
@@ -237,6 +255,69 @@
 </li>
 </ul>
 <h2 id="4-release-notes">4. Release Notes</h2>
+<h3 id="version-17-2025-12-26">Version 1.7 (2025-12-26)</h3>
+<h4 id="multi-log-management-merged-view">📂 Multi-Log Management &amp; Merged View</h4>
+<ul>
+<li><strong>Multi-Log Support</strong>:<ul>
+<li>Added a dynamic <strong>Log List Sidebar</strong> to manage multiple loaded files simultaneously.</li>
+<li>Files in the sidebar are automatically sorted chronologically based on their start time.</li>
+<li><strong>Sidebar Automation</strong>: Automatically shows when 2+ files are loaded and hides for single files or empty state.</li>
+<li><strong>Right-Click Context Menu</strong>: Quickly remove specific files or <strong>Clear All Logs</strong> from the session.</li>
+</ul>
+</li>
+<li><strong>High-Performance Merged View</strong>:<ul>
+<li>New <strong>"Merge All Logs"</strong> feature to combine all loaded files into a single, seamless chronological view.</li>
+<li><strong>Proxy-Based Architecture</strong>: Optimized for massive datasets (e.g., 18M+ lines) using a reference-based system that significantly reduces memory overhead.</li>
+<li><strong>Smart Persistence</strong>: The Merged View automatically cleans itself up if the number of loaded files drops below two.</li>
+<li><strong>Full Feature Parity</strong>: Merged View now supports the complete Filtering and Event Timeline systems across all combined files.</li>
+</ul>
+</li>
+</ul>
+<h4 id="enhanced-search-navigation">🔍 Enhanced Search &amp; Navigation</h4>
+<ul>
+<li><strong>Find History</strong>: The Find bar now features a <strong>Search History</strong> (Combobox), storing up to 10 most recent queries for quick access.</li>
+<li><strong>Cross-File Search</strong>: Searching in Merged View automatically scans all constituent files using the parallel Rust engine.</li>
+<li><strong>Keyboard Workflow</strong>:<ul>
+<li><strong>Esc Key</strong>: Now consistently closes the Find, Add/Edit Filter, and Keyboard Shortcuts windows.</li>
+<li><strong>Enter Key</strong>: Quickly save and apply changes in the Add/Edit Filter dialog.</li>
+<li><strong>Focus Management</strong>: Improved keyboard focus handling to ensure shortcuts like <code>Ctrl+C</code> (Copy) and <code>c</code> (Add Note) work reliably immediately after clicking a log line.</li>
+</ul>
+</li>
+</ul>
+<h4 id="ui-ux-polish">🎨 UI &amp; UX Polish</h4>
+<ul>
+<li><strong>Sidebar Optimization</strong>: Implemented dynamic width adjustment based on the longest filename and reduced font size for a cleaner look.</li>
+<li><strong>Timeline Upgrades</strong>:<ul>
+<li><strong>Auto-Focus Range</strong>: The timeline now automatically crops empty time periods to focus on actual log events.</li>
+<li><strong>Block-Style Visualization</strong>: Sparse events are now rendered as prominent blocks instead of thin lines for better visibility.</li>
+<li><strong>Time Axis</strong>: Added "HH:MM:SS" scale labels at the bottom of the timeline for better temporal context.</li>
+</ul>
+</li>
+<li><strong>Data Protection</strong>: Added an <strong>Unsaved Changes Warning</strong> when closing the application if filter rules have been modified.</li>
+</ul>
+<h4 id="fixes-stability">🛠 Fixes &amp; Stability</h4>
+<ul>
+<li><strong>Robust FFI Handling</strong>: Fixed a critical infinite loop issue during large file iterations via the Rust extension.</li>
+<li><strong>Race Condition Fixes</strong>: Resolved UI crashes (TclErrors) related to concurrent file loading and duplicate entry insertions.</li>
+<li><strong>Merged View Logic</strong>: Fixed an issue where the Merged View entry would persist incorrectly after removing log files.</li>
+<li><strong>General Polish</strong>: Fixed multiple indentation-related syntax errors and stabilized status bar timing displays.</li>
+</ul>
+<h3 id="version-164-2025-12-24">Version 1.6.4 (2025-12-24)</h3>
+<h4 id="event-timeline">✨ Event Timeline</h4>
+<ul>
+<li><strong>Integrated Display:</strong> The Timeline is now embedded within the main application window, providing an always-available overview of log events.</li>
+<li><strong>Density Heatmap:</strong> Events are displayed as a density heatmap, making it easy to spot clusters or anomalies in large log files.</li>
+<li><strong>Interactive Navigation:</strong> Features include mouse scroll wheel Zoom, right-click Pan, and click-to-jump navigation.</li>
+<li><strong>Enhanced Visibility:</strong> Smart color mapping ensures event highlights are clear in both light and dark themes.</li>
+<li><strong>Bi-directional Synchronization:</strong> The timeline visually tracks the visible log area, and interaction with the timeline scrolls the log view.</li>
+</ul>
+<h4 id="general-fixes">🛠 General Fixes</h4>
+<ul>
+<li><strong>Scrolling Stability:</strong> Improved scrolling accuracy and stability in filtered log views.</li>
+<li><strong>Theme Integration:</strong> Ensured the timeline's appearance correctly adapts to Dark Mode changes.</li>
+<li><strong>Default Behavior:</strong> The timeline is now hidden by default on startup and can be toggled via the View menu.</li>
+<li><strong>Viewport Indicator:</strong> Stabilized the timeline's viewport indicator for precise tracking of the visible log range.</li>
+</ul>
 <h3 id="version-163-2025-12-22">Version 1.6.3 (2025-12-22)</h3>
 <h4 id="filter-list-enhancements">✨ Filter List Enhancements</h4>
 <ul>
