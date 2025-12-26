@@ -728,6 +728,22 @@ class LogAnalyzerApp:
 			except Exception:
 				pass # Ignore if it fails for a specific window
 
+	def center_window(self, window, width, height):
+		"""Centers a Toplevel window relative to the main root window."""
+		window.withdraw() # Hide initially to avoid flicker
+		window.update_idletasks() # Ensure geometry calculation is ready
+
+		rw = self.root.winfo_width()
+		rh = self.root.winfo_height()
+		rx = self.root.winfo_rootx()
+		ry = self.root.winfo_rooty()
+
+		x = rx + (rw - width) // 2
+		y = ry + (rh - height) // 2
+		
+		window.geometry(f"{width}x{height}+{x}+{y}")
+		window.deiconify() # Show after positioning
+
 
 	# --- [Helper] Path Resource Finder ---
 	def resource_path(self, relative_path):
@@ -1824,12 +1840,14 @@ class LogAnalyzerApp:
 		current_note = self.notes.get(note_key, "")
 
 		dialog = tk.Toplevel(self.root)
+		dialog.withdraw()
 		dialog.title(f"Note for Line {idx + 1}")
 		self._apply_icon(dialog)
 		dialog.transient(self.root)
 		dialog.grab_set()
-		dialog.geometry("400x200")
+		self.center_window(dialog, 400, 200)
 		dialog.config(bg=self.root.cget("bg")) # Match theme
+		dialog.bind("<Escape>", lambda e: dialog.destroy())
 
 		# Buttons (Pack first to ensure visibility at bottom)
 		btn_frame = ttk.Frame(dialog, padding=10)
@@ -2321,11 +2339,12 @@ class LogAnalyzerApp:
 			return "break"
 
 		dialog = tk.Toplevel(self.root)
+		dialog.withdraw()
 		dialog.title("Go to Line")
 		self._apply_icon(dialog)
 		dialog.transient(self.root)
 		dialog.grab_set()
-		dialog.geometry("300x120")
+		self.center_window(dialog, 300, 120)
 		dialog.resizable(False, False)
 		dialog.config(bg=self.root.cget("bg")) # Match theme
 
@@ -2910,6 +2929,7 @@ class LogAnalyzerApp:
 			return "break"
 
 		self.find_window = tk.Toplevel(self.root)
+		self.find_window.withdraw()
 		self.find_window.title("Find")
 		self._apply_icon(self.find_window)
 		self.find_window.transient(self.root)
@@ -2917,15 +2937,7 @@ class LogAnalyzerApp:
 		self.find_window.protocol("WM_DELETE_WINDOW", self.close_find_bar)
 		self.find_window.config(bg=self.root.cget("bg"))
 
-		# Center relative to root
-		rw = self.root.winfo_width()
-		rh = self.root.winfo_height()
-		rx = self.root.winfo_rootx()
-		ry = self.root.winfo_rooty()
-		w = 400; h = 80
-		x = rx + (rw - w) // 2
-		y = ry + (rh - h) // 2
-		self.find_window.geometry(f"+{x}+{y}")
+		self.center_window(self.find_window, 400, 80)
 
 		frame = ttk.Frame(self.find_window, padding=5)
 		frame.pack(fill=tk.BOTH, expand=True)
@@ -3388,11 +3400,12 @@ class LogAnalyzerApp:
 
 	def open_filter_dialog(self, filter_obj=None, index=None, initial_text=None):
 		dialog = tk.Toplevel(self.root)
+		dialog.withdraw()
 		dialog.title("Edit Filter" if filter_obj else "Add Filter")
 		self._apply_icon(dialog)
 		dialog.transient(self.root) # Make it a child of the main window
 		dialog.grab_set()
-		dialog.geometry("400x200")
+		self.center_window(dialog, 400, 200)
 		dialog.config(bg=self.root.cget("bg")) # Match theme
 
 		main_frame = ttk.Frame(dialog, padding=10)
@@ -3523,9 +3536,9 @@ class LogAnalyzerApp:
 				is_event = is_true(f.get('is_event')) # Read our custom attribute, defaults to False if not found
 				if text: new_filters.append(Filter(text, fore, back, enabled, is_regex, is_exclude, is_event=is_event))
 			self.filters = new_filters
-			self.filters_dirty = False # Newly loaded, not dirty
 			self.current_tat_path = filepath; self.update_title()
 			self.recalc_filtered_data()
+			self.filters_dirty = False # Newly loaded, not dirty
 			self.show_toast(f"Imported {len(new_filters)} filters")
 		except Exception as e: messagebox.showerror("Import Error", str(e))
 
@@ -3550,6 +3563,7 @@ class LogAnalyzerApp:
 				data = json.load(f)
 				self.filters = [Filter(**item) for item in data]
 			self.recalc_filtered_data()
+			self.filters_dirty = False # Reset dirty flag after recalc
 		except Exception as e: messagebox.showerror("Error", f"JSON Import Failed: {e}")
 
 	# --- Multi-Log File Support ---
