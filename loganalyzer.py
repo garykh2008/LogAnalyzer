@@ -630,8 +630,9 @@ class LogAnalyzerApp:
 			self.pending_load_count -= 1
 			if self.pending_load_count <= 0:
 				self.pending_load_count = 0
-				self.set_ui_busy(False)
-				self.update_status("All files loaded.")
+				if getattr(self, 'pending_filter_count', 0) <= 0:
+					self.set_ui_busy(False)
+					self.update_status("All files loaded.")
 		else:
 			# Fallback if counter not initialized
 			self.set_ui_busy(False)
@@ -970,7 +971,8 @@ class LogAnalyzerApp:
 							self.draw_timeline()
 							self.view_menu.entryconfig("Toggle Timeline", state="normal" if log_state.timestamps_found else "disabled")
 
-						self.set_ui_busy(False)
+						if not getattr(self, 'pending_load_count', 0) > 0:
+							self.set_ui_busy(False)
 
 				elif msg_type == 'status':
 					self.update_status(msg[1])
@@ -1461,8 +1463,8 @@ class LogAnalyzerApp:
 		self.filters_dirty = True
 		self.recalc_filtered_data()
 
-	def recalc_filtered_data(self):
-		if self.is_processing: return
+	def recalc_filtered_data(self, force=False):
+		if self.is_processing and not force: return
 
 		# If no active log file or no log files loaded, clear everything
 		if not self.active_log_filepath or not self.loaded_log_files:
@@ -3538,6 +3540,9 @@ class LogAnalyzerApp:
 		filepath = filedialog.askopenfilename(initialdir=init_dir, filetypes=[("TextAnalysisTool", "*.tat"), ("XML", "*.xml")])
 		if not filepath: return
 		self.config["last_filter_dir"] = os.path.dirname(filepath); self.save_config()
+		self._load_tat_filters_from_path(filepath)
+
+	def _load_tat_filters_from_path(self, filepath):
 		try:
 			tree = ET.parse(filepath); root = tree.getroot()
 			filters_node = root.findall('.//filter')
@@ -3556,7 +3561,10 @@ class LogAnalyzerApp:
 			self.recalc_filtered_data()
 			self.filters_dirty = False # Newly loaded, not dirty
 			self.show_toast(f"Imported {len(new_filters)} filters")
-		except Exception as e: messagebox.showerror("Import Error", str(e))
+			return True
+		except Exception as e:
+			messagebox.showerror("Import Error", str(e))
+			return False
 
 	# JSON methods
 	def export_filters(self):
@@ -3650,7 +3658,7 @@ class LogAnalyzerApp:
 		self.update_status(f"Loaded {len(self.active_raw_lines)} lines from {display_log_name}")
 
 		# Recalculate filters for the new active state
-		self.recalc_filtered_data() # This will update filter_complete and draw_timeline
+		self.recalc_filtered_data(force=True) # This will update filter_complete and draw_timeline
 
 		# Select in treeview if not already selected (Skip for MERGED_VIEW_ID)
 		if filepath != self.MERGED_VIEW_ID and self.log_files_tree.selection() != (filepath,):
@@ -3816,9 +3824,42 @@ class LogAnalyzerApp:
 		self.welcome_label.place_forget()
 
 if __name__ == "__main__":
+	import argparse
+	import glob
+
+	parser = argparse.ArgumentParser(description="Log Analyzer", fromfile_prefix_chars='@')
+	parser.add_argument("logs", nargs="*", help="Log files to open")
+	parser.add_argument("-f", "--filter", help="Filter file to load (.tat)")
+	args = parser.parse_args()
+
 	if HAS_DND:
 		root = TkinterDnD.Tk()
 	else:
 		root = tk.Tk()
 	app = LogAnalyzerApp(root)
+
+	# Process Command Line Arguments
+	if args.filter:
+		app._load_tat_filters_from_path(args.filter)
+
+	if args.logs:
+		final_logs = []
+		for log_arg in args.logs:
+			# Handle Wildcards (for CMD where shell doesn't expand)
+			if any(c in log_arg for c in '*?['):
+				expanded = glob.glob(log_arg)
+				if expanded:
+					final_logs.extend(expanded)
+				else:
+					final_logs.append(log_arg) # Keep as is if no match found
+			else:
+				final_logs.append(log_arg)
+
+		if final_logs:
+			app.set_ui_busy(True)
+			app.pending_load_count = len(final_logs)
+			for log_file in final_logs:
+				app.currently_loading.add(log_file)
+				app._load_log_file_into_state(log_file, is_initial_load=True)
+
 	root.mainloop()

@@ -10,7 +10,8 @@
     - [🔍 Powerful Filtering System](#-powerful-filtering-system)
     - [📂 File \& Compatibility](#-file--compatibility)
     - [🖥️ Intuitive UI](#️-intuitive-ui)
-  - [3. User Guide](#3-user-guide)
+  - [3. Command-Line Usage](#3-command-line-usage)
+  - [4. User Guide](#4-user-guide)
     - [Menu Bar](#menu-bar)
       - [File](#file)
       - [Sidebar \& Merged View](#sidebar--merged-view)
@@ -19,7 +20,7 @@
       - [Notes](#notes)
       - [Help](#help)
     - [Shortcuts \& Operations](#shortcuts--operations)
-  - [4. Release Notes](#4-release-notes)
+  - [5. Release Notes](#5-release-notes)
     - [Version 1.7 (2025-12-26)](#version-17-2025-12-26)
       - [📂 Multi-Log Management \& Merged View](#-multi-log-management--merged-view)
       - [🔍 Enhanced Search \& Navigation](#-enhanced-search--navigation)
@@ -56,7 +57,7 @@
       - [✨ New Features](#-new-features-1)
       - [⚡ Performance Improvements](#-performance-improvements)
       - [🐛 Bug Fixes](#-bug-fixes)
-  - [5. System Requirements](#5-system-requirements)
+  - [6. System Requirements](#6-system-requirements)
 
 ---
 
@@ -108,7 +109,28 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 *   **Data Safety**: Includes an unsaved changes warning when exiting to prevent accidental loss of filter rules.
 
-## 3. User Guide
+## 3. Command-Line Usage
+
+Log Analyzer supports several command-line arguments for quick startup and automation.
+
+*   **Open Single/Multiple Logs**: Pass one or more file paths as positional arguments.
+    ```bash
+    python loganalyzer.py file1.log file2.log
+    ```
+*   **Wildcard Support**: You can use wildcards to open multiple files matching a pattern (e.g., in Windows CMD or Linux shell).
+    ```bash
+    python loganalyzer.py logs/*.log
+    ```
+*   **Load Filters**: Use the `-f` or `--filter` flag to specify a `.tat` filter file to be applied on startup.
+    ```bash
+    python loganalyzer.py my_log.log -f standard_filters.tat
+    ```
+*   **Argument Files (@)**: If you have a very long list of files that exceeds the command-line length limit, you can put them in a text file and load them using the `@` prefix.
+    ```bash
+    python loganalyzer.py @file_list.txt
+    ```
+
+## 4. User Guide
 
 ### Menu Bar
 
@@ -179,7 +201,7 @@ Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dyna
 
 * **Ctrl + Left/Right Arrow**: Jumps to the previous/next match in the filtered results.
 
-## 4. Release Notes
+## 5. Release Notes
 
 ### Version 1.7 (2025-12-26)
 
@@ -450,7 +472,7 @@ This version marks a significant milestone for Log Analyzer, focusing on a compl
 
 * Removed trailing whitespace from the source code (Code Cleanup).
 
-## 5. System Requirements
+## 6. System Requirements
 
 * **OS**: Windows / macOS / Linux
 
