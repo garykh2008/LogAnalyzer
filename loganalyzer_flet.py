@@ -1,0 +1,2179 @@
+import flet as ft
+import flet.canvas as cv # Import canvas module explicitly
+import os
+import sys
+import time
+import asyncio
+import json
+import re
+
+# Add current directory to sys.path to ensure we can load the Rust module
+sys.path.append(os.getcwd())
+
+# ... (Previous imports and helper functions remain)
+
+# --- Rust Extension Import ---
+# 確保能從當前目錄載入 Rust pyd/so
+sys.path.append(os.getcwd())
+
+def hex_to_rgb(hex_str):
+    hex_str = hex_str.lstrip('#')
+    if not hex_str: return (0, 0, 0)
+    if len(hex_str) == 3: hex_str = "".join(c*2 for c in hex_str)
+    try:
+        return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
+    except: return (0, 0, 0)
+
+def get_luminance(hex_str):
+    rgb = hex_to_rgb(hex_str)
+    return (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255.0
+
+def adjust_color_for_theme(hex_color, is_background, is_dark_mode):
+    """
+    Dynamically adjusts filter colors for Dark Mode to prevent jarring contrast.
+    Ported from loganalyzer.py.
+    """
+    if not hex_color: return hex_color
+    hex_color = hex_color.strip().lower()
+    if not hex_color.startswith("#"): hex_color = "#" + hex_color
+
+    if not is_dark_mode:
+        return hex_color
+
+    # 1. Handle Defaults
+    if is_background and (hex_color == "#ffffff" or hex_color == "#fff"):
+        return "#1e1e1e" # Match dark theme bg
+    if not is_background and (hex_color == "#000000" or hex_color == "#000"):
+        return "#d4d4d4" # Match dark theme text
+
+    # 2. Smart Adjustment based on Luminance
+    rgb = hex_to_rgb(hex_color)
+    lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255.0
+
+    if is_background and lum > 0.4: # Too bright for dark mode bg
+        return '#{:02x}{:02x}{:02x}'.format(*tuple(int(c * 0.25) for c in rgb))
+    if not is_background and lum < 0.5: # Too dark for dark mode text
+        return '#{:02x}{:02x}{:02x}'.format(*tuple(int(c + (255 - c) * 0.6) for c in rgb))
+
+    return hex_color
+
+def get_event_prop(event, prop_name, default=None):
+    """
+    Safely access event properties with fallback and debug info.
+    Helps resolve API differences between Flet versions.
+    """
+    # 1. Direct access
+    if hasattr(event, prop_name):
+        return getattr(event, prop_name)
+    
+    # 2. Common Aliases / Fallbacks for 0.80.0+
+    aliases = {
+        'delta_y': ['delta', 'scroll_delta'], # scroll_delta might be float or Offset
+        'local_y': ['local_position'],       # local_position is Offset
+        'global_y': ['global_position']
+    }
+    
+    if prop_name in aliases:
+        for alias in aliases[prop_name]:
+            if hasattr(event, alias):
+                val = getattr(event, alias)
+                # Handle Offset objects (local_position, etc.)
+                if prop_name.endswith('_y') and hasattr(val, 'y'):
+                    return val.y
+                if prop_name.endswith('_x') and hasattr(val, 'x'):
+                    return val.x
+                # If expecting a scalar but got scalar (e.g. scroll_delta)
+                return val
+
+    # 3. Last Resort: Inspect and Debug
+    # print(f"DEBUG: Attribute '{prop_name}' not found in {type(event).__name__}")
+    # valid_attrs = [a for a in dir(event) if not a.startswith('_')]
+    # print(f"DEBUG: Available attributes: {valid_attrs}")
+    
+    return default
+
+class MockLogEngine:
+    """Fallback engine when Rust extension is missing."""
+    def __init__(self, path):
+        self.path = path
+        # 模擬讀取
+        print(f"[MockEngine] Pretending to read {path}")
+        self._lines = 1000 # 假裝有 1000 行
+        
+    def line_count(self):
+        return self._lines
+        
+    def get_line(self, idx):
+        return f"Mock Line #{idx} from {os.path.basename(self.path)}"
+
+    def filter(self, filters):
+        # filters: List of (text, is_regex, is_exclude, is_event, original_index)
+        print(f"[MockEngine] Filtering with {len(filters)} filters...")
+        
+        # 簡單模擬：如果 filter text 是 "error"，就只回傳偶數行
+        # 回傳格式: (line_tags_codes, filtered_indices, hit_counts, timeline_events)
+        
+        filtered_indices = []
+        line_tags = [0] * self._lines
+        hit_counts = [0] * len(filters)
+        
+        # 模擬一個簡單的過濾邏輯
+        has_active_filters = len(filters) > 0
+        
+        for i in range(self._lines):
+            # 這裡簡單全通過，除非有 filter 且內容包含 "error" (模擬)
+            # 為了方便測試，我們假設如果沒有 filter 就全顯示
+            # 如果有 filter，我們隨機過濾一些
+            if not has_active_filters:
+                filtered_indices.append(i)
+            else:
+                # 模擬：只要有 filter，就只顯示 1/3 的行數
+                if i % 3 == 0:
+                    filtered_indices.append(i)
+                    line_tags[i] = 2 # 模擬匹配第一個 filter
+                    hit_counts[0] += 1
+        
+        return (line_tags, filtered_indices, hit_counts, [])
+
+try:
+    import log_engine_rs
+    # Assign the imported class to a new variable for consistent access
+    _REAL_LOG_ENGINE = log_engine_rs.LogEngine
+    HAS_RUST = True
+    print("Rust Extension Loaded Successfully.")
+except ImportError as e:
+    _REAL_LOG_ENGINE = MockLogEngine # Fallback
+    HAS_RUST = False
+    print(f"Failed to load Rust Extension: {e}. Using Mock Engine.")
+
+class Filter:
+    def __init__(self, text, fore_color="#000000", back_color="#FFFFFF", enabled=True, is_regex=False, is_exclude=False, is_event=False):
+        self.text = text
+        self.fore_color = fore_color
+        self.back_color = back_color
+        self.enabled = enabled
+        self.is_regex = is_regex
+        self.is_exclude = is_exclude
+        self.is_event = is_event
+        self.hit_count = 0
+
+    def to_tat_xml(self):
+        """Converts filter to TextAnalysisTool XML format."""
+        # Simple XML fragment generation
+        en = 'y' if self.enabled else 'n'
+        reg = 'y' if self.is_regex else 'n'
+        exc = 'y' if self.is_exclude else 'n'
+        # Remove '#' for TAT color format
+        fg = self.fore_color.lstrip('#')
+        bg = self.back_color.lstrip('#')
+        
+        return f'<Filter enabled="{en}" regex="{reg}" exclude="{exc}" foreColor="{fg}" backColor="{bg}">{self.text}</Filter>'
+
+
+class TimelineView(ft.Container):
+    def __init__(self, app, width=50):
+        super().__init__(
+            width=width,
+            bgcolor="#1e1e1e",
+            padding=0,
+            alignment=ft.Alignment(-1, -1)
+        )
+        self.app = app
+        self.events = [] # List of (ts, filter_text, raw_idx)
+        self.total_lines = 0
+        self.current_scroll_index = 0
+        
+        # Canvas for drawing
+        self.canvas = cv.Canvas(
+            shapes=[],
+            expand=True,
+        )
+        
+        # GestureDetector for interaction
+        self.gesture = ft.GestureDetector(
+            content=self.canvas,
+            on_tap_down=self.on_tap_down,
+            on_pan_update=self.on_pan_update,
+            expand=True
+        )
+        
+        self.content = self.gesture
+
+    def update_data(self, events, total_lines):
+        self.events = events
+        self.total_lines = total_lines
+        self.draw()
+        self.update()
+
+    def update_scroll(self, index):
+        self.current_scroll_index = index
+        # Optimize: Only redraw the viewport indicator if possible?
+        # For now, redraw everything or just overlay?
+        # Canvas shapes are retained, we can update specific shapes.
+        self.draw()
+        self.update()
+
+    def set_height(self, height):
+        self.height = height
+        self.draw()
+        self.update()
+
+    def draw(self):
+        self.canvas.shapes.clear()
+        
+        # Use explicitly set height, default to 500 if not set
+        canvas_height = self.height if self.height else 500
+        
+        # Determine foreground color based on theme
+        is_dark = self.app.page.theme_mode == ft.ThemeMode.DARK
+        fg_color = ft.Colors.WHITE if is_dark else ft.Colors.BLACK
+        
+        # Avoid division by zero
+        if self.total_lines <= 0:
+            self.canvas.update()
+            return
+
+        # 1. Draw Heatmap (Background)
+        if self.events:
+            color_map = {}
+            for f in self.app.filters:
+                if f.enabled:
+                    color_map[f.text] = f.back_color
+
+            scale = canvas_height / self.total_lines
+            for _, text, raw_idx in self.events:
+                y = raw_idx * scale
+                color = color_map.get(text, "#FF0000")
+                h = max(2, scale) 
+                self.canvas.shapes.append(
+                    cv.Rect(
+                        x=0, y=y, 
+                        width=self.width, height=h,
+                        paint=ft.Paint(color=color, style=ft.PaintingStyle.FILL)
+                    )
+                )
+
+        # 2. Draw Viewport Indicator (The "Thumb")
+        if self.total_lines > 0:
+            lines_per_page = self.app.LINES_PER_PAGE
+            current_filtered_idx = self.app.current_start_index
+            
+            start_raw = 0
+            end_raw = 0
+            
+            if self.app.filtered_indices:
+                if current_filtered_idx < len(self.app.filtered_indices):
+                    start_raw = self.app.filtered_indices[current_filtered_idx]
+                else:
+                    start_raw = self.total_lines
+                
+                end_filtered_idx = min(current_filtered_idx + lines_per_page, len(self.app.filtered_indices) - 1)
+                if end_filtered_idx >= 0 and end_filtered_idx < len(self.app.filtered_indices):
+                    end_raw = self.app.filtered_indices[end_filtered_idx]
+                else:
+                    end_raw = start_raw
+            else:
+                start_raw = current_filtered_idx
+                end_raw = min(current_filtered_idx + lines_per_page, self.total_lines)
+
+            y_start = (start_raw / self.total_lines) * canvas_height
+            y_end = (end_raw / self.total_lines) * canvas_height
+            h = max(4, y_end - y_start)
+            
+            # Draw Indicator
+            indicator = cv.Rect(
+                x=0, y=y_start, 
+                width=self.width, height=h,
+                paint=ft.Paint(
+                    color=fg_color, 
+                    style=ft.PaintingStyle.STROKE,
+                    stroke_width=2
+                )
+            )
+            self.canvas.shapes.append(indicator)
+            
+        self.canvas.update()
+
+    async def on_tap_down(self, e: ft.TapEvent):
+        await self.handle_interaction(e.local_position.y)
+
+    async def on_pan_update(self, e: ft.DragUpdateEvent):
+        await self.handle_interaction(e.local_position.y) # Delta handling handled by position update
+
+    async def handle_interaction(self, y):
+        # Calculate index from Y
+        canvas_height = self.page.height - 60 # Sync with draw logic
+        if canvas_height <= 0: return
+        
+        percentage = y / canvas_height
+        target_raw_idx = int(percentage * self.total_lines)
+        
+        # We need to jump to the NEAREST filtered index for this raw index
+        new_filtered_idx = 0
+        
+        if self.app.filtered_indices:
+            # Binary search or simple scan to find closest
+            # For now, simple scan (optimization needed for large logs)
+            # Find i such that filtered_indices[i] >= target_raw_idx
+            
+            # Using bisect module would be better, but let's implement simple search for MVP
+            import bisect
+            idx = bisect.bisect_left(self.app.filtered_indices, target_raw_idx)
+            if idx >= len(self.app.filtered_indices):
+                idx = len(self.app.filtered_indices) - 1
+            new_filtered_idx = idx
+        else:
+            new_filtered_idx = target_raw_idx
+            
+        self.app.jump_to_index(new_filtered_idx, update_slider=True)
+
+class LogAnalyzerApp:
+    def __init__(self, page: ft.Page):
+        self.page = page
+        self.page.title = "LogAnalyzer (Flet Edition)"
+        
+        # Configure global theme
+        self.page.theme = ft.Theme(color_scheme_seed=ft.Colors.BLUE)
+        self.page.dark_theme = ft.Theme(color_scheme_seed=ft.Colors.BLUE)
+        
+        self.page.theme_mode = ft.ThemeMode.DARK
+        self.page.padding = 0
+        self.page.spacing = 0
+        
+        # App State
+        self.log_engine = None
+        self.file_path = None
+        self.is_programmatic_scroll = False # 防止 Slider 回圈更新
+        self.last_slider_update = 0 # Timestamp for debouncing slider events
+        self.last_render_time = 0 # For throttling scroll updates
+        self.target_start_index = 0 # Target position for smooth/buffered scrolling
+        self.needs_render = False # Flag to trigger render in loop
+        
+        self.filters = [] # Store Filter objects
+        self.filtered_indices = None # None means show all, otherwise list of real indices
+        self.line_tags_codes = None  # Storage for all line tags from Rust
+        self.show_only_filtered = False # Toggle between Full view and Filtered view
+        
+        # Search State
+        self.search_results = [] # List of raw indices matching search
+        self.current_search_idx = -1 # Index within search_results
+        self.search_query = ""
+        self.search_case_sensitive = False
+        self.search_wrap = True
+        
+        # Selection State (matching loganalyzer.py)
+        self.selected_indices = set() # Set of raw indices
+        self.selection_anchor = -1 # Raw index for Shift-selection anchor
+        
+        # Modifier States for selection
+        self.ctrl_pressed = False
+        self.shift_pressed = False
+        
+        # Config Defaults
+        self.config = {
+            "last_log_dir": os.path.expanduser("~"),
+            "last_filter_dir": os.path.expanduser("~"),
+            "font_size": 12,
+            "recent_files": [],
+            "window_maximized": False,
+            "main_window_geometry": "1200x800+100+100",
+            "note_view_visible": False,
+            "sash_main_y": 360
+        }
+        self.config_file = "app_config.json"
+        self.load_config()
+        
+        # Apply window settings
+        self.apply_window_geometry()
+        
+        self.target_start_index = 0
+        
+        # --- UI Components ---
+        self.build_ui()
+        
+        # Start background render loop for smooth scrolling
+        asyncio.create_task(self.render_loop())
+        
+        # Capture initial focus
+        asyncio.create_task(self.focus_trap.focus())
+        
+        # Bind close event for saving config
+        self.page.window_prevent_close = True # We want to handle close to save config
+        self.page.on_window_event = self.on_window_event
+        
+    def load_config(self):
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    loaded_config = json.load(f)
+                    self.config.update(loaded_config)
+                print("Config loaded.")
+            except Exception as e:
+                print(f"Error loading config: {e}")
+
+    def save_config(self):
+        # Update current geometry to config
+        # Flet 0.80+ doesn't always expose window position perfectly across platforms, but we try
+        # Note: page.window_width/height are available. top/left might be.
+        try:
+            w = int(self.page.window_width)
+            h = int(self.page.window_height)
+            x = int(self.page.window_left) if self.page.window_left is not None else 0
+            y = int(self.page.window_top) if self.page.window_top is not None else 0
+            self.config["main_window_geometry"] = f"{w}x{h}+{x}+{y}"
+            self.config["window_maximized"] = self.page.window_maximized
+            
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.config, f, indent=4)
+            print("Config saved.")
+        except Exception as e:
+            print(f"Error saving config: {e}")
+
+    def apply_window_geometry(self):
+        geo = self.config.get("main_window_geometry", "1200x800+100+100")
+        try:
+            # Parse Tkinter/X11 geometry string: WxH+X+Y
+            match = re.match(r"(\d+)x(\d+)\+(\d+)\+(\d+)", geo)
+            if match:
+                w, h, x, y = map(int, match.groups())
+                self.page.window_width = w
+                self.page.window_height = h
+                self.page.window_left = x
+                self.page.window_top = y
+            
+            if self.config.get("window_maximized", False):
+                self.page.window_maximized = True
+        except Exception as e:
+            print(f"Error applying window geometry: {e}")
+
+    async def on_window_event(self, e):
+        if e.data == "close":
+            self.save_config()
+            await self.page.window.destroy()
+
+    def build_ui(self):
+        # --- Custom Top Menu Bar (Replacing AppBar for stability) ---
+        self.recent_files_submenu = ft.SubmenuButton(
+            content=ft.Text("Recent Files"),
+            controls=[] # Populated later
+        )
+        self.update_recent_files_menu()
+
+        self.menu_bar = ft.MenuBar(
+            expand=True,
+            style=ft.MenuStyle(
+                alignment=ft.Alignment(-1, -1),
+            ),
+            controls=[
+                ft.SubmenuButton(
+                    content=ft.Text("File"),
+                    controls=[
+                        ft.MenuItemButton(
+                            content=ft.Text("Open File..."),
+                            leading=ft.Icon(ft.Icons.FOLDER_OPEN),
+                            on_click=self.on_open_file_click
+                        ),
+                        self.recent_files_submenu,
+                                                        ft.MenuItemButton(
+                                                            content=ft.Text("Load Filters"),
+                                                            leading=ft.Icon(ft.Icons.FILE_OPEN_OUTLINED),
+                                                            on_click=self.import_tat_filters
+                                                        ),
+                                                        ft.MenuItemButton(
+                                                            content=ft.Text("Save Filters"),
+                                                            leading=ft.Icon(ft.Icons.SAVE),
+                                                            on_click=self.save_tat_filters
+                                                        ),                        ft.MenuItemButton(
+                            content=ft.Text("Exit"),
+                            leading=ft.Icon(ft.Icons.EXIT_TO_APP),
+                            on_click=self.exit_app
+                        )
+                    ]
+                ),
+                                        ft.SubmenuButton(
+                                            content=ft.Text("View"),
+                                            controls=[
+                                                ft.MenuItemButton(
+                                                    content=ft.Text("Toggle Sidebar"),
+                                                    on_click=lambda _: self.toggle_sidebar()
+                                                ),
+                                                ft.MenuItemButton(
+                                                    content=ft.Text("Toggle Dark/Light Mode"),
+                                                    on_click=self.toggle_theme
+                                                ),
+                                                ft.MenuItemButton(
+                                                    content=ft.Text("Show Filtered Only"),
+                                                    leading=ft.Icon(ft.Icons.FILTER_ALT),
+                                                    on_click=self.toggle_show_filtered
+                                                )
+                                            ]
+                                        )            ]
+        )
+
+        self.app_title_text = ft.Text("LogAnalyzer", weight=ft.FontWeight.BOLD, size=16)
+        
+        # Store the Row separately so we can reuse it during container reconstruction
+        self.top_bar_row = ft.Row([
+            ft.Container(content=ft.Icon(ft.Icons.ANALYTICS), padding=5),
+            self.app_title_text,
+            ft.VerticalDivider(width=10),
+            self.menu_bar
+        ], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+        # Initial creation
+        self.top_bar = self.create_top_bar()
+
+        # 1. Sidebar (Filters)
+        self.filter_list_view = ft.ListView(
+            expand=True, 
+            spacing=5, 
+            padding=5,
+            auto_scroll=False
+        )
+
+        self.add_filter_btn = ft.Button(
+            "Add Filter", 
+            icon=ft.Icons.ADD, 
+            on_click=self.on_add_filter_click
+        )
+
+        self.sidebar = ft.Container(
+            width=300, # Increased width for filters
+            bgcolor="#252526",
+            padding=10,
+            content=ft.Column([
+                ft.Text("Filters", size=20, weight=ft.FontWeight.BOLD),
+                self.add_filter_btn,
+                ft.Divider(),
+                self.filter_list_view,
+            ])
+        )
+        
+        # 2. Main Log Area (Center)
+        # Focus Trap: Invisible TextField to suck up all keyboard events and prevent Sidebar focus
+        self.focus_trap = ft.TextField(
+            width=0, height=0, opacity=0, 
+            on_submit=lambda _: None,
+            # No border/padding to make it truly invisible
+            border_color=ft.Colors.TRANSPARENT,
+            cursor_width=0
+        )
+        
+        # 2. Main Log Area (Center)
+        # 替代方案：手動輸入路徑 (Still kept as fallback in initial view)
+        self.path_input = ft.TextField(
+            label="Log File Path", 
+            width=400,
+            on_submit=self.on_path_submit
+        )
+        self.load_btn = ft.Button(
+            "Load File", 
+            icon="folder_open",
+            on_click=self.on_load_click
+        )
+        
+        self.top_controls = ft.Row([self.path_input, self.load_btn], alignment=ft.MainAxisAlignment.CENTER)
+
+        # --- Log View (Virtual Scroll) ---
+        self.LINES_PER_PAGE = 20  # Initial value, will be updated by on_resize
+        self.MAX_LOG_ROWS = 200   # Pre-allocate rows to avoid dynamic list modification crash
+        self.current_start_index = 0
+        
+        self.log_rows = []
+        self.log_text_controls = [] 
+        
+        for i in range(self.MAX_LOG_ROWS):
+            t = ft.Text(
+                value="", 
+                font_family="Consolas, monospace", 
+                size=12,
+                no_wrap=True,
+                color="#d4d4d4",
+                selectable=False,
+                visible=False,
+            )
+            self.log_text_controls.append(t)
+            
+            gd = ft.GestureDetector(
+                content=ft.Container(
+                    content=t, 
+                    padding=ft.Padding.only(left=5, right=5), 
+                    height=20, 
+                    alignment=ft.Alignment(-1, 0)
+                ),
+                on_tap=self.on_log_click,
+                on_secondary_tap=self.on_log_right_click,
+                data=i,
+            )
+            # Prevent rows from being focused by tab/arrows
+            gd.tab_index = -1
+            self.log_rows.append(gd)
+        
+        self.log_display_column = ft.GestureDetector(
+            content=ft.Column(
+                controls=self.log_rows,
+                spacing=0,
+                scroll=None, 
+                # Remove expand=True here to let children define height
+            ),
+            on_scroll=self.on_log_scroll,
+            expand=True
+        )
+        
+        # --- Custom Vertical Scrollbar ---
+        self.scrollbar_width = 15
+        self.scrollbar_thumb_height = 50 # Fixed height for now, or dynamic later
+        self.scrollbar_track_height = 0 # Will be updated on resize
+        self.thumb_top = 0.0
+        
+        self.scrollbar_thumb = ft.Container(
+            width=self.scrollbar_width,
+            height=self.scrollbar_thumb_height,
+            bgcolor="#555555",
+            border_radius=5,
+            top=0
+        )
+        
+        self.scrollbar_track = ft.Container(
+            width=self.scrollbar_width,
+            bgcolor="#2d2d2d",
+            expand=True, # Fill vertical space
+        )
+        
+        self.scrollbar_stack = ft.Stack(
+            controls=[
+                self.scrollbar_track,
+                self.scrollbar_thumb
+            ],
+            width=self.scrollbar_width,
+            expand=True
+        )
+        
+        self.scrollbar_gesture = ft.GestureDetector(
+            content=self.scrollbar_stack,
+            on_pan_update=self.on_scrollbar_drag,
+            on_tap_down=self.on_scrollbar_tap # Allow jumping to position
+        )
+
+        self.scrollbar_container = ft.Container(
+            content=self.scrollbar_gesture,
+            width=self.scrollbar_width,
+            bgcolor="#2d2d2d",
+            alignment=ft.Alignment(-1, -1)
+        )
+
+        # Log View Area (Container wrapping a Row)
+        self.log_view_area = ft.Container(
+            content=ft.Row(
+                controls=[
+                    self.log_display_column,
+                    self.scrollbar_container
+                ],
+                spacing=0,
+                expand=True,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+            ),
+            expand=True,
+            visible=False,
+            bgcolor=None # Remove debug color
+        )
+
+        self.initial_content = ft.Column(
+            [
+                ft.Icon(ft.Icons.ANALYTICS, size=80, color=ft.Colors.GREY_700),
+                ft.Text("LogAnalyzer", size=32, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_500),
+                ft.Text("Welcome to high-performance log analysis", size=16, color=ft.Colors.GREY_600),
+                ft.Container(height=20),
+                ft.Text("To get started:", size=14, color=ft.Colors.GREY_700),
+                ft.Row([
+                    ft.Icon(ft.Icons.FOLDER_OPEN, size=16, color=ft.Colors.BLUE_400),
+                    ft.Text("Go to File > Open File...", size=14, color=ft.Colors.GREY_600),
+                ], alignment=ft.MainAxisAlignment.CENTER),
+                ft.Text("or", size=12, color=ft.Colors.GREY_700),
+                ft.Text("Drag & Drop Log File Here", size=14, color=ft.Colors.GREY_600),
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            expand=True
+        )
+
+        self.log_area = ft.Column(
+            controls=[
+                self.initial_content,
+                self.log_view_area
+            ], 
+            spacing=0,
+            expand=True,
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER
+        )
+        
+        # --- Drag & Drop Support (Experimental for Flet 1.0) ---
+        # Note: Page.on_scroll or Page.on_drop may vary in Beta.
+        # We attempt to bind it here.
+        # self.page.on_drop = self.on_page_drop # Experimental
+        
+        # --- Keyboard & Resize Events ---
+        self.page.on_keyboard_event = self.on_keyboard
+        self.page.on_resize = self.on_resize
+        
+        # 3. Timeline (Right)
+        self.timeline = TimelineView(self, width=50)
+        self.timeline_area = ft.Container(
+            width=50, 
+            bgcolor="#2d2d2d",
+            content=self.timeline,
+            alignment=ft.Alignment(-1, -1)
+        )
+
+        # --- Search Bar (Find) ---
+        self.search_input = ft.TextField(
+            label="Find",
+            height=30,
+            text_size=12,
+            content_padding=5,
+            width=200,
+            on_submit=self.on_find_next,
+            border_color=ft.Colors.BLUE
+        )
+        self.search_results_count = ft.Text(value="0/0", size=12)
+        
+        async def toggle_case(e):
+            self.search_case_sensitive = not self.search_case_sensitive
+            e.control.style = ft.ButtonStyle(color=ft.Colors.BLUE if self.search_case_sensitive else ft.Colors.GREY)
+            e.control.update()
+            self.search_query = "" # Force re-search
+            await self.perform_search()
+
+        async def toggle_wrap(e):
+            self.search_wrap = not self.search_wrap
+            e.control.style = ft.ButtonStyle(color=ft.Colors.BLUE if self.search_wrap else ft.Colors.GREY)
+            e.control.update()
+
+        self.search_bar = ft.Container(
+            content=ft.Row([
+                self.search_input,
+                ft.IconButton(ft.Icons.ABC, tooltip="Match Case", icon_size=16, on_click=toggle_case, 
+                              style=ft.ButtonStyle(color=ft.Colors.GREY)),
+                ft.IconButton(ft.Icons.KEYBOARD_RETURN, tooltip="Wrap Around", icon_size=16, on_click=toggle_wrap,
+                              style=ft.ButtonStyle(color=ft.Colors.BLUE)),
+                ft.VerticalDivider(width=1),
+                ft.IconButton(ft.Icons.ARROW_UPWARD, icon_size=16, tooltip="Previous (F2 / Shift+F3)", on_click=self.on_find_prev),
+                ft.IconButton(ft.Icons.ARROW_DOWNWARD, icon_size=16, tooltip="Next (F3 / Enter)", on_click=self.on_find_next),
+                self.search_results_count,
+                ft.IconButton(ft.Icons.CLOSE, icon_size=16, on_click=self.hide_search_bar),
+            ], spacing=5),
+            bgcolor="#3c3c3c",
+            padding=5,
+            border_radius=5,
+            border=ft.Border.all(1, ft.Colors.BLUE_400), # Professional subtle border
+            visible=False, # Hidden by default
+            offset=ft.Offset(0, 0),
+            animate_offset=ft.Animation(300, ft.AnimationCurve.DECELERATE),
+        )
+
+        # 4. Status Bar (Bottom)
+        self.status_text = ft.Text("Ready", size=12)
+        self.status_bar = ft.Container(
+            height=30,
+            bgcolor="#007acc", # VS Code blue
+            padding=ft.Padding.only(left=10, right=10),
+            content=ft.Row([
+                self.status_text,
+            ], alignment=ft.MainAxisAlignment.START),
+            alignment=ft.Alignment(-1, 0)
+        )
+
+        # --- Main Layout Assembly ---
+        
+        # Wrap log area in a Stack to overlay the Search Bar
+        self.log_stack = ft.Stack([
+            self.log_area,
+            self.focus_trap, # Hidden focus trap
+            ft.Container(
+                content=self.search_bar,
+                top=10, right=20 # Position search bar top-right of log area
+            )
+        ], expand=True)
+
+        main_body = ft.Row(
+            controls=[
+                self.sidebar,
+                self.log_stack, # Use Stack here
+                self.timeline_area
+            ],
+            expand=True, # 讓這個 Row 佔滿高度 (扣除 Status Bar)
+            spacing=0
+        )
+        
+        self.page.add(
+            ft.Column([
+                self.top_bar, # Add Custom Top Bar here
+                main_body,
+                self.status_bar
+            ], expand=True, spacing=0)
+        )
+        self.page.update()
+
+    async def on_open_file_click(self, e):
+        # WORKAROUND: Using Tkinter native dialog because Flet 1.0 Beta FilePicker 
+        # is currently unstable/unrecognized in this specific environment.
+        import tkinter as tk
+        from tkinter import filedialog
+        
+        def pick_file_sync():
+            try:
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes('-topmost', True) # Force to front
+                path = filedialog.askopenfilename(
+                    title="Select Log File (Flet 1.0 Workaround)",
+                    initialdir=self.config.get("last_log_dir", os.path.expanduser("~")),
+                    filetypes=[("Log Files", "*.log;*.txt;*.tat"), ("All Files", "*.*")]
+                )
+                root.destroy()
+                return path
+            except Exception as ex:
+                print(f"DEBUG: Tkinter Workaround Error: {ex}")
+                return None
+            
+        # Per Flet Development Guide 3.1: Use asyncio.to_thread for blocking tasks
+        file_path = await asyncio.to_thread(pick_file_sync)
+        
+        if file_path:
+            self.config["last_log_dir"] = os.path.dirname(file_path)
+            self.path_input.value = file_path
+            await self.load_file(file_path)
+
+    async def exit_app(self, e):
+        await self.page.window.destroy()
+
+    def update_recent_files_menu(self):
+        recent = self.config.get("recent_files", [])
+        self.recent_files_submenu.controls.clear()
+        
+        if not recent:
+             self.recent_files_submenu.controls.append(
+                 ft.MenuItemButton(content=ft.Text("No recent files"), disabled=True)
+             )
+        else:
+            for path in recent:
+                # Capture path in default arg to avoid lambda binding issue
+                def open_recent(e, p=path):
+                    self.path_input.value = p # Sync to input
+                    asyncio.create_task(self.load_file(p))
+                    
+                self.recent_files_submenu.controls.append(
+                    ft.MenuItemButton(
+                        content=ft.Text(os.path.basename(path)),
+                        leading=ft.Icon(ft.Icons.DESCRIPTION),
+                        on_click=open_recent
+                    )
+                )
+
+    def add_to_recent_files(self, path):
+        recent = self.config.get("recent_files", [])
+        # Remove if exists to move to top
+        if path in recent:
+            recent.remove(path)
+        recent.insert(0, path)
+        # Limit to 10
+        if len(recent) > 10:
+            recent = recent[:10]
+        self.config["recent_files"] = recent
+        self.update_recent_files_menu()
+
+    async def import_tat_filters(self, e=None):
+        import tkinter as tk
+        from tkinter import filedialog
+        import xml.etree.ElementTree as ET
+        
+        def ask_file():
+            root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
+            path = filedialog.askopenfilename(
+                title="Import TAT Filters",
+                initialdir=self.config.get("last_filter_dir", "."),
+                filetypes=[("TextAnalysisTool", "*.tat"), ("All Files", "*.*")]
+            )
+            root.destroy(); return path
+            
+        path = await asyncio.to_thread(ask_file)
+        if not path: return
+        
+        try:
+            tree = ET.parse(path)
+            root = tree.getroot()
+            new_filters = []
+            
+            # Find all filter tags regardless of case or nesting
+            for f_node in root.iter():
+                if f_node.tag.lower() == 'filter':
+                    # Extract attributes with broad compatibility
+                    en = f_node.get('enabled', 'y').lower() == 'y'
+                    reg = f_node.get('regex', 'n').lower() == 'y'
+                    
+                    # Handle both 'exclude' and 'excluding'
+                    exc = (f_node.get('exclude', 'n').lower() == 'y') or \
+                          (f_node.get('excluding', 'n').lower() == 'y')
+                    
+                    # Colors (handle missing attributes)
+                    fg = f_node.get('foreColor', '000000')
+                    bg = f_node.get('backColor', 'ffffff')
+                    if not fg.startswith("#"): fg = "#" + fg
+                    if not bg.startswith("#"): bg = "#" + bg
+                    
+                    # Handle text as attribute OR node text
+                    text = f_node.get('text')
+                    if text is None:
+                        text = f_node.text if f_node.text else ""
+                    
+                    new_filters.append(Filter(text, fg, bg, en, reg, exc))
+            
+            if not new_filters:
+                self.page.snack_bar = ft.SnackBar(ft.Text("No filters found in file."))
+            else:
+                self.filters.extend(new_filters)
+                await self.render_filters()
+                await self.apply_filters()
+                self.config["last_filter_dir"] = os.path.dirname(path)
+                self.page.snack_bar = ft.SnackBar(ft.Text(f"Imported {len(new_filters)} filters."))
+            
+            self.page.snack_bar.open = True
+            self.page.update()
+        except Exception as ex:
+            print(f"Import Error: {ex}")
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Error importing filters: {ex}"))
+            self.page.snack_bar.open = True
+            self.page.update()
+
+    async def save_tat_filters(self, e=None):
+        import tkinter as tk
+        from tkinter import filedialog
+        
+        if not self.filters:
+            self.page.snack_bar = ft.SnackBar(ft.Text("No filters to save."))
+            self.page.snack_bar.open = True; self.page.update(); return
+
+        def ask_save():
+            root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
+            path = filedialog.asksaveasfilename(
+                title="Save Filters As",
+                defaultextension=".tat",
+                initialdir=self.config.get("last_filter_dir", "."),
+                filetypes=[("TextAnalysisTool", "*.tat")]
+            )
+            root.destroy(); return path
+            
+        path = await asyncio.to_thread(ask_save)
+        if not path: return
+        
+        try:
+            xml_content = '<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<TextAnalysisTool.NET>\n'
+            for f in self.filters:
+                xml_content += f"  {f.to_tat_xml()}\n"
+            xml_content += "</TextAnalysisTool.NET>"
+            
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(xml_content)
+            
+            self.config["last_filter_dir"] = os.path.dirname(path)
+            self.page.snack_bar = ft.SnackBar(ft.Text("Filters saved successfully."))
+            self.page.snack_bar.open = True; self.page.update()
+        except Exception as ex:
+            print(f"Save Error: {ex}")
+
+    def toggle_sidebar(self):
+        self.sidebar.visible = not self.sidebar.visible
+        self.page.update()
+
+    async def on_page_drop(self, e: ft.DragUpdateEvent):
+        # Experimental handler for OS file drops
+        # In Flet 1.0 Beta, e.src might contain paths or e.files (if added to page)
+        print(f"DEBUG: Drop event detected: {e.data}")
+        # Workaround for path extraction if possible
+        # ... implementation will depend on Flet actual support ...
+
+    def create_top_bar(self):
+        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+        bg_color = "#202020" if is_dark else "#f3f3f3"
+        text_color = "#d4d4d4" if is_dark else "#000000"
+        
+        # Re-apply style to MenuBar
+        self.menu_bar.style = ft.MenuStyle(
+            bgcolor=bg_color,
+            alignment=ft.Alignment(-1, -1),
+        )
+        
+        # Update components in-place for the MenuBar
+        self.app_title_text.color = text_color
+        for control in self.top_bar_row.controls:
+            if isinstance(control, ft.Icon):
+                control.color = text_color
+            elif isinstance(control, ft.VerticalDivider):
+                control.color = ft.Colors.with_opacity(0.2, text_color)
+
+        return ft.Container(
+            content=self.top_bar_row,
+            bgcolor=bg_color,
+            padding=5,
+            height=40
+        )
+
+    async def toggle_theme(self, e):
+        import ctypes
+        import ctypes.wintypes
+        
+        if self.page.theme_mode == ft.ThemeMode.DARK:
+            self.page.theme_mode = ft.ThemeMode.LIGHT
+            sidebar_bg = "#ffffff"
+            search_bg = "#ffffff"
+            text_color = "#000000"
+            scrollbar_track_color = "#f0f0f0"
+            scrollbar_thumb_color = "#c1c1c1"
+            win_dark_value = 0 
+        else:
+            self.page.theme_mode = ft.ThemeMode.DARK
+            sidebar_bg = "#252526"
+            search_bg = "#3c3c3c"
+            text_color = "#d4d4d4"
+            scrollbar_track_color = "#2d2d2d"
+            scrollbar_thumb_color = "#555555"
+            win_dark_value = 1
+            
+        # Update Page and basic components
+        self.page.bgcolor = sidebar_bg
+
+        # --- Native Windows Title Bar Sync ---
+        if sys.platform == "win32":
+            try:
+                hwnd = ctypes.windll.user32.GetForegroundWindow()
+                if hwnd:
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(ctypes.c_int(win_dark_value)), 4)
+            except Exception: pass
+
+        # Update Sidebar & Others
+        self.sidebar.bgcolor = sidebar_bg
+        self.timeline.bgcolor = sidebar_bg
+        self.search_bar.bgcolor = search_bg
+        self.search_input.color = text_color
+        self.search_results_count.color = text_color
+        
+        # Re-generate Top Bar (The "Magic" fix)
+        new_top_bar = self.create_top_bar()
+        
+        # Find the main column and swap the top bar
+        # Structure: page -> Column -> [top_bar, main_body, status_bar]
+        main_column = self.page.controls[0]
+        main_column.controls[0] = new_top_bar
+        self.top_bar = new_top_bar # Update reference
+        
+        # Update Scrollbar Colors
+        self.scrollbar_track.bgcolor = scrollbar_track_color
+        self.scrollbar_thumb.bgcolor = scrollbar_thumb_color
+        
+        # Update existing text controls
+        for t in self.log_text_controls:
+            if t.color in ["#d4d4d4", "#1e1e1e", "#000000"]:
+                t.color = text_color
+        
+        # Redraw timeline with new theme colors
+        self.timeline.draw()
+        
+        # Light-weight color update for filters instead of full re-render
+        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+        for i, f in enumerate(self.filters):
+            # Access the Row container from filter_list_view
+            if i < len(self.filter_list_view.controls):
+                item_row_gesture = self.filter_list_view.controls[i]
+                # GestureDetector -> Row -> [Checkbox, Container(Label), Badge]
+                item_row = item_row_gesture.content
+                lbl_container = item_row.controls[1]
+                lbl_text = lbl_container.content
+                
+                # Re-adjust colors
+                adj_bg = adjust_color_for_theme(f.back_color, True, is_dark)
+                adj_fg = adjust_color_for_theme(f.fore_color, False, is_dark)
+                
+                lbl_container.bgcolor = adj_bg
+                lbl_text.color = adj_fg
+                lbl_container.border = ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE) if is_dark else ft.Colors.with_opacity(0.2, ft.Colors.BLACK))
+
+        self.update_log_view()
+                
+        self.page.update()
+        # Safety delay to let client catch up before next interactions
+        await asyncio.sleep(0.1)
+        self.page.update()
+
+
+    async def show_search_bar(self):
+        # print("DEBUG: show_search_bar called")
+        self.search_bar.visible = True
+        self.page.update() # First update to make it visible
+        
+        # Then focus
+        try:
+            await self.search_input.focus()
+        except Exception as e:
+            print(f"DEBUG: Focus error: {e}")
+            
+        self.page.update() # Second update to ensure focus state is rendered
+        # print("DEBUG: search_bar should be visible now")
+
+    async def hide_search_bar(self, e=None):
+        self.search_bar.visible = False
+        self.search_results = []
+        self.current_search_idx = -1
+        self.update_log_view()
+        self.page.update()
+
+    async def on_find_next(self, e=None):
+        await self.perform_search(backward=False)
+
+    async def on_find_prev(self, e=None):
+        await self.perform_search(backward=True)
+
+    async def perform_search(self, backward=False):
+        if not self.log_engine: return
+        
+        query = self.search_input.value
+        if not query:
+            self.search_results = []
+            self.current_search_idx = -1
+            self.update_log_view()
+            return
+
+        # If query or case-sensitivity changed, perform a new global search
+        if query != self.search_query:
+            self.search_query = query
+            # Call Rust engine search (returns list of raw indices)
+            self.search_results = await asyncio.to_thread(
+                self.log_engine.search, query, False, self.search_case_sensitive
+            )
+            self.current_search_idx = -1
+            # print(f"DEBUG: Found {len(self.search_results)} search results")
+
+        if not self.search_results:
+            self.update_results_count("0/0")
+            self.status_text.value = f"No results for '{query}'"
+            self.page.update()
+            return
+
+        # Navigation logic with Wrap Around support
+        old_idx = self.current_search_idx
+        
+        if backward:
+            if self.current_search_idx <= 0:
+                if self.search_wrap:
+                    self.current_search_idx = len(self.search_results) - 1
+                else:
+                    self.status_text.value = "Reached Top"
+                    self.page.update()
+                    return
+            else:
+                self.current_search_idx -= 1
+        else:
+            if self.current_search_idx >= len(self.search_results) - 1:
+                if self.search_wrap:
+                    self.current_search_idx = 0
+                else:
+                    self.status_text.value = "Reached Bottom"
+                    self.page.update()
+                    return
+            else:
+                self.current_search_idx += 1
+
+        self.update_results_count(f"{self.current_search_idx + 1}/{len(self.search_results)}")
+        
+        # Jump to the search result
+        target_raw_idx = self.search_results[self.current_search_idx]
+        
+        # Sync selection with search result
+        self.selected_indices = {target_raw_idx}
+        self.selection_anchor = target_raw_idx
+        
+        # We need to find the filtered index corresponding to this raw index
+        target_view_idx = self._get_view_index_from_raw(target_raw_idx)
+        
+        # If the search result is filtered out, we jump to the nearest visible line?
+        # For now, if view_idx is None, we stay at current position but select it
+        if target_view_idx is not None:
+            self.jump_to_index(target_view_idx, update_slider=True)
+        else:
+            self.status_text.value = f"Result on line {target_raw_idx+1} is filtered out."
+            self.page.update()
+
+    def update_results_count(self, text):
+        self.search_results_count.value = text
+        self.page.update()
+
+    async def on_log_scroll(self, e: ft.ScrollEvent):
+        if not self.log_engine: return
+        
+        # Throttling: Limit updates to ~30 FPS (0.033s)
+        current_time = time.time()
+        if current_time - self.last_render_time < 0.03:
+            return
+        
+        delta = e.scroll_delta.y
+        step = 3 if abs(delta) < 100 else 10 # Variable step based on speed
+        
+        if delta > 0:
+            new_idx = self.current_start_index + step
+        elif delta < 0:
+            new_idx = self.current_start_index - step
+        else:
+            return
+            
+        self.last_render_time = current_time
+        self.jump_to_index(int(new_idx), update_slider=True)
+
+    def update_log_view(self):
+        """從 Engine 獲取當前視窗的數據並更新 UI"""
+        if not self.log_engine: return
+            
+        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+        
+        # PRE-CALCULATE filter colors
+        filter_color_cache = {}
+        active_filters_objs = []
+        if self.filters:
+            for f in self.filters:
+                if f.enabled and f.text:
+                    active_filters_objs.append(f)
+                    idx = len(active_filters_objs) - 1
+                    filter_color_cache[idx] = (
+                        adjust_color_for_theme(f.back_color, True, is_dark),
+                        adjust_color_for_theme(f.fore_color, False, is_dark)
+                    )
+
+        search_query = self.search_input.value.lower() if (self.search_bar.visible and self.search_input.value) else None
+        
+        if self.show_only_filtered and self.filtered_indices is not None:
+            total_items = len(self.filtered_indices)
+        else:
+            total_items = self.log_engine.line_count()
+
+        for i in range(self.MAX_LOG_ROWS):
+            # 1. Viewport boundary check
+            if i >= self.LINES_PER_PAGE:
+                self.log_rows[i].visible = False
+                self.log_text_controls[i].visible = False
+                continue
+
+            # 2. Data mapping
+            view_idx = self.current_start_index + i
+            if 0 <= view_idx < total_items:
+                real_idx = self.filtered_indices[view_idx] if (self.show_only_filtered and self.filtered_indices is not None) else view_idx
+                line_data = self.log_engine.get_line(real_idx)
+                
+                # Base colors
+                base_color = "#d4d4d4" if is_dark else "#1e1e1e"
+                if "[ERROR]" in line_data: base_color = "#ff6b6b"
+                elif "[WARN]" in line_data: base_color = "#ffd93d"
+                elif "[INFO]" in line_data: base_color = "#4dabf7"
+                
+                bg_color = None
+                if self.line_tags_codes is not None and real_idx < len(self.line_tags_codes):
+                    tag_code = self.line_tags_codes[real_idx]
+                    if tag_code >= 2: 
+                        af_idx = tag_code - 2
+                        if af_idx in filter_color_cache:
+                            bg_color, base_color = filter_color_cache[af_idx]
+                    elif tag_code == 1:
+                        base_color = ft.Colors.GREY_500 if is_dark else ft.Colors.GREY_400
+                
+                target_row_bg = bg_color
+                if real_idx in self.selected_indices:
+                    target_row_bg = "#264f78" if is_dark else "#b3d7ff"
+
+                # Text & Spans (Search Highlighting)
+                if search_query and search_query in line_data.lower():
+                    h_bg = ft.Colors.YELLOW
+                    h_fg = ft.Colors.BLACK
+                    if bg_color and get_luminance(bg_color) > 0.6:
+                        h_bg = ft.Colors.BLUE_800
+                        h_fg = ft.Colors.WHITE
+                    
+                    parts = re.split(f"({re.escape(search_query)})", line_data, flags=re.IGNORECASE)
+                    self.log_text_controls[i].spans = [
+                        ft.TextSpan(p, style=ft.TextStyle(bgcolor=h_bg, color=h_fg, weight=ft.FontWeight.BOLD)) 
+                        if p.lower() == search_query else ft.TextSpan(p) for p in parts
+                    ]
+                    self.log_text_controls[i].value = None
+                else:
+                    self.log_text_controls[i].value = line_data
+                    self.log_text_controls[i].spans = []
+                
+                # Force apply all properties to ensure client sync
+                self.log_text_controls[i].color = base_color
+                self.log_text_controls[i].visible = True
+                self.log_rows[i].visible = True
+                self.log_rows[i].content.bgcolor = target_row_bg
+                self.log_rows[i].data = i
+            else:
+                # Outside file bounds
+                self.log_rows[i].visible = False
+                self.log_text_controls[i].visible = False
+
+
+
+        
+        # REMOVED page.update() here, it's now in the render_loop
+
+
+
+        
+        # 效能監控 (可選)
+        # print(f"Render frame took: {(time.time() - t_start)*1000:.2f}ms")
+
+    def jump_to_index(self, idx, update_slider=True):
+        if not self.log_engine:
+            return
+
+        print(f"DEBUG: jump_to_index: requested idx={idx}, current_start_index_before={self.current_start_index}")
+        
+        # Determine total items based on filter state
+        total_items = len(self.filtered_indices) if self.filtered_indices is not None else self.log_engine.line_count()
+
+        # 邊界檢查
+        if idx < 0: idx = 0
+        max_idx = max(0, total_items - self.LINES_PER_PAGE)
+        if idx > max_idx: idx = max_idx
+        
+        self.current_start_index = idx
+        
+        # Update Slider if requested
+        if update_slider:
+            self.last_slider_update = time.time()
+            self.sync_scrollbar_position()
+            
+        print(f"DEBUG: jump_to_index: current_start_index_after={self.current_start_index}")
+        self.update_log_view()
+
+    async def on_slider_change(self, e):
+        # Time-based debounce is still useful but less critical if we don't update slider
+        if time.time() - self.last_slider_update < 0.1:
+             # print("DEBUG: Ignored slider echo event")
+             return
+            
+        if self.is_programmatic_scroll:
+            return
+            
+        # Don't update slider because it's the source of truth right now
+        self.jump_to_index(int(e.control.value), update_slider=False)
+
+    async def on_keyboard(self, e: ft.KeyboardEvent):
+        # print(f"DEBUG: Key pressed: {e.key}") # Debug key codes
+        if not self.log_engine:
+            return
+
+        # Determine total items based on current view
+        if self.show_only_filtered and self.filtered_indices is not None:
+            total_items = len(self.filtered_indices)
+        else:
+            total_items = self.log_engine.line_count()
+        
+        if total_items == 0: return
+
+        # Search Shortcuts
+        if e.ctrl and e.key.lower() == "f":
+            await self.show_search_bar()
+            return
+        if e.ctrl and e.key.lower() == "h":
+            await self.toggle_show_filtered()
+            return
+        if e.key == "Escape":
+            await self.hide_search_bar()
+            return
+        if e.key == "F2":
+            await self.perform_search(backward=True)
+            return
+        if e.key == "F3":
+            await self.perform_search(backward=e.shift)
+            return
+        if e.key == "Enter" and self.search_bar.visible:
+            await self.perform_search(backward=e.shift)
+            return
+
+        # --- Selection-based Navigation ---
+        # Find current view index of the anchor
+        current_view_idx = self._get_view_index_from_raw(self.selection_anchor)
+        if current_view_idx is None: current_view_idx = 0
+        
+        new_view_idx = current_view_idx
+
+        if e.key in ["ArrowDown", "Arrow Down"]:
+            new_view_idx = current_view_idx + 1
+        elif e.key in ["ArrowUp", "Arrow Up"]:
+            new_view_idx = current_view_idx - 1
+        elif e.key in ["PageDown", "Page Down", "Next"]:
+            new_view_idx = current_view_idx + self.LINES_PER_PAGE
+        elif e.key in ["PageUp", "Page Up", "Prior"]:
+            new_view_idx = current_view_idx - self.LINES_PER_PAGE
+        elif e.key == "Home": 
+            new_view_idx = 0
+        elif e.key == "End": 
+            new_view_idx = total_items - 1
+        else:
+            return
+
+        # Clamp range
+        new_view_idx = max(0, min(new_view_idx, total_items - 1))
+        
+        print(f"DEBUG: Navigating to ViewIdx: {new_view_idx}, Total: {total_items}, ViewportLines: {self.LINES_PER_PAGE}, CurrentStart: {self.target_start_index}")
+        
+        # Map back to raw index for selection
+        if self.show_only_filtered and self.filtered_indices is not None:
+            new_raw_idx = self.filtered_indices[new_view_idx]
+        else:
+            new_raw_idx = new_view_idx
+
+        # Update Selection
+        self.selected_indices = {new_raw_idx}
+        self.selection_anchor = new_raw_idx
+        
+        # --- Sync Viewport (Scroll to follow selection) ---
+        # Using target_start_index for more consistent logic with render_loop
+        if new_view_idx < self.target_start_index:
+            # Scroll up to show the new line at the top
+            self.jump_to_index(new_view_idx)
+        elif new_view_idx >= self.target_start_index + self.LINES_PER_PAGE:
+            # Scroll down to show the new line at the bottom
+            self.jump_to_index(new_view_idx - self.LINES_PER_PAGE + 1)
+        else:
+            # Selection is within viewport, but we still need to redraw the highight
+            self.needs_render = True
+
+
+
+    async def on_page_scroll(self, e: ft.ScrollEvent):
+        # Flet page scroll event
+        # Only works if page is scrollable? No, usually works globally if handled.
+        # Check if we should scroll the log
+        if not self.log_engine:
+            return
+            
+        # Adjust sensitivity
+        step = 3
+        
+        # e.scroll_delta_y might be pixels, so we need to threshold it
+        if e.scroll_delta_y > 0:
+            new_idx = self.current_start_index + step
+        elif e.scroll_delta_y < 0:
+            new_idx = self.current_start_index - step
+        else:
+            return
+            
+        self.jump_to_index(int(new_idx), update_slider=True)
+
+    async def on_log_scroll(self, e: ft.ScrollEvent):
+        # Handle mouse wheel scrolling via GestureDetector
+        if not self.log_engine:
+            return
+            
+        # Adjust sensitivity (lines per scroll step)
+        step = 3
+        
+        # e.scroll_delta_y: positive = scroll up (content moves down), negative = scroll down?
+        # Typically:
+        # Wheel Down -> delta_y > 0 -> We want to see next lines -> Index Increase
+        # Wheel Up -> delta_y < 0 -> We want to see prev lines -> Index Decrease
+        
+        # Note: Flet/Flutter scroll delta direction might vary.
+        # Let's assume standard: delta > 0 means scrolling down (content moves up)
+        
+        # Based on API Ref: scroll_delta is an Offset object
+        delta = e.scroll_delta.y
+        
+        if delta > 0:
+            new_idx = self.current_start_index + step
+        elif delta < 0:
+            new_idx = self.current_start_index - step
+        else:
+            return
+            
+        self.jump_to_index(int(new_idx), update_slider=True)
+
+    async def on_resize(self, e):
+        # Update scrollbar track height info
+        if self.page.height:
+            # We need the full height of the log_view_area for the scrollbar track
+            # Estimated track height = Page Height - Status Bar Height - Top Input Controls Height
+            # The height of the log_view_area (excluding sidebar and timeline)
+            # Use a larger margin (100px) to account for all UI decorations safely
+            is_initial = self.initial_content.visible
+            status_h = self.status_bar.height if self.status_bar.height else 30
+            menu_h = self.top_bar.height if self.top_bar.height else 40
+            top_controls_h = (self.top_controls.height if self.top_controls.height else 50) if is_initial else 0
+            
+            # Safe margin for OS title bar and internal spacing
+            # Since we use fixed height rows, we can be much more precise.
+            self.scrollbar_track_height = self.page.height - top_controls_h - status_h - menu_h
+            
+            # Dynamic LINES_PER_PAGE
+            line_height = 20 # Matches the Container height set in build_ui
+            if self.scrollbar_track_height > 0:
+                # Calculate exactly how many 20px rows fit in the track
+                # Subtract a small safety margin (5px) for the entire column
+                new_lines_per_page = int((self.scrollbar_track_height - 5) / line_height)
+                # Clamp
+                new_lines_per_page = max(10, min(new_lines_per_page, self.MAX_LOG_ROWS))
+                
+                if new_lines_per_page != self.LINES_PER_PAGE:
+                    self.LINES_PER_PAGE = new_lines_per_page
+                    self.update_log_view()
+
+            # Re-sync thumb position based on new track height
+            self.sync_scrollbar_position()
+            
+            # Sync Timeline height
+            self.timeline.set_height(self.scrollbar_track_height)
+            
+        self.page.update()
+
+    async def on_scrollbar_drag(self, e: ft.DragUpdateEvent):
+        # Update thumb position visually
+        # e.delta_y might be missing in 0.80.0, use local_delta.y
+        # delta = e.local_delta.y if hasattr(e, 'local_delta') else e.delta_y # Fallback just in case
+        delta = get_event_prop(e, 'delta_y', default=0)
+        
+        self.thumb_top += delta
+        
+        # Clamp position
+        max_top = self.scrollbar_track_height - self.scrollbar_thumb_height
+        if max_top < 0: max_top = 0
+        
+        self.thumb_top = max(0.0, min(self.thumb_top, max_top))
+        self.scrollbar_thumb.top = self.thumb_top
+        self.scrollbar_thumb.update() # Fast local update
+        
+        # Calculate index
+        if max_top > 0:
+            percentage = self.thumb_top / max_top
+            
+            # Total lines
+            total_items = len(self.filtered_indices) if self.filtered_indices is not None else (self.log_engine.line_count() if self.log_engine else 0)
+            max_idx = max(0, total_items - self.LINES_PER_PAGE)
+            
+            new_idx = int(percentage * max_idx)
+            # Update log view (don't update scrollbar back to avoid jitter)
+            self.jump_to_index(new_idx, update_slider=False)
+    
+    async def on_scrollbar_tap(self, e: ft.TapEvent):
+        # Jump to position
+        # e.local_y replaced by e.local_position.y in 0.80.0
+        # local_y = e.local_position.y
+        local_y = get_event_prop(e, 'local_y', default=0)
+        
+        click_y = local_y - (self.scrollbar_thumb_height / 2) # Center thumb on click
+        
+        max_top = self.scrollbar_track_height - self.scrollbar_thumb_height
+        if max_top <= 0: return
+
+        self.thumb_top = max(0.0, min(click_y, max_top))
+        self.scrollbar_thumb.top = self.thumb_top
+        # self.scrollbar_thumb.update()
+        
+        percentage = self.thumb_top / max_top
+        total_items = len(self.filtered_indices) if self.filtered_indices is not None else (self.log_engine.line_count() if self.log_engine else 0)
+        max_idx = max(0, total_items - self.LINES_PER_PAGE)
+        new_idx = int(percentage * max_idx)
+        
+        self.jump_to_index(new_idx, update_slider=True) # Tap should snap
+
+    def sync_scrollbar_position(self):
+        if not self.log_engine: return
+        
+        total_items = len(self.filtered_indices) if self.filtered_indices is not None else self.log_engine.line_count()
+        max_idx = max(0, total_items - self.LINES_PER_PAGE)
+        if max_idx <= 0:
+            self.thumb_top = 0
+            self.scrollbar_thumb.top = 0
+            return
+
+        percentage = self.current_start_index / max_idx
+        max_top = self.scrollbar_track_height - self.scrollbar_thumb_height
+        if max_top < 0: max_top = 0
+        
+        self.thumb_top = percentage * max_top
+        self.scrollbar_thumb.top = self.thumb_top
+        # print(f"DEBUG: Sync Scrollbar: idx={self.current_start_index}, max_idx={max_idx}, track={self.scrollbar_track_height}, thumb_top={self.thumb_top}")
+        # Explicitly update thumb to ensure visual sync if page.update misses it?
+        # self.scrollbar_thumb.update()
+
+    async def render_loop(self):
+        """Background task that polls for index changes and updates UI at 30fps."""
+        while True:
+            try:
+                # Trigger update if index changed OR needs_render was requested
+                if self.needs_render or self.current_start_index != self.target_start_index:
+                    self.current_start_index = self.target_start_index
+                    self.update_log_view()
+                    self.sync_scrollbar_position()
+                    self.timeline.update_scroll(self.current_start_index)
+                    self.page.update()
+                    self.needs_render = False # Reset flag
+                
+                await asyncio.sleep(0.033) # ~30 FPS
+            except Exception as e:
+                print(f"Render Loop Error: {e}")
+                await asyncio.sleep(1)
+
+    def jump_to_index(self, idx, update_slider=True):
+        if not self.log_engine:
+            return
+
+        # Determine total items based on filter state
+        if self.show_only_filtered and self.filtered_indices is not None:
+            total_items = len(self.filtered_indices)
+        else:
+            total_items = self.log_engine.line_count()
+
+        # 邊界檢查
+        if idx < 0: idx = 0
+        max_idx = max(0, total_items - self.LINES_PER_PAGE)
+        if idx > max_idx: idx = max_idx
+        
+        # Only update the target, the loop will handle the rest
+        self.target_start_index = idx
+
+    async def on_slider_change(self, e):
+        pass
+
+    async def toggle_show_filtered(self, e=None):
+        self.show_only_filtered = not self.show_only_filtered
+        self.page.snack_bar = ft.SnackBar(ft.Text(f"Mode: {'Filtered Only' if self.show_only_filtered else 'Full View'}"))
+        self.page.snack_bar.open = True
+        self.current_start_index = 0 # Reset to top
+        self.update_log_view()
+        self.sync_scrollbar_position()
+        self.page.update()
+
+    async def apply_filters(self):
+        if not self.log_engine:
+            return
+
+        # 收集啟用的 Filters
+        # Format: (text, is_regex, is_exclude, is_event, original_index)
+        active_filters = []
+        # Mapping from active_index to original_index to update hit counts later
+        active_map = [] 
+
+        for i, f in enumerate(self.filters):
+            # Reset hit count for display
+            f.hit_count = 0
+            if f.enabled and f.text:
+                active_filters.append((f.text, f.is_regex, f.is_exclude, f.is_event, i))
+                active_map.append(i)
+
+        if not active_filters:
+            self.filtered_indices = None
+            self.line_tags_codes = None # Clear tags
+            total_count = self.log_engine.line_count()
+            # Still update timeline to empty? or full? usually clear timeline if no filters
+            self.timeline.update_data([], total_count)
+        else:
+            # Call Engine Filter (Run in thread to avoid freezing)
+            self.status_text.value = "Filtering..."
+            self.page.update()
+            
+            try:
+                # 這裡假設 filter 是同步的，如果是 Rust 引擎會很快，但如果很大，最好用 run_in_executor
+                # MockEngine.filter is synchronous
+                # Rust log_engine.filter is synchronous (releasing GIL)
+                
+                # We wrap it in to_thread just in case
+                import asyncio
+                results = await asyncio.to_thread(self.log_engine.filter, active_filters)
+                
+                # Unpack results: (line_tags, filtered_indices, hit_counts, timeline_events)
+                self.line_tags_codes, self.filtered_indices, hit_counts, timeline_events = results
+                total_count = len(self.filtered_indices)
+                
+                # Pass RAW total lines for timeline normalization
+                raw_count = self.log_engine.line_count()
+                self.timeline.update_data(timeline_events, raw_count)
+                
+                # Update hit counts on Filter objects
+                for idx, count in enumerate(hit_counts):
+                    if idx < len(active_map):
+                        original_idx = active_map[idx]
+                        self.filters[original_idx].hit_count = count
+                
+                # Refresh filter list to show new counts
+                await self.render_filters()
+                
+            except Exception as e:
+                print(f"Filter Error: {e}")
+                import traceback
+                traceback.print_exc()
+                self.filtered_indices = None
+                total_count = self.log_engine.line_count()
+                self.timeline.update_data([], total_count) # Clear timeline on error
+
+        # Update Custom Scrollbar Max
+        # self.scroll_slider.max = max(0, total_count - self.LINES_PER_PAGE) # No longer needed
+        self.current_start_index = 0
+        self.jump_to_index(0, update_slider=True) # Reset scroll to top and update thumb
+        
+        mode = "Showing" if self.show_only_filtered else "Total"
+        count = total_count if self.show_only_filtered else self.log_engine.line_count()
+        self.status_text.value = f"{mode} {count} lines"
+        
+        # Trigger the render loop to refresh log view with new filter results
+        self.needs_render = True
+        self.page.update()
+        # self.update_log_view() # jump_to_index already calls update_log_view
+
+    async def on_add_filter_click(self, e):
+        # Instead of adding directly, open the dialog
+        await self.open_filter_dialog()
+
+    async def open_filter_dialog(self, filter_obj=None):
+        # Create a temporary state for the dialog
+        is_new = filter_obj is None
+        d_text = filter_obj.text if not is_new else ""
+        d_fore = filter_obj.fore_color if not is_new else "#FFFFFF"
+        d_back = filter_obj.back_color if not is_new else "#000000"
+        d_regex = filter_obj.is_regex if not is_new else False
+        d_exclude = filter_obj.is_exclude if not is_new else False
+
+        # Dialog controls
+        txt_pattern = ft.TextField(label="Pattern", value=d_text, autofocus=True, expand=True)
+        sw_regex = ft.Switch(label="Regex", value=d_regex)
+        sw_exclude = ft.Switch(label="Exclude", value=d_exclude)
+        
+        # Simple color presets (Matching loganalyzer.py common colors)
+        colors = ["#000000", "#FFFFFF", "#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#00FFFF", 
+                  "#800000", "#008000", "#000080", "#808000", "#800080", "#008080", "#C0C0C0", "#808080"]
+        
+        selected_fg = d_fore
+        selected_bg = d_back
+
+        def update_preview():
+            is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+            adj_bg = adjust_color_for_theme(selected_bg, True, is_dark)
+            adj_fg = adjust_color_for_theme(selected_fg, False, is_dark)
+            preview.bgcolor = adj_bg
+            preview.content.color = adj_fg
+            preview.update()
+
+        def set_fg(color):
+            nonlocal selected_fg
+            selected_fg = color
+            update_preview()
+
+        def set_bg(color):
+            nonlocal selected_bg
+            selected_bg = color
+            update_preview()
+
+        preview = ft.Container(
+            content=ft.Text("Preview Text", color=adjust_color_for_theme(selected_fg, False, self.page.theme_mode == ft.ThemeMode.DARK), weight=ft.FontWeight.BOLD),
+            bgcolor=adjust_color_for_theme(selected_bg, True, self.page.theme_mode == ft.ThemeMode.DARK),
+            padding=10,
+            border_radius=5,
+            alignment=ft.Alignment(0, 0)
+        )
+
+        def build_color_grid(on_click_func, is_bg_selection):
+            is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+            return ft.Row([
+                ft.Container(
+                    width=24, height=24, 
+                    # Show the adjusted color in the palette so it matches preview
+                    bgcolor=adjust_color_for_theme(c, is_bg_selection, is_dark), 
+                    border_radius=3,
+                    border=ft.Border.all(1, ft.Colors.GREY_400),
+                    tooltip=f"Original: {c}",
+                    on_click=lambda e, col=c: on_click_func(col)
+                ) for c in colors
+            ], wrap=True, width=300)
+
+        async def save_filter(e):
+            nonlocal filter_obj
+            if is_new:
+                filter_obj = Filter(txt_pattern.value, selected_fg, selected_bg, True, sw_regex.value, sw_exclude.value)
+                self.filters.append(filter_obj)
+            else:
+                filter_obj.text = txt_pattern.value
+                filter_obj.fore_color = selected_fg
+                filter_obj.back_color = selected_bg
+                filter_obj.is_regex = sw_regex.value
+                filter_obj.is_exclude = sw_exclude.value
+            
+            self.dialog.open = False
+            await self.render_filters()
+            await self.apply_filters()
+            self.page.update()
+
+        self.dialog = ft.AlertDialog(
+            title=ft.Text("Edit Filter" if not is_new else "Add Filter"),
+            content=ft.Column([
+                txt_pattern,
+                ft.Row([sw_regex, sw_exclude]),
+                ft.Text("Foreground Color:"),
+                build_color_grid(set_fg, False),
+                ft.Text("Background Color:"),
+                build_color_grid(set_bg, True),
+                ft.Text("(Colors automatically adjusted for readability)", size=10, italic=True, color=ft.Colors.GREY_500),
+                ft.Divider(),
+                ft.Text("Preview:"),
+                preview
+            ], tight=True, scroll=ft.ScrollMode.AUTO, width=400),
+            actions=[
+                ft.TextButton("Save", on_click=save_filter),
+                ft.TextButton("Cancel", on_click=lambda _: [setattr(self.dialog, 'open', False), self.page.update()])
+            ]
+        )
+        self.page.show_dialog(self.dialog)
+
+    async def delete_filter(self, filter_obj):
+        if filter_obj in self.filters:
+            self.filters.remove(filter_obj)
+            await self.render_filters()
+            await self.apply_filters()
+            self.page.update()
+
+    async def move_filter_to_top(self, filter_obj):
+        if filter_obj in self.filters:
+            self.filters.remove(filter_obj)
+            self.filters.insert(0, filter_obj)
+            await self.render_filters()
+            await self.apply_filters()
+            self.page.update()
+
+    async def move_filter_to_bottom(self, filter_obj):
+        if filter_obj in self.filters:
+            self.filters.remove(filter_obj)
+            self.filters.append(filter_obj)
+            await self.render_filters()
+            await self.apply_filters()
+            self.page.update()
+
+    async def render_filters(self):
+        self.filter_list_view.controls.clear()
+        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+        
+        for f in self.filters:
+            # Checkbox for enabled state
+            async def on_cb_change(e, obj=f):
+                obj.enabled = e.control.value
+                await self.apply_filters()
+                await self.focus_trap.focus() # Recapture focus
+
+            cb = ft.Checkbox(
+                value=f.enabled, 
+                on_change=on_cb_change,
+            )
+            # Use tab_index=-1 to exclude from keyboard navigation
+            cb.tab_index = -1
+            
+            # Smart Colors for Tag
+            adj_bg = adjust_color_for_theme(f.back_color, True, is_dark)
+            adj_fg = adjust_color_for_theme(f.fore_color, False, is_dark)
+            
+            # Label with Background/Foreground colors (Tag-like look)
+            type_str = " (R)" if f.is_regex else ""
+            if f.is_exclude: type_str += " [X]"
+            
+            lbl_tag = ft.Container(
+                content=ft.Text(
+                    value=f"{f.text}{type_str}", 
+                    size=12,
+                    color=adj_fg, # Adjusted
+                    weight=ft.FontWeight.W_500,
+                    no_wrap=True,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+                bgcolor=adj_bg, # Adjusted
+                padding=ft.Padding(8, 2, 8, 2),
+                border_radius=4,
+                expand=True,
+                border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE) if is_dark else ft.Colors.with_opacity(0.2, ft.Colors.BLACK))
+            )
+            
+            # Hit Count Badge
+            hit_badge = ft.Container(
+                content=ft.Text(str(f.hit_count), size=10, color="black", weight=ft.FontWeight.BOLD),
+                bgcolor="#bdc3c7" if f.hit_count == 0 else "#f1c40f",
+                padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+                border_radius=10,
+                alignment=ft.Alignment(0, 0)
+            )
+
+            # Row container
+            async def on_double_tap(e, obj=f):
+                await self.open_filter_dialog(obj)
+
+            async def on_secondary_tap(e, obj=f):
+                self.open_filter_context_menu(e, obj)
+
+            item_row = ft.GestureDetector(
+                content=ft.Row([
+                    cb,
+                    lbl_tag,
+                    hit_badge
+                ], spacing=5, alignment=ft.MainAxisAlignment.START),
+                on_double_tap=on_double_tap,
+                on_secondary_tap=on_secondary_tap,
+            )
+            # Ensure the row doesn't end up in the tab cycle
+            item_row.tab_index = -1
+            
+            self.filter_list_view.controls.append(item_row)
+        
+        # Ensure focus is on the trap, not the list items
+        await self.focus_trap.focus()
+        self.page.update()
+
+    def open_filter_context_menu(self, e, obj):
+        def close_dlg(ev):
+            self.filter_ctx.open = False
+            self.page.update()
+
+        async def menu_edit(ev):
+            await self.open_filter_dialog(obj)
+            close_dlg(None)
+
+        async def menu_top(ev):
+            await self.move_filter_to_top(obj)
+            close_dlg(None)
+
+        async def menu_bottom(ev):
+            await self.move_filter_to_bottom(obj)
+            close_dlg(None)
+
+        async def menu_delete(ev):
+            await self.delete_filter(obj)
+            close_dlg(None)
+
+        self.filter_ctx = ft.AlertDialog(
+            title=ft.Text("Filter Actions"),
+            content=ft.Column([
+                ft.ListTile(leading=ft.Icon(ft.Icons.EDIT), title=ft.Text("Edit Filter"), on_click=menu_edit),
+                ft.ListTile(leading=ft.Icon(ft.Icons.ARROW_UPWARD), title=ft.Text("Move to Top"), on_click=menu_top),
+                ft.ListTile(leading=ft.Icon(ft.Icons.ARROW_DOWNWARD), title=ft.Text("Move to Bottom"), on_click=menu_bottom),
+                ft.ListTile(leading=ft.Icon(ft.Icons.DELETE), title=ft.Text("Delete"), on_click=menu_delete),
+            ], height=240, width=200),
+            actions=[ft.TextButton("Close", on_click=close_dlg)]
+        )
+        self.page.show_dialog(self.filter_ctx)
+
+
+    async def on_log_click(self, e: ft.TapEvent):
+        row_idx = e.control.data
+        view_idx = self.current_start_index + row_idx
+        
+        # Determine total items matching update_log_view logic
+        if self.show_only_filtered and self.filtered_indices is not None:
+            total_items = len(self.filtered_indices)
+        else:
+            total_items = self.log_engine.line_count()
+            
+        if view_idx >= total_items: return
+        
+        # Map to real_idx matching update_log_view logic
+        if self.show_only_filtered and self.filtered_indices is not None:
+            real_idx = self.filtered_indices[view_idx]
+        else:
+            real_idx = view_idx
+        
+        # Determine modifiers
+        # TapEvent has .ctrl and .shift in some Flet versions
+        ctrl = getattr(e, "ctrl", False)
+        shift = getattr(e, "shift", False)
+        
+        if shift and self.selection_anchor != -1:
+            # Range Selection
+            # Find view indices for anchor and current
+            start_view = self._get_view_index_from_raw(self.selection_anchor)
+            end_view = view_idx
+            
+            if start_view is not None:
+                low = min(start_view, end_view)
+                high = max(start_view, end_view)
+                
+                if not ctrl:
+                    self.selected_indices.clear()
+                
+                for i in range(low, high + 1):
+                    ridx = self.filtered_indices[i] if self.filtered_indices is not None else i
+                    self.selected_indices.add(ridx)
+        elif ctrl:
+            # Toggle Selection
+            if real_idx in self.selected_indices:
+                self.selected_indices.remove(real_idx)
+            else:
+                self.selected_indices.add(real_idx)
+            self.selection_anchor = real_idx
+        else:
+            # Single Selection
+            self.selected_indices = {real_idx}
+            self.selection_anchor = real_idx
+        
+        self.update_log_view()
+
+    def _get_view_index_from_raw(self, raw_idx):
+        # Crucial fix: only use filtered_indices mapping if we are in Filtered View mode
+        if self.show_only_filtered and self.filtered_indices is not None:
+            import bisect
+            idx = bisect.bisect_left(self.filtered_indices, raw_idx)
+            if idx < len(self.filtered_indices) and self.filtered_indices[idx] == raw_idx:
+                return idx
+            return None
+        # In Full View (or no filters), raw index is the view index
+        return raw_idx
+
+    async def on_log_right_click(self, e: ft.TapEvent):
+        # e.control.data contains the row index (0-59)
+        row_idx = e.control.data
+        view_idx = self.current_start_index + row_idx
+        
+        # Map view index to real log index
+        if self.filtered_indices is not None:
+            if view_idx >= len(self.filtered_indices): return
+            real_idx = self.filtered_indices[view_idx]
+        else:
+            real_idx = view_idx
+        
+        if not self.log_engine or real_idx >= self.log_engine.line_count():
+            return
+
+        line_content = self.log_engine.get_line(real_idx)
+        # print(f"DEBUG: Right clicked on line {real_idx}: {line_content[:20]}...")
+
+        # Create actions for the context menu
+        def close_dlg(e):
+            # self.page.close(self.context_menu_dlg)
+            self.context_menu_dlg.open = False
+            self.page.update()
+
+        async def copy_line(e):
+            # Using deprecated page.clipboard because ft.Clipboard causes Unknown control
+            await self.page.clipboard.set(line_content)
+            # self.page.close(self.context_menu_dlg)
+            self.context_menu_dlg.open = False
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Copied line {real_idx}"))
+            self.page.snack_bar.open = True
+            self.page.update()
+
+        async def filter_include(e):
+            # TODO: Implement actual filter logic
+            print(f"Filter Include: {line_content}")
+            self.context_menu_dlg.open = False
+            self.page.update()
+            
+        async def filter_exclude(e):
+            # TODO: Implement actual filter logic
+            print(f"Filter Exclude: {line_content}")
+            self.context_menu_dlg.open = False
+            self.page.update()
+
+        # Using AlertDialog as a simple context menu
+        self.context_menu_dlg = ft.AlertDialog(
+            title=ft.Text(f"Line {real_idx} Actions"),
+            content=ft.Column([
+                ft.ListTile(leading=ft.Icon(ft.Icons.COPY), title=ft.Text("Copy Line"), on_click=copy_line),
+                ft.ListTile(leading=ft.Icon(ft.Icons.FILTER_ALT), title=ft.Text("Filter Include"), on_click=filter_include),
+                ft.ListTile(leading=ft.Icon(ft.Icons.FILTER_ALT_OFF), title=ft.Text("Filter Exclude"), on_click=filter_exclude),
+            ], height=200, width=300),
+            actions=[
+                ft.TextButton("Cancel", on_click=close_dlg),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        # self.page.open(self.context_menu_dlg)
+        self.context_menu_dlg.open = True
+        self.page.show_dialog(self.context_menu_dlg)
+        self.page.update()
+
+    async def on_path_submit(self, e):
+        await self.load_file(e.control.value)
+
+    async def on_load_click(self, e):
+        await self.load_file(self.path_input.value)
+
+    async def load_file(self, path):
+        print(f"DEBUG: load_file called with path='{path}'")
+        if not path:
+            return
+            
+        # Clean path (remove quotes if any)
+        path = path.strip().strip('\"\'')
+        
+        self.status_text.value = f"Loading: {path}..."
+        self.page.update() # Sync update
+        await asyncio.sleep(0) # Yield control to UI
+        
+        start_time = time.time()
+        try:
+            print(f"DEBUG: Initializing engine with {path}")
+            # Initialize Engine (_REAL_LOG_ENGINE is either the actual Rust module or MockLogEngine)
+            # If Engine initialization is heavy, we might want to wrap it in asyncio.to_thread
+            if HAS_RUST:
+                 # 假設 Rust 引擎初始化是同步且耗時的
+                 # self.log_engine = await asyncio.to_thread(_REAL_LOG_ENGINE, path)
+                 self.log_engine = _REAL_LOG_ENGINE(path)
+            else:
+                 self.log_engine = _REAL_LOG_ENGINE(path)
+            
+            line_count = self.log_engine.line_count()
+            duration = time.time() - start_time
+            print(f"DEBUG: Loaded {line_count} lines")
+            
+            self.file_path = path
+            
+            # 更新 Recent Files
+            self.add_to_recent_files(path)
+            
+            # 更新 UI 顯示載入結果
+            engine_type = "Rust" if HAS_RUST else "Mock"
+            self.status_text.value = f"[{engine_type}] Loaded {os.path.basename(path)} ({line_count:,} lines) in {duration:.3f}s"
+            
+            # Force initial content update
+            self.initial_content.visible = False
+            self.log_view_area.visible = True
+            self.log_area.alignment = ft.MainAxisAlignment.START
+            
+            # Reset view parameters
+            self.target_start_index = 0
+            self.current_start_index = 0
+            
+            # Select first line
+            if line_count > 0:
+                self.selected_indices = {0}
+                self.selection_anchor = 0
+            
+            # Sync all UI components before the first update
+            await self.on_resize(None)
+            await self.apply_filters()
+            
+            self.update_log_view()
+            self.needs_render = True # Inform loop
+            self.page.update() # Immediate render
+            
+        except Exception as e:
+            print(f"ERROR in load_file: {e}")
+            import traceback
+            traceback.print_exc()
+            self.status_text.value = f"Error loading file: {e}"
+            self.page.update()
+
+async def main(page: ft.Page):
+    # Try to force page scrollable to receive events, but hide the bar
+    # page.scroll = "hidden" # REVERTED: Breaks layout
+    app = LogAnalyzerApp(page)
+    # Async apps often need to keep running, but Flet handles the loop.
+    # We might need to initialize things asynchronously here.
+    page.update()
+
+if __name__ == "__main__":
+    # ft.run is the new recommended way for scripts in 0.80.0+
+    # But checking if ft.run exists first or fallback to ft.app
+    if hasattr(ft, 'run'):
+        ft.run(main)
+    else:
+        ft.app(target=main)

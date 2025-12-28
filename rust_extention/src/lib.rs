@@ -115,6 +115,9 @@ impl LogEngine {
 
         let lines = &self.lines;
 
+        // Check if there are any active INCLUDE filters
+        let has_include_filters = filters.iter().any(|(_, _, is_exclude, _, _)| !*is_exclude);
+
         // 預先編譯 Regex 以提升效能
         let compiled_filters: Vec<_> = filters.iter().map(|(text, is_regex, is_exclude, is_event, idx)| {
             let re = if *is_regex {
@@ -196,7 +199,16 @@ impl LogEngine {
                 hit_counts[idx] += 1;
             }
 
-            if code >= 2 {
+            // Logic: Include if (Matched Include) OR (Not Excluded AND No Includes defined)
+            let should_include = if code >= 2 {
+                true
+            } else if code == 0 && !has_include_filters {
+                true
+            } else {
+                false
+            };
+
+            if should_include {
                 filtered_indices.push(raw_idx);
 
                 if let Some(evt) = event {
