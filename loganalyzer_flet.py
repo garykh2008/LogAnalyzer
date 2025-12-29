@@ -406,9 +406,6 @@ class LogAnalyzerApp:
         # Start background render loop for smooth scrolling
         asyncio.create_task(self.render_loop())
         
-        # Capture initial focus
-        asyncio.create_task(self.focus_trap.focus())
-        
         # Bind close event for saving config
         self.page.window_prevent_close = True # We want to handle close to save config
         self.page.on_window_event = self.on_window_event
@@ -424,16 +421,21 @@ class LogAnalyzerApp:
                 print(f"Error loading config: {e}")
 
     def save_config(self):
-        # Update current geometry to config
-        # Flet 0.80+ doesn't always expose window position perfectly across platforms, but we try
-        # Note: page.window_width/height are available. top/left might be.
+        # Update current geometry to config using Flet 1.0 window APIs
         try:
+            # page.window_width/height are available in 1.0
             w = int(self.page.window_width)
             h = int(self.page.window_height)
+            
+            # Use window object properties safely
             x = int(self.page.window_left) if self.page.window_left is not None else 0
             y = int(self.page.window_top) if self.page.window_top is not None else 0
+            
             self.config["main_window_geometry"] = f"{w}x{h}+{x}+{y}"
-            self.config["window_maximized"] = self.page.window_maximized
+            
+            # window_maximized is no longer a direct Page attribute, 
+            # we check the window property if available
+            self.config["window_maximized"] = getattr(self.page, "window_maximized", False)
             
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, indent=4)
@@ -459,9 +461,13 @@ class LogAnalyzerApp:
             print(f"Error applying window geometry: {e}")
 
     async def on_window_event(self, e):
+        # In Flet 1.0, e.data might contain various window lifecycle states
         if e.data == "close":
+            # Final save of geometry and state
             self.save_config()
-            await self.page.window.destroy()
+            # No need to destroy if we want default close behavior, 
+            # but since prevent_close is True, we must exit.
+            await self.page.window_destroy()
 
     def build_ui(self):
         # --- Custom Top Menu Bar (Replacing AppBar for stability) ---
@@ -562,16 +568,6 @@ class LogAnalyzerApp:
         )
         
         # 2. Main Log Area (Center)
-        # Focus Trap: Invisible TextField to suck up all keyboard events and prevent Sidebar focus
-        self.focus_trap = ft.TextField(
-            width=0, height=0, opacity=0, 
-            on_submit=lambda _: None,
-            # No border/padding to make it truly invisible
-            border_color=ft.Colors.TRANSPARENT,
-            cursor_width=0
-        )
-        
-        # 2. Main Log Area (Center)
         # 替代方案：手動輸入路徑 (Still kept as fallback in initial view)
         self.path_input = ft.TextField(
             label="Log File Path", 
@@ -630,10 +626,10 @@ class LogAnalyzerApp:
                 on_scroll=self.on_log_scroll,
                 on_tap_down=self.on_log_area_tap,
                 on_secondary_tap_down=self.on_log_area_secondary_tap,
-                expand=True # Ensure detector fills container
+                expand=True 
             ),
             expand=True,
-            bgcolor="#1e1e1e", # Normal Dark Background
+            bgcolor="#1e1e1e", 
         )
         
         # --- Custom Vertical Scrollbar ---
@@ -807,7 +803,6 @@ class LogAnalyzerApp:
         # Wrap log area in a Stack to overlay the Search Bar
         self.log_stack = ft.Stack([
             self.log_area,
-            self.focus_trap, # Hidden focus trap
             ft.Container(
                 content=self.search_bar,
                 top=10, right=20 # Position search bar top-right of log area
@@ -864,7 +859,8 @@ class LogAnalyzerApp:
             await self.load_file(file_path)
 
     async def exit_app(self, e):
-        await self.page.window.destroy()
+        self.save_config()
+        await self.page.window_destroy()
 
     def update_recent_files_menu(self):
         recent = self.config.get("recent_files", [])
@@ -875,17 +871,16 @@ class LogAnalyzerApp:
                  ft.MenuItemButton(content=ft.Text("No recent files"), disabled=True)
              )
         else:
+            # Closure helper to capture path
+            def create_click_handler(p):
+                return lambda _: asyncio.create_task(self.load_file(p))
+
             for path in recent:
-                # Capture path in default arg to avoid lambda binding issue
-                def open_recent(e, p=path):
-                    self.path_input.value = p # Sync to input
-                    asyncio.create_task(self.load_file(p))
-                    
                 self.recent_files_submenu.controls.append(
                     ft.MenuItemButton(
                         content=ft.Text(os.path.basename(path)),
                         leading=ft.Icon(ft.Icons.DESCRIPTION),
-                        on_click=open_recent
+                        on_click=create_click_handler(path)
                     )
                 )
 
@@ -900,6 +895,11 @@ class LogAnalyzerApp:
             recent = recent[:10]
         self.config["recent_files"] = recent
         self.update_recent_files_menu()
+        # Save config immediately to avoid loss on crash
+        self.save_config()
+        # Force top bar update
+        if hasattr(self, "menu_bar"):
+            self.menu_bar.update()
 
     async def import_tat_filters(self, e=None):
         import tkinter as tk
@@ -1459,17 +1459,17 @@ class LogAnalyzerApp:
         self.jump_to_index(int(e.control.value), update_slider=False)
 
     async def on_keyboard(self, e: ft.KeyboardEvent):
-        # print(f"DEBUG: Key pressed: {e.key}") # Debug key codes
         if not self.log_engine:
             return
 
-        # Determine total items based on current view
-        if self.show_only_filtered and self.filtered_indices is not None:
-            total_items = len(self.filtered_indices)
-        else:
-            total_items = self.log_engine.line_count()
-        
+        # Determine total items
+        total_items = len(self.filtered_indices) if self.filtered_indices is not None else self.log_engine.line_count()
         if total_items == 0: return
+
+        # Clipboard Shortcuts
+        if e.ctrl and e.key.lower() == "c":
+            await self.copy_selected_lines()
+            return
 
         # Search Shortcuts
         if e.ctrl and e.key.lower() == "f":
@@ -1906,7 +1906,6 @@ class LogAnalyzerApp:
             async def on_cb_change(e, obj=f):
                 obj.enabled = e.control.value
                 await self.apply_filters()
-                await self.focus_trap.focus() # Recapture focus
 
             cb = ft.Checkbox(
                 value=f.enabled, 
@@ -1969,8 +1968,6 @@ class LogAnalyzerApp:
             
             self.filter_list_view.controls.append(item_row)
         
-        # Ensure focus is on the trap, not the list items
-        await self.focus_trap.focus()
         self.page.update()
 
     def open_filter_context_menu(self, e, obj):
@@ -2013,9 +2010,20 @@ class LogAnalyzerApp:
         row_height = self.ROW_HEIGHT
         row_idx = int(local_y / row_height)
         
-        # Safely access modifiers
-        ctrl = getattr(e, "ctrl", False)
-        shift = getattr(e, "shift", False)
+        # --- WINDOWS ULTIMATE FIX: Direct OS Query ---
+        ctrl = False
+        shift = False
+        
+        if sys.platform == "win32":
+            import ctypes
+            # VK_CONTROL = 0x11, VK_SHIFT = 0x10
+            # If the high-order bit is 1, the key is down (0x8000)
+            ctrl = (ctypes.windll.user32.GetKeyState(0x11) & 0x8000) != 0
+            shift = (ctypes.windll.user32.GetKeyState(0x10) & 0x8000) != 0
+        else:
+            # Fallback for other platforms
+            ctrl = getattr(e, "ctrl", False)
+            shift = getattr(e, "shift", False)
         
         # Call the existing click handler with mocked row_idx
         class MockEvent:
@@ -2057,26 +2065,18 @@ class LogAnalyzerApp:
         else:
             real_idx = view_idx
         
-        # Determine modifiers
-        # TapEvent has .ctrl and .shift in some Flet versions
+        # Determine modifiers passed from the tap handler
         ctrl = getattr(e, "ctrl", False)
         shift = getattr(e, "shift", False)
         
         if shift and self.selection_anchor != -1:
             # Range Selection
-            # Find view indices for anchor and current
             start_view = self._get_view_index_from_raw(self.selection_anchor)
-            end_view = view_idx
-            
             if start_view is not None:
-                low = min(start_view, end_view)
-                high = max(start_view, end_view)
-                
-                if not ctrl:
-                    self.selected_indices.clear()
-                
+                low, high = min(start_view, view_idx), max(start_view, view_idx)
+                if not ctrl: self.selected_indices.clear()
                 for i in range(low, high + 1):
-                    ridx = self.filtered_indices[i] if self.filtered_indices is not None else i
+                    ridx = self.filtered_indices[i] if (self.show_only_filtered and self.filtered_indices is not None) else i
                     self.selected_indices.add(ridx)
         elif ctrl:
             # Toggle Selection
@@ -2090,21 +2090,42 @@ class LogAnalyzerApp:
             self.selected_indices = {real_idx}
             self.selection_anchor = real_idx
         
-        self.update_log_view()
+        await self.immediate_render()
 
     def _get_view_index_from_raw(self, raw_idx):
-        # Crucial fix: only use filtered_indices mapping if we are in Filtered View mode
-        if self.show_only_filtered and self.filtered_indices is not None:
+        if self.filtered_indices is not None:
             import bisect
             idx = bisect.bisect_left(self.filtered_indices, raw_idx)
             if idx < len(self.filtered_indices) and self.filtered_indices[idx] == raw_idx:
                 return idx
             return None
-        # In Full View (or no filters), raw index is the view index
         return raw_idx
 
-    async def on_log_right_click(self, e: ft.TapEvent):
-        # e.control.data contains the row index (0-59)
+    async def copy_selected_lines(self, e=None):
+        if not self.selected_indices or not self.log_engine:
+            return
+            
+        # Sort indices to ensure chronological order in clipboard
+        sorted_indices = sorted(list(self.selected_indices))
+        
+        # Batch fetch content from Rust
+        try:
+            # Use get_lines_batch if available, but only for text
+            batch_data = self.log_engine.get_lines_batch(sorted_indices)
+            lines = [item[0] for item in batch_data]
+            text = "\n".join(lines)
+            
+            # Use the deprecated but functional method as per project notes
+            await self.page.clipboard.set(text)
+            
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Copied {len(lines)} lines to clipboard."))
+            self.page.snack_bar.open = True
+            self.page.update()
+        except Exception as ex:
+            print(f"Copy Error: {ex}")
+
+    async def on_log_right_click(self, e):
+        # e.control.data contains the row index
         row_idx = e.control.data
         view_idx = self.current_start_index + row_idx
         
@@ -2118,41 +2139,26 @@ class LogAnalyzerApp:
         if not self.log_engine or real_idx >= self.log_engine.line_count():
             return
 
-        line_content = self.log_engine.get_line(real_idx)
-        # print(f"DEBUG: Right clicked on line {real_idx}: {line_content[:20]}...")
-
         # Create actions for the context menu
         def close_dlg(e):
-            # self.page.close(self.context_menu_dlg)
             self.context_menu_dlg.open = False
-            self.page.update()
-
-        async def copy_line(e):
-            # Using deprecated page.clipboard because ft.Clipboard causes Unknown control
-            await self.page.clipboard.set(line_content)
-            # self.page.close(self.context_menu_dlg)
-            self.context_menu_dlg.open = False
-            self.page.snack_bar = ft.SnackBar(ft.Text(f"Copied line {real_idx}"))
-            self.page.snack_bar.open = True
             self.page.update()
 
         async def filter_include(e):
             # TODO: Implement actual filter logic
-            print(f"Filter Include: {line_content}")
-            self.context_menu_dlg.open = False
-            self.page.update()
+            close_dlg(None)
             
         async def filter_exclude(e):
             # TODO: Implement actual filter logic
-            print(f"Filter Exclude: {line_content}")
-            self.context_menu_dlg.open = False
-            self.page.update()
+            close_dlg(None)
 
         # Using AlertDialog as a simple context menu
+        copy_label = f"Copy Line" if len(self.selected_indices) <= 1 else f"Copy {len(self.selected_indices)} Lines"
+        
         self.context_menu_dlg = ft.AlertDialog(
-            title=ft.Text(f"Line {real_idx} Actions"),
+            title=ft.Text(f"Line {real_idx + 1} Actions"),
             content=ft.Column([
-                ft.ListTile(leading=ft.Icon(ft.Icons.COPY), title=ft.Text("Copy Line"), on_click=copy_line),
+                ft.ListTile(leading=ft.Icon(ft.Icons.COPY), title=ft.Text(copy_label), on_click=lambda _: [asyncio.create_task(self.copy_selected_lines()), close_dlg(None)]),
                 ft.ListTile(leading=ft.Icon(ft.Icons.FILTER_ALT), title=ft.Text("Filter Include"), on_click=filter_include),
                 ft.ListTile(leading=ft.Icon(ft.Icons.FILTER_ALT_OFF), title=ft.Text("Filter Exclude"), on_click=filter_exclude),
             ], height=200, width=300),
@@ -2162,7 +2168,6 @@ class LogAnalyzerApp:
             actions_alignment=ft.MainAxisAlignment.END,
         )
 
-        # self.page.open(self.context_menu_dlg)
         self.context_menu_dlg.open = True
         self.page.show_dialog(self.context_menu_dlg)
         self.page.update()
