@@ -56,6 +56,19 @@ impl LogEngine {
         self.lines.get(index).cloned().unwrap_or_default()
     }
 
+    fn get_lines_batch(&self, indices: Vec<usize>) -> Vec<(String, u8)> {
+        indices.iter()
+            .map(|&idx| {
+                let s = self.lines.get(idx).cloned().unwrap_or_default();
+                let level = if s.contains("[ERROR]") { 1 }
+                            else if s.contains("[WARN]") { 2 }
+                            else if s.contains("[INFO]") { 3 }
+                            else { 0 };
+                (s, level)
+            })
+            .collect()
+    }
+
     fn line_count(&self) -> usize {
         self.lines.len()
     }

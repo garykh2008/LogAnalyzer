@@ -68,7 +68,7 @@ def get_event_prop(event, prop_name, default=None):
     
     # 2. Common Aliases / Fallbacks for 0.80.0+
     aliases = {
-        'delta_y': ['delta', 'scroll_delta'], # scroll_delta might be float or Offset
+        'delta_y': ['delta', 'scroll_delta', 'local_delta'], # Added local_delta
         'local_y': ['local_position'],       # local_position is Offset
         'global_y': ['global_position']
     }
@@ -183,15 +183,27 @@ class TimelineView(ft.Container):
         self.total_lines = 0
         self.current_scroll_index = 0
         
-        # Canvas for drawing
-        self.canvas = cv.Canvas(
+        # Static Layer: Heatmap
+        self.heatmap_canvas = cv.Canvas(
             shapes=[],
             expand=True,
         )
         
+        # Dynamic Layer: Viewport Indicator
+        self.indicator_canvas = cv.Canvas(
+            shapes=[],
+            expand=True,
+        )
+        
+        # Stack layers
+        self.layers = ft.Stack([
+            self.heatmap_canvas,
+            self.indicator_canvas
+        ], expand=True)
+        
         # GestureDetector for interaction
         self.gesture = ft.GestureDetector(
-            content=self.canvas,
+            content=self.layers,
             on_tap_down=self.on_tap_down,
             on_pan_update=self.on_pan_update,
             expand=True
@@ -202,35 +214,30 @@ class TimelineView(ft.Container):
     def update_data(self, events, total_lines):
         self.events = events
         self.total_lines = total_lines
-        self.draw()
+        self.draw_heatmap()
+        self.draw_indicator()
         self.update()
 
     def update_scroll(self, index):
         self.current_scroll_index = index
-        # Optimize: Only redraw the viewport indicator if possible?
-        # For now, redraw everything or just overlay?
-        # Canvas shapes are retained, we can update specific shapes.
-        self.draw()
-        self.update()
+        self.draw_indicator()
+        self.indicator_canvas.update()
 
     def set_height(self, height):
         self.height = height
-        self.draw()
+        self.draw_heatmap()
+        self.draw_indicator()
         self.update()
 
-    def draw(self):
-        self.canvas.shapes.clear()
+    def draw_heatmap(self):
+        self.heatmap_canvas.shapes.clear()
         
         # Use explicitly set height, default to 500 if not set
         canvas_height = self.height if self.height else 500
         
-        # Determine foreground color based on theme
-        is_dark = self.app.page.theme_mode == ft.ThemeMode.DARK
-        fg_color = ft.Colors.WHITE if is_dark else ft.Colors.BLACK
-        
         # Avoid division by zero
         if self.total_lines <= 0:
-            self.canvas.update()
+            self.heatmap_canvas.update()
             return
 
         # 1. Draw Heatmap (Background)
@@ -245,15 +252,21 @@ class TimelineView(ft.Container):
                 y = raw_idx * scale
                 color = color_map.get(text, "#FF0000")
                 h = max(2, scale) 
-                self.canvas.shapes.append(
+                self.heatmap_canvas.shapes.append(
                     cv.Rect(
                         x=0, y=y, 
                         width=self.width, height=h,
                         paint=ft.Paint(color=color, style=ft.PaintingStyle.FILL)
                     )
                 )
+        self.heatmap_canvas.update()
 
-        # 2. Draw Viewport Indicator (The "Thumb")
+    def draw_indicator(self):
+        self.indicator_canvas.shapes.clear()
+        canvas_height = self.height if self.height else 500
+        is_dark = self.app.page.theme_mode == ft.ThemeMode.DARK
+        fg_color = ft.Colors.WHITE if is_dark else ft.Colors.BLACK
+
         if self.total_lines > 0:
             lines_per_page = self.app.LINES_PER_PAGE
             current_filtered_idx = self.app.current_start_index
@@ -290,9 +303,7 @@ class TimelineView(ft.Container):
                     stroke_width=2
                 )
             )
-            self.canvas.shapes.append(indicator)
-            
-        self.canvas.update()
+            self.indicator_canvas.shapes.append(indicator)
 
     async def on_tap_down(self, e: ft.TapEvent):
         await self.handle_interaction(e.local_position.y)
@@ -348,6 +359,7 @@ class LogAnalyzerApp:
         self.last_render_time = 0 # For throttling scroll updates
         self.target_start_index = 0 # Target position for smooth/buffered scrolling
         self.needs_render = False # Flag to trigger render in loop
+        self.is_updating = False # Update lock for performance
         
         self.filters = [] # Store Filter objects
         self.filtered_indices = None # None means show all, otherwise list of real indices
@@ -575,49 +587,53 @@ class LogAnalyzerApp:
         self.top_controls = ft.Row([self.path_input, self.load_btn], alignment=ft.MainAxisAlignment.CENTER)
 
         # --- Log View (Virtual Scroll) ---
+        self.ROW_HEIGHT = 20
+        self.FONT_SIZE = 12
+        # Calculate strict line height multiplier (Flutter 'height' is a multiplier of font size)
+        self.LINE_HEIGHT_MULT = self.ROW_HEIGHT / self.FONT_SIZE 
+        
         self.LINES_PER_PAGE = 20  # Initial value, will be updated by on_resize
         self.MAX_LOG_ROWS = 200   # Pre-allocate rows to avoid dynamic list modification crash
         self.current_start_index = 0
         
-        self.log_rows = []
-        self.log_text_controls = [] 
-        
-        for i in range(self.MAX_LOG_ROWS):
+        # Phase 8: Tight Pool (Optimized for 30-50 visible lines)
+        self.TEXT_POOL_SIZE = 50 # Phase 9: Minimum viable pool for maximum speed
+        self.text_pool = []
+        for _ in range(self.TEXT_POOL_SIZE):
             t = ft.Text(
                 value="", 
-                font_family="Consolas, monospace", 
-                size=12,
+                font_family="Consolas, monospace",
+                size=self.FONT_SIZE,
                 no_wrap=True,
                 color="#d4d4d4",
-                selectable=False,
-                visible=False,
+                visible=True,
             )
-            self.log_text_controls.append(t)
+            c = ft.Container(
+                content=t,
+                height=self.ROW_HEIGHT,
+                alignment=ft.Alignment(-1, 0),
+                bgcolor=ft.Colors.TRANSPARENT,
+                visible=True
+            )
+            self.text_pool.append(c)
             
-            gd = ft.GestureDetector(
-                content=ft.Container(
-                    content=t, 
-                    padding=ft.Padding.only(left=5, right=5), 
-                    height=20, 
-                    alignment=ft.Alignment(-1, 0)
-                ),
-                on_tap=self.on_log_click,
-                on_secondary_tap=self.on_log_right_click,
-                data=i,
-            )
-            # Prevent rows from being focused by tab/arrows
-            gd.tab_index = -1
-            self.log_rows.append(gd)
-        
-        self.log_display_column = ft.GestureDetector(
-            content=ft.Column(
-                controls=self.log_rows,
-                spacing=0,
-                scroll=None, 
-                # Remove expand=True here to let children define height
+        self.log_list_column = ft.Column(
+            controls=self.text_pool,
+            spacing=0,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            tight=True, # Critical for fixed-height children
+        )
+
+        self.log_display_column = ft.Container(
+            content=ft.GestureDetector(
+                content=self.log_list_column,
+                on_scroll=self.on_log_scroll,
+                on_tap_down=self.on_log_area_tap,
+                on_secondary_tap_down=self.on_log_area_secondary_tap,
+                expand=True # Ensure detector fills container
             ),
-            on_scroll=self.on_log_scroll,
-            expand=True
+            expand=True,
+            bgcolor="#1e1e1e", # Normal Dark Background
         )
         
         # --- Custom Vertical Scrollbar ---
@@ -674,27 +690,29 @@ class LogAnalyzerApp:
                 vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
             expand=True,
-            visible=False,
-            bgcolor=None # Remove debug color
+            visible=False # Controlled in load_file
         )
 
-        self.initial_content = ft.Column(
-            [
-                ft.Icon(ft.Icons.ANALYTICS, size=80, color=ft.Colors.GREY_700),
-                ft.Text("LogAnalyzer", size=32, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_500),
-                ft.Text("Welcome to high-performance log analysis", size=16, color=ft.Colors.GREY_600),
-                ft.Container(height=20),
-                ft.Text("To get started:", size=14, color=ft.Colors.GREY_700),
-                ft.Row([
-                    ft.Icon(ft.Icons.FOLDER_OPEN, size=16, color=ft.Colors.BLUE_400),
-                    ft.Text("Go to File > Open File...", size=14, color=ft.Colors.GREY_600),
-                ], alignment=ft.MainAxisAlignment.CENTER),
-                ft.Text("or", size=12, color=ft.Colors.GREY_700),
-                ft.Text("Drag & Drop Log File Here", size=14, color=ft.Colors.GREY_600),
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            expand=True
+        self.initial_content = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Icon(ft.Icons.ANALYTICS, size=80, color=ft.Colors.GREY_700),
+                    ft.Text("LogAnalyzer", size=32, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_500),
+                    ft.Text("Welcome to high-performance log analysis", size=16, color=ft.Colors.GREY_600),
+                    ft.Container(height=20),
+                    ft.Text("To get started:", size=14, color=ft.Colors.GREY_700),
+                    ft.Row([
+                        ft.Icon(ft.Icons.FOLDER_OPEN, size=16, color=ft.Colors.BLUE_400),
+                        ft.Text("Go to File > Open File...", size=14, color=ft.Colors.GREY_600),
+                    ], alignment=ft.MainAxisAlignment.CENTER),
+                    ft.Text("or", size=12, color=ft.Colors.GREY_700),
+                    ft.Text("Drag & Drop Log File Here", size=14, color=ft.Colors.GREY_600),
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            expand=True,
+            visible=True
         )
 
         self.log_area = ft.Column(
@@ -704,8 +722,8 @@ class LogAnalyzerApp:
             ], 
             spacing=0,
             expand=True,
-            alignment=ft.MainAxisAlignment.CENTER,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER
+            alignment=ft.MainAxisAlignment.START,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH
         )
         
         # --- Drag & Drop Support (Experimental for Flet 1.0) ---
@@ -1026,6 +1044,7 @@ class LogAnalyzerApp:
         if self.page.theme_mode == ft.ThemeMode.DARK:
             self.page.theme_mode = ft.ThemeMode.LIGHT
             sidebar_bg = "#ffffff"
+            log_view_bg = "#f3f3f3"
             search_bg = "#ffffff"
             text_color = "#000000"
             scrollbar_track_color = "#f0f0f0"
@@ -1034,6 +1053,7 @@ class LogAnalyzerApp:
         else:
             self.page.theme_mode = ft.ThemeMode.DARK
             sidebar_bg = "#252526"
+            log_view_bg = "#1e1e1e"
             search_bg = "#3c3c3c"
             text_color = "#d4d4d4"
             scrollbar_track_color = "#2d2d2d"
@@ -1042,6 +1062,7 @@ class LogAnalyzerApp:
             
         # Update Page and basic components
         self.page.bgcolor = sidebar_bg
+        self.log_display_column.bgcolor = log_view_bg
 
         # --- Native Windows Title Bar Sync ---
         if sys.platform == "win32":
@@ -1071,13 +1092,10 @@ class LogAnalyzerApp:
         self.scrollbar_track.bgcolor = scrollbar_track_color
         self.scrollbar_thumb.bgcolor = scrollbar_thumb_color
         
-        # Update existing text controls
-        for t in self.log_text_controls:
-            if t.color in ["#d4d4d4", "#1e1e1e", "#000000"]:
-                t.color = text_color
-        
         # Redraw timeline with new theme colors
-        self.timeline.draw()
+        self.timeline.draw_heatmap()
+        self.timeline.draw_indicator()
+        self.timeline.update()
         
         # Light-weight color update for filters instead of full re-render
         is_dark = self.page.theme_mode == ft.ThemeMode.DARK
@@ -1210,23 +1228,64 @@ class LogAnalyzerApp:
     async def on_log_scroll(self, e: ft.ScrollEvent):
         if not self.log_engine: return
         
-        # Throttling: Limit updates to ~30 FPS (0.033s)
-        current_time = time.time()
-        if current_time - self.last_render_time < 0.03:
-            return
+        # Throttling handled by render_loop if we use target_start_index, 
+        # but here we calculate new target.
         
         delta = e.scroll_delta.y
-        step = 3 if abs(delta) < 100 else 10 # Variable step based on speed
         
+        # Dynamic acceleration
+        # If delta is large (fast scroll), increase step
+        # Standard mouse wheel is often ~100.
+        base_step = 3
+        if abs(delta) >= 100:
+             step = int(abs(delta) / 10) # e.g. 100 -> 10 lines
+        elif abs(delta) > 20:
+             step = 5
+        else:
+             step = base_step
+             
+        step = max(1, step) # Minimum 1 line
+
         if delta > 0:
-            new_idx = self.current_start_index + step
+            new_idx = self.target_start_index + step
         elif delta < 0:
-            new_idx = self.current_start_index - step
+            new_idx = self.target_start_index - step
         else:
             return
             
-        self.last_render_time = current_time
-        self.jump_to_index(int(new_idx), update_slider=True)
+        # Immediate Update Path for responsiveness
+        target = int(new_idx)
+        
+        # Boundary Check (Clamping)
+        total_items = len(self.filtered_indices) if self.filtered_indices is not None else (self.log_engine.line_count() if self.log_engine else 0)
+        max_idx = max(0, total_items - self.LINES_PER_PAGE)
+        
+        target = max(0, min(target, max_idx))
+        self.target_start_index = target
+        
+        if not self.is_updating:
+            asyncio.create_task(self.immediate_render())
+
+    async def immediate_render(self):
+        if self.is_updating: return
+        self.is_updating = True
+        try:
+            # Phase 9: Scoped Update only
+            self.current_start_index = self.target_start_index
+            self.update_log_view()
+            self.sync_scrollbar_position()
+            
+            # Update specific controls only - DO NOT use page.update()
+            self.log_list_column.update()
+            self.scrollbar_stack.update()
+            self.timeline.update_scroll(self.current_start_index)
+        finally:
+            self.is_updating = False
+            # If target changed during the update, schedule next frame immediately
+            if self.current_start_index != self.target_start_index:
+                # Yield briefly to avoid event loop starvation
+                await asyncio.sleep(0.001)
+                asyncio.create_task(self.immediate_render())
 
     def update_log_view(self):
         """從 Engine 獲取當前視窗的數據並更新 UI"""
@@ -1236,8 +1295,8 @@ class LogAnalyzerApp:
         
         # PRE-CALCULATE filter colors
         filter_color_cache = {}
-        active_filters_objs = []
         if self.filters:
+            active_filters_objs = []
             for f in self.filters:
                 if f.enabled and f.text:
                     active_filters_objs.append(f)
@@ -1254,28 +1313,57 @@ class LogAnalyzerApp:
         else:
             total_items = self.log_engine.line_count()
 
-        for i in range(self.MAX_LOG_ROWS):
-            # 1. Viewport boundary check
-            if i >= self.LINES_PER_PAGE:
-                self.log_rows[i].visible = False
-                self.log_text_controls[i].visible = False
-                continue
+        # Turbo Rendering Path: Optimized for minimum Python overhead and IPC payload
+        _get_lines_batch = getattr(self.log_engine, 'get_lines_batch', None)
+        _filtered_indices = self.filtered_indices
+        _show_filtered = self.show_only_filtered
+        _current_start_index = self.current_start_index
+        _selected_indices = self.selected_indices
+        _line_tags_codes = self.line_tags_codes
+        _text_pool = self.text_pool
+        _lines_per_page = self.LINES_PER_PAGE
+        
+        search_active = bool(search_query)
 
-            # 2. Data mapping
-            view_idx = self.current_start_index + i
+        # 1. Prepare target indices for the current viewport
+        target_indices = []
+        for i in range(_lines_per_page):
+            view_idx = _current_start_index + i
             if 0 <= view_idx < total_items:
-                real_idx = self.filtered_indices[view_idx] if (self.show_only_filtered and self.filtered_indices is not None) else view_idx
-                line_data = self.log_engine.get_line(real_idx)
+                real_idx = _filtered_indices[view_idx] if (_show_filtered and _filtered_indices is not None) else view_idx
+                target_indices.append(real_idx)
+        
+        # 2. Batch fetch text and log levels from Rust in a single IPC call
+        batch_data = []
+        if target_indices and _get_lines_batch:
+            batch_data = _get_lines_batch(target_indices)
+
+        # 3. Static style table - resolved to local variables for fast lookup
+        c_default = "#d4d4d4" if is_dark else "#1e1e1e"
+        c_error = "#ff6b6b"
+        c_warn = "#ffd93d"
+        c_info = "#4dabf7"
+        c_select_bg = "#264f78" if is_dark else "#b3d7ff"
+        c_trans = ft.Colors.TRANSPARENT
+        
+        # 4. Render Loop with Strict Dirty Checking to minimize JSON Patch size
+        for i in range(self.TEXT_POOL_SIZE):
+            row_container = _text_pool[i]
+            text_control = row_container.content
+            
+            if i < len(batch_data):
+                line_data, level_code = batch_data[i]
+                real_idx = target_indices[i]
                 
-                # Base colors
-                base_color = "#d4d4d4" if is_dark else "#1e1e1e"
-                if "[ERROR]" in line_data: base_color = "#ff6b6b"
-                elif "[WARN]" in line_data: base_color = "#ffd93d"
-                elif "[INFO]" in line_data: base_color = "#4dabf7"
+                # Colors logic
+                if level_code == 1: base_color = c_error
+                elif level_code == 2: base_color = c_warn
+                elif level_code == 3: base_color = c_info
+                else: base_color = c_default
                 
                 bg_color = None
-                if self.line_tags_codes is not None and real_idx < len(self.line_tags_codes):
-                    tag_code = self.line_tags_codes[real_idx]
+                if _line_tags_codes is not None and real_idx < len(_line_tags_codes):
+                    tag_code = _line_tags_codes[real_idx]
                     if tag_code >= 2: 
                         af_idx = tag_code - 2
                         if af_idx in filter_color_cache:
@@ -1283,12 +1371,22 @@ class LogAnalyzerApp:
                     elif tag_code == 1:
                         base_color = ft.Colors.GREY_500 if is_dark else ft.Colors.GREY_400
                 
-                target_row_bg = bg_color
-                if real_idx in self.selected_indices:
-                    target_row_bg = "#264f78" if is_dark else "#b3d7ff"
+                if real_idx in _selected_indices:
+                    bg_color = c_select_bg
 
-                # Text & Spans (Search Highlighting)
-                if search_query and search_query in line_data.lower():
+                # Only touch Flet properties if they MUST change
+                target_bg = bg_color if bg_color else c_trans
+                if row_container.bgcolor != target_bg:
+                    row_container.bgcolor = target_bg
+                
+                if not row_container.visible:
+                    row_container.visible = True
+                
+                if text_control.color != base_color:
+                    text_control.color = base_color
+
+                if search_active and search_query in line_data.lower():
+                    # Search Highlight Path
                     h_bg = ft.Colors.YELLOW
                     h_fg = ft.Colors.BLACK
                     if bg_color and get_luminance(bg_color) > 0.6:
@@ -1296,25 +1394,25 @@ class LogAnalyzerApp:
                         h_fg = ft.Colors.WHITE
                     
                     parts = re.split(f"({re.escape(search_query)})", line_data, flags=re.IGNORECASE)
-                    self.log_text_controls[i].spans = [
+                    text_control.value = "" 
+                    text_control.spans = [
                         ft.TextSpan(p, style=ft.TextStyle(bgcolor=h_bg, color=h_fg, weight=ft.FontWeight.BOLD)) 
-                        if p.lower() == search_query else ft.TextSpan(p) for p in parts
+                        if p.lower() == search_query else ft.TextSpan(p, style=ft.TextStyle(color=base_color)) 
+                        for p in parts
                     ]
-                    self.log_text_controls[i].value = None
                 else:
-                    self.log_text_controls[i].value = line_data
-                    self.log_text_controls[i].spans = []
-                
-                # Force apply all properties to ensure client sync
-                self.log_text_controls[i].color = base_color
-                self.log_text_controls[i].visible = True
-                self.log_rows[i].visible = True
-                self.log_rows[i].content.bgcolor = target_row_bg
-                self.log_rows[i].data = i
+                    # Optimized Path: Simple Text
+                    if text_control.spans:
+                        text_control.spans = [] 
+                    
+                    target_val = line_data if line_data.strip() else " "
+                    if text_control.value != target_val:
+                        text_control.value = target_val
             else:
-                # Outside file bounds
-                self.log_rows[i].visible = False
-                self.log_text_controls[i].visible = False
+                if row_container.visible:
+                    row_container.visible = False
+                    row_container.bgcolor = c_trans
+                    text_control.value = ""
 
 
 
@@ -1327,29 +1425,26 @@ class LogAnalyzerApp:
         # 效能監控 (可選)
         # print(f"Render frame took: {(time.time() - t_start)*1000:.2f}ms")
 
-    def jump_to_index(self, idx, update_slider=True):
+    def jump_to_index(self, idx, update_slider=True, immediate=False):
         if not self.log_engine:
             return
 
-        print(f"DEBUG: jump_to_index: requested idx={idx}, current_start_index_before={self.current_start_index}")
-        
         # Determine total items based on filter state
-        total_items = len(self.filtered_indices) if self.filtered_indices is not None else self.log_engine.line_count()
+        if self.show_only_filtered and self.filtered_indices is not None:
+            total_items = len(self.filtered_indices)
+        else:
+            total_items = self.log_engine.line_count()
 
         # 邊界檢查
         if idx < 0: idx = 0
         max_idx = max(0, total_items - self.LINES_PER_PAGE)
         if idx > max_idx: idx = max_idx
         
-        self.current_start_index = idx
+        self.target_start_index = idx
         
-        # Update Slider if requested
-        if update_slider:
-            self.last_slider_update = time.time()
-            self.sync_scrollbar_position()
-            
-        print(f"DEBUG: jump_to_index: current_start_index_after={self.current_start_index}")
-        self.update_log_view()
+        if immediate:
+            # Snap immediately
+            asyncio.create_task(self.immediate_render())
 
     async def on_slider_change(self, e):
         # Time-based debounce is still useful but less critical if we don't update slider
@@ -1402,11 +1497,16 @@ class LogAnalyzerApp:
         if current_view_idx is None: current_view_idx = 0
         
         new_view_idx = current_view_idx
-
+        
+        # Modifier for speed
+        step = 1
+        if e.ctrl: step = 10 # Faster scroll with Ctrl
+        
+        # Basic navigation
         if e.key in ["ArrowDown", "Arrow Down"]:
-            new_view_idx = current_view_idx + 1
+            new_view_idx = current_view_idx + step
         elif e.key in ["ArrowUp", "Arrow Up"]:
-            new_view_idx = current_view_idx - 1
+            new_view_idx = current_view_idx - step
         elif e.key in ["PageDown", "Page Down", "Next"]:
             new_view_idx = current_view_idx + self.LINES_PER_PAGE
         elif e.key in ["PageUp", "Page Up", "Prior"]:
@@ -1421,7 +1521,7 @@ class LogAnalyzerApp:
         # Clamp range
         new_view_idx = max(0, min(new_view_idx, total_items - 1))
         
-        print(f"DEBUG: Navigating to ViewIdx: {new_view_idx}, Total: {total_items}, ViewportLines: {self.LINES_PER_PAGE}, CurrentStart: {self.target_start_index}")
+        # print(f"DEBUG: Navigating to ViewIdx: {new_view_idx}, Total: {total_items}")
         
         # Map back to raw index for selection
         if self.show_only_filtered and self.filtered_indices is not None:
@@ -1434,16 +1534,18 @@ class LogAnalyzerApp:
         self.selection_anchor = new_raw_idx
         
         # --- Sync Viewport (Scroll to follow selection) ---
-        # Using target_start_index for more consistent logic with render_loop
+        # We use immediate=True for keyboard to make it feel snappy
         if new_view_idx < self.target_start_index:
             # Scroll up to show the new line at the top
-            self.jump_to_index(new_view_idx)
+            self.jump_to_index(new_view_idx, immediate=True)
         elif new_view_idx >= self.target_start_index + self.LINES_PER_PAGE:
             # Scroll down to show the new line at the bottom
-            self.jump_to_index(new_view_idx - self.LINES_PER_PAGE + 1)
+            self.jump_to_index(new_view_idx - self.LINES_PER_PAGE + 1, immediate=True)
         else:
-            # Selection is within viewport, but we still need to redraw the highight
+            # Selection is within viewport, just redraw highlight
             self.needs_render = True
+            self.update_log_view()
+            self.page.update()
 
 
 
@@ -1467,75 +1569,39 @@ class LogAnalyzerApp:
             
         self.jump_to_index(int(new_idx), update_slider=True)
 
-    async def on_log_scroll(self, e: ft.ScrollEvent):
-        # Handle mouse wheel scrolling via GestureDetector
-        if not self.log_engine:
-            return
-            
-        # Adjust sensitivity (lines per scroll step)
-        step = 3
-        
-        # e.scroll_delta_y: positive = scroll up (content moves down), negative = scroll down?
-        # Typically:
-        # Wheel Down -> delta_y > 0 -> We want to see next lines -> Index Increase
-        # Wheel Up -> delta_y < 0 -> We want to see prev lines -> Index Decrease
-        
-        # Note: Flet/Flutter scroll delta direction might vary.
-        # Let's assume standard: delta > 0 means scrolling down (content moves up)
-        
-        # Based on API Ref: scroll_delta is an Offset object
-        delta = e.scroll_delta.y
-        
-        if delta > 0:
-            new_idx = self.current_start_index + step
-        elif delta < 0:
-            new_idx = self.current_start_index - step
-        else:
-            return
-            
-        self.jump_to_index(int(new_idx), update_slider=True)
+
 
     async def on_resize(self, e):
         # Update scrollbar track height info
         if self.page.height:
-            # We need the full height of the log_view_area for the scrollbar track
-            # Estimated track height = Page Height - Status Bar Height - Top Input Controls Height
-            # The height of the log_view_area (excluding sidebar and timeline)
-            # Use a larger margin (100px) to account for all UI decorations safely
+            # Check if initial content is hidden
             is_initial = self.initial_content.visible
             status_h = self.status_bar.height if self.status_bar.height else 30
             menu_h = self.top_bar.height if self.top_bar.height else 40
-            top_controls_h = (self.top_controls.height if self.top_controls.height else 50) if is_initial else 0
             
-            # Safe margin for OS title bar and internal spacing
-            # Since we use fixed height rows, we can be much more precise.
-            self.scrollbar_track_height = self.page.height - top_controls_h - status_h - menu_h
+            # Safe margin calculation
+            self.scrollbar_track_height = self.page.height - status_h - menu_h
             
             # Dynamic LINES_PER_PAGE
-            line_height = 20 # Matches the Container height set in build_ui
+            line_height = self.ROW_HEIGHT
             if self.scrollbar_track_height > 0:
-                # Calculate exactly how many 20px rows fit in the track
-                # Subtract a small safety margin (5px) for the entire column
-                new_lines_per_page = int((self.scrollbar_track_height - 5) / line_height)
-                # Clamp
-                new_lines_per_page = max(10, min(new_lines_per_page, self.MAX_LOG_ROWS))
+                # Calculate exactly how many rows fit in the track
+                new_lines_per_page = int((self.scrollbar_track_height - 10) / line_height)
+                # Clamp to pool size
+                new_lines_per_page = max(10, min(new_lines_per_page, self.TEXT_POOL_SIZE))
                 
                 if new_lines_per_page != self.LINES_PER_PAGE:
                     self.LINES_PER_PAGE = new_lines_per_page
                     self.update_log_view()
 
-            # Re-sync thumb position based on new track height
+            # Re-sync thumb position
             self.sync_scrollbar_position()
-            
-            # Sync Timeline height
             self.timeline.set_height(self.scrollbar_track_height)
             
         self.page.update()
 
     async def on_scrollbar_drag(self, e: ft.DragUpdateEvent):
         # Update thumb position visually
-        # e.delta_y might be missing in 0.80.0, use local_delta.y
-        # delta = e.local_delta.y if hasattr(e, 'local_delta') else e.delta_y # Fallback just in case
         delta = get_event_prop(e, 'delta_y', default=0)
         
         self.thumb_top += delta
@@ -1557,13 +1623,13 @@ class LogAnalyzerApp:
             max_idx = max(0, total_items - self.LINES_PER_PAGE)
             
             new_idx = int(percentage * max_idx)
-            # Update log view (don't update scrollbar back to avoid jitter)
-            self.jump_to_index(new_idx, update_slider=False)
+            # Update target and trigger immediate render
+            self.target_start_index = new_idx
+            if not self.is_updating:
+                asyncio.create_task(self.immediate_render())
     
     async def on_scrollbar_tap(self, e: ft.TapEvent):
         # Jump to position
-        # e.local_y replaced by e.local_position.y in 0.80.0
-        # local_y = e.local_position.y
         local_y = get_event_prop(e, 'local_y', default=0)
         
         click_y = local_y - (self.scrollbar_thumb_height / 2) # Center thumb on click
@@ -1572,15 +1638,14 @@ class LogAnalyzerApp:
         if max_top <= 0: return
 
         self.thumb_top = max(0.0, min(click_y, max_top))
-        self.scrollbar_thumb.top = self.thumb_top
-        # self.scrollbar_thumb.update()
+        # self.scrollbar_thumb.top = self.thumb_top
         
         percentage = self.thumb_top / max_top
         total_items = len(self.filtered_indices) if self.filtered_indices is not None else (self.log_engine.line_count() if self.log_engine else 0)
         max_idx = max(0, total_items - self.LINES_PER_PAGE)
         new_idx = int(percentage * max_idx)
         
-        self.jump_to_index(new_idx, update_slider=True) # Tap should snap
+        self.jump_to_index(new_idx, update_slider=True, immediate=True) # immediate=True will trigger render
 
     def sync_scrollbar_position(self):
         if not self.log_engine: return
@@ -1603,40 +1668,20 @@ class LogAnalyzerApp:
         # self.scrollbar_thumb.update()
 
     async def render_loop(self):
-        """Background task that polls for index changes and updates UI at 30fps."""
+        """Background task that polls for index changes."""
         while True:
             try:
-                # Trigger update if index changed OR needs_render was requested
-                if self.needs_render or self.current_start_index != self.target_start_index:
-                    self.current_start_index = self.target_start_index
-                    self.update_log_view()
-                    self.sync_scrollbar_position()
-                    self.timeline.update_scroll(self.current_start_index)
-                    self.page.update()
-                    self.needs_render = False # Reset flag
+                # Still check for needs_render (for non-scroll updates like filters)
+                if self.needs_render:
+                    self.needs_render = False
+                    await self.immediate_render()
                 
-                await asyncio.sleep(0.033) # ~30 FPS
+                await asyncio.sleep(0.1) # Much slower heartbeat, scroll is handled immediately
             except Exception as e:
                 print(f"Render Loop Error: {e}")
                 await asyncio.sleep(1)
 
-    def jump_to_index(self, idx, update_slider=True):
-        if not self.log_engine:
-            return
 
-        # Determine total items based on filter state
-        if self.show_only_filtered and self.filtered_indices is not None:
-            total_items = len(self.filtered_indices)
-        else:
-            total_items = self.log_engine.line_count()
-
-        # 邊界檢查
-        if idx < 0: idx = 0
-        max_idx = max(0, total_items - self.LINES_PER_PAGE)
-        if idx > max_idx: idx = max_idx
-        
-        # Only update the target, the loop will handle the rest
-        self.target_start_index = idx
 
     async def on_slider_change(self, e):
         pass
@@ -1723,7 +1768,7 @@ class LogAnalyzerApp:
         
         # Trigger the render loop to refresh log view with new filter results
         self.needs_render = True
-        self.page.update()
+        # self.page.update() # REMOVED: Rely on render_loop
         # self.update_log_view() # jump_to_index already calls update_log_view
 
     async def on_add_filter_click(self, e):
@@ -1962,7 +2007,39 @@ class LogAnalyzerApp:
         self.page.show_dialog(self.filter_ctx)
 
 
-    async def on_log_click(self, e: ft.TapEvent):
+    async def on_log_area_tap(self, e: ft.TapEvent):
+        # Calculate which row was clicked based on local_y
+        local_y = get_event_prop(e, "local_y", 0)
+        row_height = self.ROW_HEIGHT
+        row_idx = int(local_y / row_height)
+        
+        # Safely access modifiers
+        ctrl = getattr(e, "ctrl", False)
+        shift = getattr(e, "shift", False)
+        
+        # Call the existing click handler with mocked row_idx
+        class MockEvent:
+            def __init__(self, data, ctrl, shift):
+                self.control = type('obj', (object,), {'data': data})
+                self.ctrl = ctrl
+                self.shift = shift
+        
+        mock_e = MockEvent(row_idx, ctrl, shift)
+        await self.on_log_click(mock_e)
+
+    async def on_log_area_secondary_tap(self, e: ft.TapEvent):
+        local_y = get_event_prop(e, "local_y", 0)
+        row_height = self.ROW_HEIGHT
+        row_idx = int(local_y / row_height)
+        
+        class MockEvent:
+            def __init__(self, data):
+                self.control = type('obj', (object,), {'data': data})
+        
+        mock_e = MockEvent(row_idx)
+        await self.on_log_right_click(mock_e)
+
+    async def on_log_click(self, e):
         row_idx = e.control.data
         view_idx = self.current_start_index + row_idx
         
@@ -2133,10 +2210,9 @@ class LogAnalyzerApp:
             engine_type = "Rust" if HAS_RUST else "Mock"
             self.status_text.value = f"[{engine_type}] Loaded {os.path.basename(path)} ({line_count:,} lines) in {duration:.3f}s"
             
-            # Force initial content update
+            # Phase 5 Fix: Use direct visibility control
             self.initial_content.visible = False
             self.log_view_area.visible = True
-            self.log_area.alignment = ft.MainAxisAlignment.START
             
             # Reset view parameters
             self.target_start_index = 0
@@ -2147,13 +2223,17 @@ class LogAnalyzerApp:
                 self.selected_indices = {0}
                 self.selection_anchor = 0
             
-            # Sync all UI components before the first update
+            # Sync all UI components
             await self.on_resize(None)
             await self.apply_filters()
             
+            # First render
             self.update_log_view()
-            self.needs_render = True # Inform loop
-            self.page.update() # Immediate render
+            self.page.update() 
+            
+            # Enable loop
+            self.needs_render = True 
+            print(f"DEBUG: File loaded and UI update triggered. Lines per page: {self.LINES_PER_PAGE}")
             
         except Exception as e:
             print(f"ERROR in load_file: {e}")
