@@ -9,7 +9,7 @@ import re
 import warnings
 import threading
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import filedialog
 
 # 隱藏 Flet 1.0 的過期警告
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -450,19 +450,34 @@ class LogAnalyzerApp:
 
     def _init_background_services(self):
         """啟動與管理所有背景服務。"""
-        # A. 啟動執行緒級別的物理喚醒 (針對 Windows 的核心穩定方案)
+        # A. 啟動執行緒級別的物理喚醒 (解決 Windows asyncio 睡眠問題)
         try:
             loop = asyncio.get_running_loop()
-            t = threading.Thread(target=wakeup_loop, args=(loop,), daemon=True)
-            t.start()
+            def _wakeup_serv():
+                while not self.is_closing:
+                    try:
+                        # 強制喚醒事件迴圈處理掛起的 Pipe/Socket 信號
+                        loop.call_soon_threadsafe(lambda: None)
+                        time.sleep(0.1)
+                    except: break
+            
+            threading.Thread(target=_wakeup_serv, daemon=True).start()
         except Exception as e:
             print(f"DEBUG: Failed to start wakeup thread: {e}")
 
-        # B. 啟動協程級別任務
-        asyncio.create_task(heartbeat(self.page))
+        # B. 啟動協程級別心跳 (主動通訊確保視窗信號 flush)
+        async def _heartbeat_serv():
+            while not self.is_closing:
+                try:
+                    # 讀取視窗寬度強制進行一次 IPC 通訊，解決信號積壓
+                    _ = self.page.window_width
+                    await asyncio.sleep(0.5)
+                except: break
+        
+        asyncio.create_task(_heartbeat_serv())
         asyncio.create_task(self.render_loop())
         
-        # C. 基礎視窗事件 (暫不攔截，僅保留 hook)
+        # C. 基礎視窗事件
         self.page.window_prevent_close = False 
         
     def load_config(self):
@@ -918,31 +933,25 @@ class LogAnalyzerApp:
         self.page.update()
 
     async def on_open_file_click(self, e):
-        # WORKAROUND: Using Tkinter native dialog because Flet 1.0 Beta FilePicker 
-        # is currently unstable/unrecognized in this specific environment.
+        """開啟檔案對話框。"""
+        await self._run_safe_async(self._perform_open_file_dialog(), "Opening File")
+
+    async def _perform_open_file_dialog(self):
         import tkinter as tk
         from tkinter import filedialog
         
         def pick_file_sync():
-            try:
-                root = tk.Tk()
-                root.withdraw()
-                root.attributes('-topmost', True) # Force to front
-                path = filedialog.askopenfilename(
-                    title="Select Log File (Flet 1.0 Workaround)",
-                    initialdir=self.config.get("last_log_dir", os.path.expanduser("~")),
-                    filetypes=[("Log Files", "*.log;*.txt;*.tat"), ("All Files", "*.*")]
-                )
-                root.destroy()
-                return path
-            except Exception as ex:
-                print(f"DEBUG: Tkinter Workaround Error: {ex}")
-                return None
+            root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
+            path = filedialog.askopenfilename(
+                title="Select Log File",
+                initialdir=self.config.get("last_log_dir", os.path.expanduser("~")),
+                filetypes=[("Log Files", "*.log;*.txt;*.tat"), ("All Files", "*.*")]
+            )
+            root.destroy(); return path
             
-        # Per Flet Development Guide 3.1: Use asyncio.to_thread for blocking tasks
-        self.is_picking_file = True # 鎖定，忽略雜訊事件
+        self.is_picking_file = True
         file_path = await asyncio.to_thread(pick_file_sync)
-        self.is_picking_file = False # 解鎖
+        self.is_picking_file = False
         
         if file_path:
             self.config["last_log_dir"] = os.path.dirname(file_path)
@@ -977,145 +986,127 @@ class LogAnalyzerApp:
 
     def add_to_recent_files(self, path):
         recent = self.config.get("recent_files", [])
-        # Remove if exists to move to top
         if path in recent:
             recent.remove(path)
         recent.insert(0, path)
-        # Limit to 10
-        if len(recent) > 10:
-            recent = recent[:10]
-        self.config["recent_files"] = recent
+        self.config["recent_files"] = recent[:10]
         self.update_recent_files_menu()
-        # Save config immediately to avoid loss on crash
         self.save_config()
-        # Force top bar update
         if hasattr(self, "menu_bar"):
             self.menu_bar.update()
 
-    async def import_tat_filters(self, e=None):
-        import tkinter as tk
-        from tkinter import filedialog
-        import xml.etree.ElementTree as ET
+    async def on_open_file_click(self, e):
+        """開啟檔案對話框。"""
+        await self._run_safe_async(self._perform_open_file_dialog(), "Opening File")
+
+    async def _perform_open_file_dialog(self):
+        def pick_file_sync():
+            root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
+            path = filedialog.askopenfilename(
+                title="Select Log File",
+                initialdir=self.config.get("last_log_dir", os.path.expanduser("~")),
+                filetypes=[("Log Files", "*.log;*.txt;*.tat"), ("All Files", "*.*")])
+            root.destroy(); return path
         
+        self.is_picking_file = True
+        file_path = await asyncio.to_thread(pick_file_sync)
+        self.is_picking_file = False
+        
+        if file_path:
+            self.config["last_log_dir"] = os.path.dirname(file_path)
+            self.path_input.value = file_path
+            await self.load_file(file_path)
+
+    async def import_tat_filters(self, e=None):
+        """導入 TAT 過濾器檔案。"""
+        await self._run_safe_async(self._perform_import_filters_logic(), "Importing Filters")
+
+    async def _perform_import_filters_logic(self):
         def ask_file():
             root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
             path = filedialog.askopenfilename(
                 title="Import TAT Filters",
                 initialdir=self.config.get("last_filter_dir", "."),
-                filetypes=[("TextAnalysisTool", "*.tat"), ("All Files", "*.*")]
-            )
+                filetypes=[("TextAnalysisTool", "*.tat"), ("All Files", "*.*")])
             root.destroy(); return path
-            
-        self.is_picking_file = True # 鎖定
+        self.is_picking_file = True
         path = await asyncio.to_thread(ask_file)
-        self.is_picking_file = False # 解鎖
-        
+        self.is_picking_file = False
         if not path: return
-        
-        try:
-            tree = ET.parse(path)
-            root = tree.getroot()
-            new_filters = []
-            
-            # Find all filter tags regardless of case or nesting
-            for f_node in root.iter():
-                if f_node.tag.lower() == 'filter':
-                    # Extract attributes with broad compatibility
-                    en = f_node.get('enabled', 'y').lower() == 'y'
-                    reg = f_node.get('regex', 'n').lower() == 'y'
-                    
-                    # Handle both 'exclude' and 'excluding'
-                    exc = (f_node.get('exclude', 'n').lower() == 'y') or \
-                          (f_node.get('excluding', 'n').lower() == 'y')
-                    
-                    # Colors (handle missing attributes)
-                    fg = f_node.get('foreColor', '000000')
-                    bg = f_node.get('backColor', 'ffffff')
-                    if not fg.startswith("#"): fg = "#" + fg
-                    if not bg.startswith("#"): bg = "#" + bg
-                    
-                    # Handle text as attribute OR node text
-                    text = f_node.get('text')
-                    if text is None:
-                        text = f_node.text if f_node.text else ""
-                    
-                    new_filters.append(Filter(text, fg, bg, en, reg, exc))
-            
-            if not new_filters:
-                self.page.snack_bar = ft.SnackBar(ft.Text("No filters found in file."))
-            else:
-                self.filters.extend(new_filters)
-                await self.render_filters()
-                await self.apply_filters()
-                self.config["last_filter_dir"] = os.path.dirname(path)
-                self.current_tat_path = path # Set current path
-                self.filters_dirty = False # Loaded from file, not dirty
-                self.update_title()
-                self.save_config()
-                self.page.snack_bar = ft.SnackBar(ft.Text(f"Imported {len(new_filters)} filters."))
-            
-            self.page.snack_bar.open = True
-            self.page.update()
-        except Exception as ex:
-            print(f"Import Error: {ex}")
-            self.page.snack_bar = ft.SnackBar(ft.Text(f"Error importing filters: {ex}"))
-            self.page.snack_bar.open = True
-            self.page.update()
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(path)
+        root = tree.getroot()
+        new_filters = []
+        for f_node in root.iter():
+            if f_node.tag.lower() == 'filter':
+                en = f_node.get('enabled', 'y').lower() == 'y'
+                reg = f_node.get('regex', 'n').lower() == 'y'
+                exc = (f_node.get('exclude', 'n').lower() == 'y') or (f_node.get('excluding', 'n').lower() == 'y')
+                fg = f_node.get('foreColor', '000000')
+                bg = f_node.get('backColor', 'ffffff')
+                if not fg.startswith("#"): fg = "#" + fg
+                if not bg.startswith("#"): bg = "#" + bg
+                text = f_node.get('text')
+                if text is None: text = f_node.text if f_node.text else ""
+                new_filters.append(Filter(text, fg, bg, en, reg, exc))
+        if new_filters:
+            self.filters.extend(new_filters)
+            await self.render_filters()
+            await self._perform_filtering_logic()
+            self.config["last_filter_dir"] = os.path.dirname(path)
+            self.current_tat_path = path
+            self.filters_dirty = False
+            self.update_title()
+            self.save_config()
+            return f"Imported {len(new_filters)} filters"
+        return "No filters found"
 
     async def save_tat_filters(self, e=None):
-        """Quick Save: Overwrite current file or trigger Save As."""
-        if not self.filters:
-            self.page.snack_bar = ft.SnackBar(ft.Text("No filters to save."))
-            self.page.snack_bar.open = True; self.page.update(); return
-
+        """儲存過濾器。"""
+        if not self.filters: return
         if self.current_tat_path:
-            await self._write_filters_to_file(self.current_tat_path)
+            await self._run_safe_async(self._write_filters_to_file(self.current_tat_path), "Saving Filters")
         else:
             await self.save_tat_filters_as()
 
     async def save_tat_filters_as(self, e=None):
-        import tkinter as tk
-        from tkinter import filedialog
-        
-        if not self.filters:
-            self.page.snack_bar = ft.SnackBar(ft.Text("No filters to save."))
-            self.page.snack_bar.open = True; self.page.update(); return
+        """過濾器另存新檔。"""
+        if not self.filters: return
+        await self._run_safe_async(self._perform_save_as_logic(), "Saving Filters")
 
+    async def _perform_save_as_logic(self):
         def ask_save():
             root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
             path = filedialog.asksaveasfilename(
                 title="Save Filters As",
                 defaultextension=".tat",
                 initialdir=self.config.get("last_filter_dir", "."),
-                filetypes=[("TextAnalysisTool", "*.tat")]
-            )
+                filetypes=[("TextAnalysisTool", "*.tat")])
             root.destroy(); return path
-            
+        self.is_picking_file = True
         path = await asyncio.to_thread(ask_save)
+        self.is_picking_file = False
         if path:
             await self._write_filters_to_file(path)
 
     async def _write_filters_to_file(self, path):
-        try:
-            xml_content = '<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<TextAnalysisTool.NET>\n'
-            for f in self.filters:
-                xml_content += f"  {f.to_tat_xml()}\n"
-            xml_content += "</TextAnalysisTool.NET>"
-            
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write(xml_content)
-            
-            self.config["last_filter_dir"] = os.path.dirname(path)
-            self.current_tat_path = path
-            self.filters_dirty = False
-            self.update_title()
-            self.save_config()
-            self.page.snack_bar = ft.SnackBar(ft.Text("Filters saved successfully."))
-            self.page.snack_bar.open = True; self.page.update()
-        except Exception as ex:
-            print(f"Save Error: {ex}")
-            self.page.snack_bar = ft.SnackBar(ft.Text(f"Error saving filters: {ex}"))
-            self.page.snack_bar.open = True; self.page.update()
+        """實體寫入過濾器檔案。"""
+        xml_content = '<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<TextAnalysisTool.NET>\n'   
+        for f in self.filters:
+            xml_content += f"  {f.to_tat_xml()}\n"
+        xml_content += "</TextAnalysisTool.NET>"
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(xml_content)
+        self.config["last_filter_dir"] = os.path.dirname(path)
+        self.current_tat_path = path
+        self.filters_dirty = False
+        self.update_title()
+        self.save_config()
+        return "Filters saved successfully"
+        
+    async def exit_app(self, e):
+        # 這裡不直接銷毀，而是呼叫我們的關閉處理器，讓它可以檢查 unsaved changes
+        await self.handle_app_close(e)
 
     def toggle_sidebar(self):
         self.sidebar.visible = not self.sidebar.visible
@@ -1825,18 +1816,51 @@ class LogAnalyzerApp:
         self.sync_scrollbar_position()
         self.page.update()
 
+    async def _run_safe_async(self, coro, status_msg=None):
+        """
+        通用的非同步任務執行器。
+        提供統一的錯誤捕捉、Log 紀錄與 SnackBar 提示，防止 UI 崩潰。
+        """
+        if status_msg:
+            self.status_text.value = f"{status_msg}..."
+            self.page.update()
+            
+        try:
+            return await coro
+        except Exception as e:
+            print(f"UNHANDLED ERROR: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            
+            # 顯示錯誤提示給使用者
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Text(f"Error: {str(e)}"),
+                bgcolor=ft.Colors.ERROR
+            )
+            self.page.snack_bar.open = True
+            self.page.update()
+            return None
+
     async def apply_filters(self):
+        """執行過濾邏輯。"""
         if not self.log_engine:
             return
 
+        # 使用安全執行器執行核心過濾任務
+        await self._run_safe_async(self._perform_filtering_logic(), "Filtering")
+
+    async def _perform_filtering_logic(self):
+        """實際的過濾計算邏輯。"""
+        # 前置條件檢查：必須有 log 檔案載入才能過濾
+        if not self.log_engine:
+            print("DEBUG: No log engine, skipping filter logic.", flush=True)
+            return
+            
         # 收集啟用的 Filters
-        # Format: (text, is_regex, is_exclude, is_event, original_index)
         active_filters = []
-        # Mapping from active_index to original_index to update hit counts later
         active_map = [] 
 
         for i, f in enumerate(self.filters):
-            # Reset hit count for display
             f.hit_count = 0
             if f.enabled and f.text:
                 active_filters.append((f.text, f.is_regex, f.is_exclude, f.is_event, i))
@@ -1844,59 +1868,34 @@ class LogAnalyzerApp:
 
         if not active_filters:
             self.filtered_indices = None
-            self.line_tags_codes = None # Clear tags
+            self.line_tags_codes = None
             total_count = self.log_engine.line_count()
-            # Still update timeline to empty? or full? usually clear timeline if no filters
             self.timeline.update_data([], total_count)
         else:
-            # Call Engine Filter (Run in thread to avoid freezing)
-            self.status_text.value = "Filtering..."
-            self.page.update()
+            # 呼叫引擎 (背景執行緒執行防止卡頓)
+            results = await asyncio.to_thread(self.log_engine.filter, active_filters)
             
-            try:
-                # 這裡假設 filter 是同步的，如果是 Rust 引擎會很快，但如果很大，最好用 run_in_executor
-                # MockEngine.filter is synchronous
-                # Rust log_engine.filter is synchronous (releasing GIL)
-                
-                # We wrap it in to_thread just in case
-                import asyncio
-                results = await asyncio.to_thread(self.log_engine.filter, active_filters)
-                
-                # Unpack results: (line_tags, filtered_indices, hit_counts, timeline_events)
-                self.line_tags_codes, self.filtered_indices, hit_counts, timeline_events = results
-                total_count = len(self.filtered_indices)
-                
-                # Pass RAW total lines for timeline normalization
-                raw_count = self.log_engine.line_count()
-                self.timeline.update_data(timeline_events, raw_count)
-                
-                # Update hit counts on Filter objects
-                for idx, count in enumerate(hit_counts):
-                    if idx < len(active_map):
-                        original_idx = active_map[idx]
-                        self.filters[original_idx].hit_count = count
-                
-                # Refresh filter list to show new counts
-                await self.render_filters()
-                
-            except Exception as e:
-                print(f"Filter Error: {e}")
-                import traceback
-                traceback.print_exc()
-                self.filtered_indices = None
-                total_count = self.log_engine.line_count()
-                self.timeline.update_data([], total_count) # Clear timeline on error
+            # 解包結果
+            self.line_tags_codes, self.filtered_indices, hit_counts, timeline_events = results
+            total_count = len(self.filtered_indices)
+            
+            # 更新 Timeline
+            raw_count = self.log_engine.line_count()
+            self.timeline.update_data(timeline_events, raw_count)
+            
+            # 更新過濾器命中數
+            for idx, count in enumerate(hit_counts):
+                if idx < len(active_map):
+                    self.filters[active_map[idx]].hit_count = count
+            
+            await self.render_filters()
 
-        # Update Custom Scrollbar Max
-        # self.scroll_slider.max = max(0, total_count - self.LINES_PER_PAGE) # No longer needed
         self.current_start_index = 0
-        self.jump_to_index(0, update_slider=True) # Reset scroll to top and update thumb
+        self.jump_to_index(0, update_slider=True)
         
         mode = "Showing" if self.show_only_filtered else "Total"
         count = total_count if self.show_only_filtered else self.log_engine.line_count()
         self.status_text.value = f"{mode} {count} lines"
-        
-        # Trigger the render loop to refresh log view with new filter results
         self.needs_render = True
         # self.page.update() # REMOVED: Rely on render_loop
         # self.update_log_view() # jump_to_index already calls update_log_view
@@ -2212,8 +2211,13 @@ class LogAnalyzerApp:
                 low, high = min(start_view, view_idx), max(start_view, view_idx)
                 if not ctrl: self.selected_indices.clear()
                 for i in range(low, high + 1):
-                    ridx = self.filtered_indices[i] if (self.show_only_filtered and self.filtered_indices is not None) else i
+                    # 正確映射回真實索引
+                    if self.show_only_filtered and self.filtered_indices is not None:
+                        ridx = self.filtered_indices[i]
+                    else:
+                        ridx = i
                     self.selected_indices.add(ridx)
+                # 注意：範圍選取後不更新 selection_anchor，保留原始起點以供連續選取
         elif ctrl:
             # Toggle Selection
             if real_idx in self.selected_indices:
@@ -2229,12 +2233,16 @@ class LogAnalyzerApp:
         await self.immediate_render()
 
     def _get_view_index_from_raw(self, raw_idx):
-        if self.filtered_indices is not None:
+        """根據目前的視圖模式，將原始索引映射為視圖索引。"""
+        # 如果目前是過濾模式，才需要查找過濾後的索引位置
+        if self.show_only_filtered and self.filtered_indices is not None:
             import bisect
             idx = bisect.bisect_left(self.filtered_indices, raw_idx)
             if idx < len(self.filtered_indices) and self.filtered_indices[idx] == raw_idx:
                 return idx
             return None
+        
+        # 全視圖模式下，視圖索引就等於原始索引
         return raw_idx
 
     async def copy_selected_lines(self, e=None):
@@ -2315,91 +2323,49 @@ class LogAnalyzerApp:
         await self.load_file(self.path_input.value)
 
     async def load_file(self, path):
-        print(f"DEBUG: load_file called with path='{path}'")
-        if not path:
-            return
-            
-        # Clean path (remove quotes if any)
-        path = path.strip().strip('\"\'')
-        
-        self.status_text.value = f"Loading: {path}..."
-        self.page.update() # Sync update
-        await asyncio.sleep(0) # Yield control to UI
-        
+        """載入 Log 檔案。"""
+        if not path: return
+        # 清理路徑
+        clean_path = path.strip().strip('\"\'')
+        await self._run_safe_async(self._perform_load_logic(clean_path), f"Loading {os.path.basename(clean_path)}")
+
+    async def _perform_load_logic(self, path):
+        """實際的檔案載入與引擎初始化邏輯。"""
+        print(f"DEBUG: Initializing engine with {path}", flush=True)
         start_time = time.time()
-        try:
-            print(f"DEBUG: Initializing engine with {path}")
-            # Initialize Engine (_REAL_LOG_ENGINE is either the actual Rust module or MockLogEngine)
-            # If Engine initialization is heavy, we might want to wrap it in asyncio.to_thread
-            if HAS_RUST:
-                 # 假設 Rust 引擎初始化是同步且耗時的
-                 # self.log_engine = await asyncio.to_thread(_REAL_LOG_ENGINE, path)
-                 self.log_engine = _REAL_LOG_ENGINE(path)
-            else:
-                 self.log_engine = _REAL_LOG_ENGINE(path)
-            
-            line_count = self.log_engine.line_count()
-            duration = time.time() - start_time
-            print(f"DEBUG: Loaded {line_count} lines")
-            
-            self.file_path = path
-            self.update_title() # Update window title
-            
-            # 更新 Recent Files
-            self.add_to_recent_files(path)
-            
-            # 更新 UI 顯示載入結果
-            engine_type = "Rust" if HAS_RUST else "Mock"
-            self.status_text.value = f"[{engine_type}] Loaded {os.path.basename(path)} ({line_count:,} lines) in {duration:.3f}s"
-            
-            # Phase 5 Fix: Use direct visibility control
-            self.initial_content.visible = False
-            self.log_view_area.visible = True
-            
-            # Reset view parameters
-            self.target_start_index = 0
-            self.current_start_index = 0
-            
-            # Select first line
-            if line_count > 0:
-                self.selected_indices = {0}
-                self.selection_anchor = 0
-            
-            # Sync all UI components
-            await self.on_resize(None)
-            await self.apply_filters()
-            
-            # First render
-            self.update_log_view()
-            self.page.update() 
-            
-            # Enable loop
-            self.needs_render = True 
-            print(f"DEBUG: File loaded and UI update triggered. Lines per page: {self.LINES_PER_PAGE}")
-            
-        except Exception as e:
-            print(f"ERROR in load_file: {e}")
-            import traceback
-            traceback.print_exc()
-            self.status_text.value = f"Error loading file: {e}"
-            self.page.update()
-
-def wakeup_loop(loop):
-    """背景執行緒：強制喚醒 asyncio 迴圈，解決 Windows 上的事件積壓問題。"""
-    while True:
-        try:
-            # 向迴圈發送空任務，強制它處理掛起的 Pipe/Socket 信號
-            loop.call_soon_threadsafe(lambda: None)
-            time.sleep(0.1)
-        except:
-            break
-
-async def heartbeat(page: ft.Page):
-    """保持協程活躍。"""
-    while True:
-        try:
-            await asyncio.sleep(1)
-        except: break
+        
+        # 初始化引擎
+        if HAS_RUST:
+             self.log_engine = _REAL_LOG_ENGINE(path)
+        else:
+             self.log_engine = _REAL_LOG_ENGINE(path)
+        
+        line_count = self.log_engine.line_count()
+        duration = time.time() - start_time
+        print(f"DEBUG: Loaded {line_count} lines in {duration:.3f}s", flush=True)
+        
+        self.file_path = path
+        self.update_title()
+        self.add_to_recent_files(path)
+        
+        # 更新 UI
+        self.initial_content.visible = False
+        self.log_view_area.visible = True
+        
+        # 重置狀態
+        self.target_start_index = 0
+        self.current_start_index = 0
+        self.selected_indices = {0} if line_count > 0 else set()
+        self.selection_anchor = 0 if line_count > 0 else -1
+        
+        # 同步各組件
+        await self.on_resize(None)
+        await self._perform_filtering_logic() # 直接呼叫邏輯避免二次 Status 更新
+        
+        self.update_log_view()
+        engine_type = "Rust" if HAS_RUST else "Mock"
+        self.status_text.value = f"[{engine_type}] Loaded {os.path.basename(path)} ({line_count:,} lines) in {duration:.3f}s"
+        self.needs_render = True
 
 async def main(page: ft.Page):
     # 階段 1 最終優化：main() 僅負責引導啟動
