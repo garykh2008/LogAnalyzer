@@ -6,6 +6,12 @@ import time
 import asyncio
 import json
 import re
+import warnings
+import tkinter as tk
+from tkinter import messagebox
+
+# 隱藏 Flet 1.0 的過期警告
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Add current directory to sys.path to ensure we can load the Rust module
 sys.path.append(os.getcwd())
@@ -172,9 +178,12 @@ class Filter:
 
 class TimelineView(ft.Container):
     def __init__(self, app, width=50):
+        is_dark = app.page.theme_mode == ft.ThemeMode.DARK
+        bg = "#1e1e1e" if is_dark else "#ffffff"
+        
         super().__init__(
             width=width,
-            bgcolor="#1e1e1e",
+            bgcolor=bg,
             padding=0,
             alignment=ft.Alignment(-1, -1)
         )
@@ -347,7 +356,7 @@ class LogAnalyzerApp:
         self.page.theme = ft.Theme(color_scheme_seed=ft.Colors.BLUE)
         self.page.dark_theme = ft.Theme(color_scheme_seed=ft.Colors.BLUE)
         
-        self.page.theme_mode = ft.ThemeMode.DARK
+        # self.page.theme_mode = ft.ThemeMode.DARK # Removed to prevent flash
         self.page.padding = 0
         self.page.spacing = 0
         
@@ -362,6 +371,9 @@ class LogAnalyzerApp:
         self.is_updating = False # Update lock for performance
         
         self.filters = [] # Store Filter objects
+        self.filters_dirty = False # Track unsaved filter changes
+        self.current_tat_path = None # Track current filter file path
+        
         self.filtered_indices = None # None means show all, otherwise list of real indices
         self.line_tags_codes = None  # Storage for all line tags from Rust
         self.show_only_filtered = False # Toggle between Full view and Filtered view
@@ -381,18 +393,30 @@ class LogAnalyzerApp:
         self.ctrl_pressed = False
         self.shift_pressed = False
         
+        self.is_closing = False # 防止重複觸發關閉邏輯
+        self.is_picking_file = False # 防止開啟檔案對話框時誤觸關閉
+        
         # Config Defaults
         self.config = {
             "last_log_dir": os.path.expanduser("~"),
             "last_filter_dir": os.path.expanduser("~"),
             "font_size": 12,
+            "theme_mode": "dark", # Default to dark
             "recent_files": [],
             "window_maximized": False,
             "main_window_geometry": "1200x800+100+100",
             "note_view_visible": False,
             "sash_main_y": 360
         }
-        self.config_file = "app_config.json"
+        
+        # Resolve absolute path for config
+        try:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+        except NameError:
+            base_dir = os.path.abspath(".")
+        self.config_file = os.path.join(base_dir, "app_config.json")
+        print(f"DEBUG: Config file path: {self.config_file}")
+        
         self.load_config()
         
         # Apply window settings
@@ -407,8 +431,13 @@ class LogAnalyzerApp:
         asyncio.create_task(self.render_loop())
         
         # Bind close event for saving config
-        self.page.window_prevent_close = True # We want to handle close to save config
-        self.page.on_window_event = self.on_window_event
+        self.page.window_prevent_close = False
+        try:
+            if hasattr(self.page, "window"):
+                self.page.window.prevent_close = False
+        except: pass
+            
+        self.page.update()
         
     def load_config(self):
         if os.path.exists(self.config_file):
@@ -433,19 +462,41 @@ class LogAnalyzerApp:
             
             self.config["main_window_geometry"] = f"{w}x{h}+{x}+{y}"
             
+            # Save theme and directory states
+            self.config["theme_mode"] = "dark" if self.page.theme_mode == ft.ThemeMode.DARK else "light"
+            
             # window_maximized is no longer a direct Page attribute, 
             # we check the window property if available
             self.config["window_maximized"] = getattr(self.page, "window_maximized", False)
             
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, indent=4)
-            print("Config saved.")
+                f.flush()
+                os.fsync(f.fileno()) # Force write to disk
+            # print(f"Config saved to {self.config_file}.")
         except Exception as e:
             print(f"Error saving config: {e}")
 
     def apply_window_geometry(self):
         geo = self.config.get("main_window_geometry", "1200x800+100+100")
         try:
+            # Apply Theme Mode first
+            target_mode = self.config.get("theme_mode", "dark")
+            print(f"DEBUG: Applying theme mode: {target_mode}")
+            self.page.theme_mode = ft.ThemeMode.DARK if target_mode == "dark" else ft.ThemeMode.LIGHT
+            
+            # Sync Native Windows Title Bar
+            if sys.platform == "win32":
+                import ctypes
+                try:
+                    # 20 = DWMWA_USE_IMMERSIVE_DARK_MODE
+                    win_dark_value = 1 if self.page.theme_mode == ft.ThemeMode.DARK else 0
+                    # Try to find our window - simpler approach for now
+                    hwnd = ctypes.windll.user32.GetForegroundWindow()
+                    if hwnd:
+                        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(ctypes.c_int(win_dark_value)), 4)
+                except Exception: pass
+            
             # Parse Tkinter/X11 geometry string: WxH+X+Y
             match = re.match(r"(\d+)x(\d+)\+(\d+)\+(\d+)", geo)
             if match:
@@ -460,16 +511,63 @@ class LogAnalyzerApp:
         except Exception as e:
             print(f"Error applying window geometry: {e}")
 
+    def handle_app_close(self, e):
+        """同步關閉處理器。採用『正向表列』：只處理確定是 close 的信號。"""
+        if self.is_closing:
+            return
+
+        # 取得事件名稱，Flet 1.0 的關閉事件名稱為 "close"
+        event_name = getattr(e, 'name', '').lower()
+        
+        # --- 終極修正：只對 "close" 產生反應，無視所有雜訊 ---
+        if event_name != "close":
+            return
+
+        print(f"DEBUG: Confirmed CLOSE button clicked. Dirty: {self.filters_dirty}", flush=True)
+        
+        if self.filters_dirty:
+            # 阻塞直到使用者回應
+            res = messagebox.askyesno(
+                "Unsaved Changes",
+                "Your filters have been modified. Do you want to exit without saving?"
+            )
+            
+            if res: # 是
+                self._execute_final_exit()
+            else: # 否
+                print("DEBUG: User cancelled exit.", flush=True)
+                self.is_closing = False
+        else:
+            self._execute_final_exit()
+
+    def _execute_final_exit(self):
+        """執行存檔與靜音銷毀。"""
+        self.is_closing = True
+        self.save_config()
+        print("DEBUG: Final exit process started...", flush=True)
+        
+        async def destroy_task():
+            try:
+                if hasattr(self.page, "window"):
+                    await self.page.window.destroy()
+            except: pass 
+
+        asyncio.run_coroutine_threadsafe(destroy_task(), asyncio.get_event_loop())
+
     async def on_window_event(self, e):
-        # In Flet 1.0, e.data might contain various window lifecycle states
-        if e.data == "close":
-            # Final save of geometry and state
-            self.save_config()
-            # No need to destroy if we want default close behavior, 
-            # but since prevent_close is True, we must exit.
-            await self.page.window_destroy()
+        pass
 
     def build_ui(self):
+        # --- Theme-Aware Colors ---
+        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+        
+        c_sidebar_bg = "#252526" if is_dark else "#ffffff"
+        c_log_bg = "#1e1e1e" if is_dark else "#f3f3f3"
+        c_scroll_track = "#2d2d2d" if is_dark else "#f0f0f0"
+        c_scroll_thumb = "#555555" if is_dark else "#c1c1c1"
+        c_timeline_area = "#2d2d2d" if is_dark else "#ffffff" # Match sidebar for light mode
+        c_top_bar_bg = "#202020" if is_dark else "#f3f3f3"
+        
         # --- Custom Top Menu Bar (Replacing AppBar for stability) ---
         self.recent_files_submenu = ft.SubmenuButton(
             content=ft.Text("Recent Files"),
@@ -480,6 +578,7 @@ class LogAnalyzerApp:
         self.menu_bar = ft.MenuBar(
             expand=True,
             style=ft.MenuStyle(
+                bgcolor=c_top_bar_bg,
                 alignment=ft.Alignment(-1, -1),
             ),
             controls=[
@@ -501,6 +600,11 @@ class LogAnalyzerApp:
                                                             content=ft.Text("Save Filters"),
                                                             leading=ft.Icon(ft.Icons.SAVE),
                                                             on_click=self.save_tat_filters
+                                                        ),
+                                                        ft.MenuItemButton(
+                                                            content=ft.Text("Save Filters As..."),
+                                                            leading=ft.Icon(ft.Icons.SAVE_AS),
+                                                            on_click=self.save_tat_filters_as
                                                         ),                        ft.MenuItemButton(
                             content=ft.Text("Exit"),
                             leading=ft.Icon(ft.Icons.EXIT_TO_APP),
@@ -557,7 +661,7 @@ class LogAnalyzerApp:
 
         self.sidebar = ft.Container(
             width=300, # Increased width for filters
-            bgcolor="#252526",
+            bgcolor=c_sidebar_bg,
             padding=10,
             content=ft.Column([
                 ft.Text("Filters", size=20, weight=ft.FontWeight.BOLD),
@@ -629,7 +733,7 @@ class LogAnalyzerApp:
                 expand=True 
             ),
             expand=True,
-            bgcolor="#1e1e1e", 
+            bgcolor=c_log_bg, 
         )
         
         # --- Custom Vertical Scrollbar ---
@@ -641,14 +745,14 @@ class LogAnalyzerApp:
         self.scrollbar_thumb = ft.Container(
             width=self.scrollbar_width,
             height=self.scrollbar_thumb_height,
-            bgcolor="#555555",
+            bgcolor=c_scroll_thumb,
             border_radius=5,
             top=0
         )
         
         self.scrollbar_track = ft.Container(
             width=self.scrollbar_width,
-            bgcolor="#2d2d2d",
+            bgcolor=c_scroll_track,
             expand=True, # Fill vertical space
         )
         
@@ -670,7 +774,7 @@ class LogAnalyzerApp:
         self.scrollbar_container = ft.Container(
             content=self.scrollbar_gesture,
             width=self.scrollbar_width,
-            bgcolor="#2d2d2d",
+            bgcolor=c_scroll_track,
             alignment=ft.Alignment(-1, -1)
         )
 
@@ -735,7 +839,7 @@ class LogAnalyzerApp:
         self.timeline = TimelineView(self, width=50)
         self.timeline_area = ft.Container(
             width=50, 
-            bgcolor="#2d2d2d",
+            bgcolor=c_timeline_area,
             content=self.timeline,
             alignment=ft.Alignment(-1, -1)
         )
@@ -851,7 +955,9 @@ class LogAnalyzerApp:
                 return None
             
         # Per Flet Development Guide 3.1: Use asyncio.to_thread for blocking tasks
+        self.is_picking_file = True # 鎖定，忽略雜訊事件
         file_path = await asyncio.to_thread(pick_file_sync)
+        self.is_picking_file = False # 解鎖
         
         if file_path:
             self.config["last_log_dir"] = os.path.dirname(file_path)
@@ -915,7 +1021,10 @@ class LogAnalyzerApp:
             )
             root.destroy(); return path
             
+        self.is_picking_file = True # 鎖定
         path = await asyncio.to_thread(ask_file)
+        self.is_picking_file = False # 解鎖
+        
         if not path: return
         
         try:
@@ -954,6 +1063,10 @@ class LogAnalyzerApp:
                 await self.render_filters()
                 await self.apply_filters()
                 self.config["last_filter_dir"] = os.path.dirname(path)
+                self.current_tat_path = path # Set current path
+                self.filters_dirty = False # Loaded from file, not dirty
+                self.update_title()
+                self.save_config()
                 self.page.snack_bar = ft.SnackBar(ft.Text(f"Imported {len(new_filters)} filters."))
             
             self.page.snack_bar.open = True
@@ -965,6 +1078,17 @@ class LogAnalyzerApp:
             self.page.update()
 
     async def save_tat_filters(self, e=None):
+        """Quick Save: Overwrite current file or trigger Save As."""
+        if not self.filters:
+            self.page.snack_bar = ft.SnackBar(ft.Text("No filters to save."))
+            self.page.snack_bar.open = True; self.page.update(); return
+
+        if self.current_tat_path:
+            await self._write_filters_to_file(self.current_tat_path)
+        else:
+            await self.save_tat_filters_as()
+
+    async def save_tat_filters_as(self, e=None):
         import tkinter as tk
         from tkinter import filedialog
         
@@ -983,8 +1107,10 @@ class LogAnalyzerApp:
             root.destroy(); return path
             
         path = await asyncio.to_thread(ask_save)
-        if not path: return
-        
+        if path:
+            await self._write_filters_to_file(path)
+
+    async def _write_filters_to_file(self, path):
         try:
             xml_content = '<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<TextAnalysisTool.NET>\n'
             for f in self.filters:
@@ -995,10 +1121,16 @@ class LogAnalyzerApp:
                 f.write(xml_content)
             
             self.config["last_filter_dir"] = os.path.dirname(path)
+            self.current_tat_path = path
+            self.filters_dirty = False
+            self.update_title()
+            self.save_config()
             self.page.snack_bar = ft.SnackBar(ft.Text("Filters saved successfully."))
             self.page.snack_bar.open = True; self.page.update()
         except Exception as ex:
             print(f"Save Error: {ex}")
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Error saving filters: {ex}"))
+            self.page.snack_bar.open = True; self.page.update()
 
     def toggle_sidebar(self):
         self.sidebar.visible = not self.sidebar.visible
@@ -1010,6 +1142,16 @@ class LogAnalyzerApp:
         print(f"DEBUG: Drop event detected: {e.data}")
         # Workaround for path extraction if possible
         # ... implementation will depend on Flet actual support ...
+
+    def update_title(self):
+        log_name = os.path.basename(self.file_path) if self.file_path else "No file loaded"
+        filter_name = os.path.basename(self.current_tat_path) if self.current_tat_path else "No filter file"
+        title_str = f"[{log_name}] - [{filter_name}] - LogAnalyzer"
+        
+        self.page.title = title_str
+        # Optional: Update the visible title in the app bar if desired
+        # self.app_title_text.value = "LogAnalyzer" # Keep simple or update? Keep simple for UI.
+        self.page.update()
 
     def create_top_bar(self):
         is_dark = self.page.theme_mode == ft.ThemeMode.DARK
@@ -1122,6 +1264,9 @@ class LogAnalyzerApp:
         # Safety delay to let client catch up before next interactions
         await asyncio.sleep(0.1)
         self.page.update()
+        
+        # Save config immediately to persist theme choice
+        self.save_config()
 
 
     async def show_search_bar(self):
@@ -1838,6 +1983,7 @@ class LogAnalyzerApp:
 
         async def save_filter(e):
             nonlocal filter_obj
+            self.filters_dirty = True # Mark as modified
             if is_new:
                 filter_obj = Filter(txt_pattern.value, selected_fg, selected_bg, True, sw_regex.value, sw_exclude.value)
                 self.filters.append(filter_obj)
@@ -1877,6 +2023,7 @@ class LogAnalyzerApp:
     async def delete_filter(self, filter_obj):
         if filter_obj in self.filters:
             self.filters.remove(filter_obj)
+            self.filters_dirty = True # Set dirty flag
             await self.render_filters()
             await self.apply_filters()
             self.page.update()
@@ -1885,6 +2032,7 @@ class LogAnalyzerApp:
         if filter_obj in self.filters:
             self.filters.remove(filter_obj)
             self.filters.insert(0, filter_obj)
+            self.filters_dirty = True # Set dirty flag
             await self.render_filters()
             await self.apply_filters()
             self.page.update()
@@ -1893,6 +2041,7 @@ class LogAnalyzerApp:
         if filter_obj in self.filters:
             self.filters.remove(filter_obj)
             self.filters.append(filter_obj)
+            self.filters_dirty = True # Set dirty flag
             await self.render_filters()
             await self.apply_filters()
             self.page.update()
@@ -1904,7 +2053,9 @@ class LogAnalyzerApp:
         for f in self.filters:
             # Checkbox for enabled state
             async def on_cb_change(e, obj=f):
+                print(f"DEBUG: Filter '{obj.text}' enabled set to {e.control.value}")
                 obj.enabled = e.control.value
+                self.filters_dirty = True
                 await self.apply_filters()
 
             cb = ft.Checkbox(
@@ -2207,6 +2358,7 @@ class LogAnalyzerApp:
             print(f"DEBUG: Loaded {line_count} lines")
             
             self.file_path = path
+            self.update_title() # Update window title
             
             # 更新 Recent Files
             self.add_to_recent_files(path)
@@ -2248,17 +2400,43 @@ class LogAnalyzerApp:
             self.page.update()
 
 async def main(page: ft.Page):
-    # Try to force page scrollable to receive events, but hide the bar
-    # page.scroll = "hidden" # REVERTED: Breaks layout
+    # Pre-load config to set initial state immediately (Anti-Flicker)
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, 'frozen', False) else os.path.dirname(sys.executable)
+        config_path = os.path.join(base_dir, "app_config.json")
+        
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+                
+            # Apply Theme
+            tm = cfg.get("theme_mode", "dark")
+            page.theme_mode = ft.ThemeMode.DARK if tm == "dark" else ft.ThemeMode.LIGHT
+            page.bgcolor = "#252526" if tm == "dark" else "#ffffff"
+            
+            # Apply Geometry
+            geo = cfg.get("main_window_geometry", "")
+            match = re.match(r"(\d+)x(\d+)\+(\d+)\+(\d+)", geo)
+            if match:
+                w, h, x, y = map(int, match.groups())
+                page.window_width = w
+                page.window_height = h
+                page.window_left = x
+                page.window_top = y
+                
+            if cfg.get("window_maximized", False):
+                page.window_maximized = True
+                
+            page.update()
+    except Exception as e:
+        print(f"Pre-load config error: {e}")
+
     app = LogAnalyzerApp(page)
-    # Async apps often need to keep running, but Flet handles the loop.
-    # We might need to initialize things asynchronously here.
+    
+    # Reveal window now that everything is ready
+    page.window_visible = True
     page.update()
 
 if __name__ == "__main__":
-    # ft.run is the new recommended way for scripts in 0.80.0+
-    # But checking if ft.run exists first or fallback to ft.app
-    if hasattr(ft, 'run'):
-        ft.run(main)
-    else:
-        ft.app(target=main)
+    # 使用 ft.app 以獲得最穩定的 Windows 支援
+    ft.app(main, view=ft.AppView.FLET_APP_HIDDEN)
