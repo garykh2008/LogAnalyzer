@@ -7,6 +7,7 @@ import asyncio
 import json
 import re
 import warnings
+import threading
 import tkinter as tk
 from tkinter import messagebox
 
@@ -350,104 +351,131 @@ class TimelineView(ft.Container):
 class LogAnalyzerApp:
     def __init__(self, page: ft.Page):
         self.page = page
-        self.page.title = "LogAnalyzer (Flet Edition)"
         
-        # Configure global theme
+        # 1. 基礎屬性初始化
+        self._init_state_variables()
+        
+        # 2. 設定載入與視窗預熱 (防閃爍的核心)
+        self._init_settings()
+        
+        # 3. 建立 UI 元件
+        self.build_ui()
+        
+        # 4. 啟動背景任務與事件綁定
+        self._init_background_services()
+        
+        # 5. 準備就緒，揭開視窗
+        self.page.window_visible = True
+        self.page.update()
+
+    def _init_state_variables(self):
+        """初始化 App 內部所有狀態變數。"""
+        self.page.title = "LogAnalyzer (Flet Edition)"
         self.page.theme = ft.Theme(color_scheme_seed=ft.Colors.BLUE)
         self.page.dark_theme = ft.Theme(color_scheme_seed=ft.Colors.BLUE)
-        
-        # self.page.theme_mode = ft.ThemeMode.DARK # Removed to prevent flash
         self.page.padding = 0
         self.page.spacing = 0
         
-        # App State
+        # App 引擎與路徑
         self.log_engine = None
         self.file_path = None
-        self.is_programmatic_scroll = False # 防止 Slider 回圈更新
-        self.last_slider_update = 0 # Timestamp for debouncing slider events
-        self.last_render_time = 0 # For throttling scroll updates
-        self.target_start_index = 0 # Target position for smooth/buffered scrolling
-        self.needs_render = False # Flag to trigger render in loop
-        self.is_updating = False # Update lock for performance
         
-        self.filters = [] # Store Filter objects
-        self.filters_dirty = False # Track unsaved filter changes
-        self.current_tat_path = None # Track current filter file path
+        # 滾動與渲染控制
+        self.is_programmatic_scroll = False
+        self.last_slider_update = 0
+        self.last_render_time = 0
+        self.target_start_index = 0
+        self.needs_render = False
+        self.is_updating = False
         
-        self.filtered_indices = None # None means show all, otherwise list of real indices
-        self.line_tags_codes = None  # Storage for all line tags from Rust
-        self.show_only_filtered = False # Toggle between Full view and Filtered view
+        # 過濾器狀態
+        self.filters = []
+        self.filters_dirty = False
+        self.current_tat_path = None
+        self.filtered_indices = None
+        self.line_tags_codes = None
+        self.show_only_filtered = False
         
-        # Search State
-        self.search_results = [] # List of raw indices matching search
-        self.current_search_idx = -1 # Index within search_results
+        # 搜尋與選擇狀態
+        self.search_results = []
+        self.current_search_idx = -1
         self.search_query = ""
         self.search_case_sensitive = False
         self.search_wrap = True
-        
-        # Selection State (matching loganalyzer.py)
-        self.selected_indices = set() # Set of raw indices
-        self.selection_anchor = -1 # Raw index for Shift-selection anchor
-        
-        # Modifier States for selection
+        self.selected_indices = set()
+        self.selection_anchor = -1
         self.ctrl_pressed = False
         self.shift_pressed = False
         
-        self.is_closing = False # 防止重複觸發關閉邏輯
-        self.is_picking_file = False # 防止開啟檔案對話框時誤觸關閉
+        # 系統標記
+        self.is_closing = False
+        self.is_picking_file = False
+
+    def _init_settings(self):
+        """載入設定檔並立即套用視窗初始化外觀。"""
+        # A. 決定設定檔絕對路徑
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            try:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+            except:
+                base_dir = os.path.abspath(".")
         
-        # Config Defaults
-        self.config = {
+        self.config_file = os.path.join(base_dir, "app_config.json")
+        
+        # B. 完整預設值（確保即使 config 損壞也能運作）
+        self.default_config = {
             "last_log_dir": os.path.expanduser("~"),
             "last_filter_dir": os.path.expanduser("~"),
             "font_size": 12,
-            "theme_mode": "dark", # Default to dark
+            "theme_mode": "dark",
             "recent_files": [],
             "window_maximized": False,
             "main_window_geometry": "1200x800+100+100",
             "note_view_visible": False,
             "sash_main_y": 360
         }
-        
-        # Resolve absolute path for config
-        try:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-        except NameError:
-            base_dir = os.path.abspath(".")
-        self.config_file = os.path.join(base_dir, "app_config.json")
-        print(f"DEBUG: Config file path: {self.config_file}")
-        
+        self.config = self.default_config.copy()
         self.load_config()
         
-        # Apply window settings
+        # C. 立即同步視窗標題與基礎屬性
+        self.page.title = "LogAnalyzer (Flet Edition)"
+        tm = self.config.get("theme_mode", "dark")
+        self.page.theme_mode = ft.ThemeMode.DARK if tm == "dark" else ft.ThemeMode.LIGHT
+        self.page.bgcolor = "#252526" if tm == "dark" else "#ffffff"
+        
+        # 套用視窗幾何與標題列同步
         self.apply_window_geometry()
-        
-        self.target_start_index = 0
-        
-        # --- UI Components ---
-        self.build_ui()
-        
-        # Start background render loop for smooth scrolling
+
+    def _init_background_services(self):
+        """啟動與管理所有背景服務。"""
+        # A. 啟動執行緒級別的物理喚醒 (針對 Windows 的核心穩定方案)
+        try:
+            loop = asyncio.get_running_loop()
+            t = threading.Thread(target=wakeup_loop, args=(loop,), daemon=True)
+            t.start()
+        except Exception as e:
+            print(f"DEBUG: Failed to start wakeup thread: {e}")
+
+        # B. 啟動協程級別任務
+        asyncio.create_task(heartbeat(self.page))
         asyncio.create_task(self.render_loop())
         
-        # Bind close event for saving config
-        self.page.window_prevent_close = False
-        try:
-            if hasattr(self.page, "window"):
-                self.page.window.prevent_close = False
-        except: pass
-            
-        self.page.update()
+        # C. 基礎視窗事件 (暫不攔截，僅保留 hook)
+        self.page.window_prevent_close = False 
         
     def load_config(self):
+        """強健地載入設定檔。"""
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
-                    loaded_config = json.load(f)
-                    self.config.update(loaded_config)
-                print("Config loaded.")
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        self.config.update(data)
+                print(f"Config loaded from {self.config_file}")
             except Exception as e:
-                print(f"Error loading config: {e}")
+                print(f"Error loading config: {e}. Using defaults.")
 
     def save_config(self):
         # Update current geometry to config using Flet 1.0 window APIs
@@ -510,49 +538,6 @@ class LogAnalyzerApp:
                 self.page.window_maximized = True
         except Exception as e:
             print(f"Error applying window geometry: {e}")
-
-    def handle_app_close(self, e):
-        """同步關閉處理器。採用『正向表列』：只處理確定是 close 的信號。"""
-        if self.is_closing:
-            return
-
-        # 取得事件名稱，Flet 1.0 的關閉事件名稱為 "close"
-        event_name = getattr(e, 'name', '').lower()
-        
-        # --- 終極修正：只對 "close" 產生反應，無視所有雜訊 ---
-        if event_name != "close":
-            return
-
-        print(f"DEBUG: Confirmed CLOSE button clicked. Dirty: {self.filters_dirty}", flush=True)
-        
-        if self.filters_dirty:
-            # 阻塞直到使用者回應
-            res = messagebox.askyesno(
-                "Unsaved Changes",
-                "Your filters have been modified. Do you want to exit without saving?"
-            )
-            
-            if res: # 是
-                self._execute_final_exit()
-            else: # 否
-                print("DEBUG: User cancelled exit.", flush=True)
-                self.is_closing = False
-        else:
-            self._execute_final_exit()
-
-    def _execute_final_exit(self):
-        """執行存檔與靜音銷毀。"""
-        self.is_closing = True
-        self.save_config()
-        print("DEBUG: Final exit process started...", flush=True)
-        
-        async def destroy_task():
-            try:
-                if hasattr(self.page, "window"):
-                    await self.page.window.destroy()
-            except: pass 
-
-        asyncio.run_coroutine_threadsafe(destroy_task(), asyncio.get_event_loop())
 
     async def on_window_event(self, e):
         pass
@@ -2399,44 +2384,28 @@ class LogAnalyzerApp:
             self.status_text.value = f"Error loading file: {e}"
             self.page.update()
 
-async def main(page: ft.Page):
-    # Pre-load config to set initial state immediately (Anti-Flicker)
-    try:
-        base_dir = os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, 'frozen', False) else os.path.dirname(sys.executable)
-        config_path = os.path.join(base_dir, "app_config.json")
-        
-        if os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-                
-            # Apply Theme
-            tm = cfg.get("theme_mode", "dark")
-            page.theme_mode = ft.ThemeMode.DARK if tm == "dark" else ft.ThemeMode.LIGHT
-            page.bgcolor = "#252526" if tm == "dark" else "#ffffff"
-            
-            # Apply Geometry
-            geo = cfg.get("main_window_geometry", "")
-            match = re.match(r"(\d+)x(\d+)\+(\d+)\+(\d+)", geo)
-            if match:
-                w, h, x, y = map(int, match.groups())
-                page.window_width = w
-                page.window_height = h
-                page.window_left = x
-                page.window_top = y
-                
-            if cfg.get("window_maximized", False):
-                page.window_maximized = True
-                
-            page.update()
-    except Exception as e:
-        print(f"Pre-load config error: {e}")
+def wakeup_loop(loop):
+    """背景執行緒：強制喚醒 asyncio 迴圈，解決 Windows 上的事件積壓問題。"""
+    while True:
+        try:
+            # 向迴圈發送空任務，強制它處理掛起的 Pipe/Socket 信號
+            loop.call_soon_threadsafe(lambda: None)
+            time.sleep(0.1)
+        except:
+            break
 
-    app = LogAnalyzerApp(page)
-    
-    # Reveal window now that everything is ready
-    page.window_visible = True
-    page.update()
+async def heartbeat(page: ft.Page):
+    """保持協程活躍。"""
+    while True:
+        try:
+            await asyncio.sleep(1)
+        except: break
+
+async def main(page: ft.Page):
+    # 階段 1 最終優化：main() 僅負責引導啟動
+    # 所有初始化邏輯（設定、背景服務、UI）均在類別內部完成
+    LogAnalyzerApp(page)
 
 if __name__ == "__main__":
-    # 使用 ft.app 以獲得最穩定的 Windows 支援
+    # 使用隱藏啟動以防閃爍
     ft.app(main, view=ft.AppView.FLET_APP_HIDDEN)
