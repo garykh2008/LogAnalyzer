@@ -1090,7 +1090,6 @@ class LogAnalyzerApp:
         
         if file_path:
             self.config["last_log_dir"] = os.path.dirname(file_path)
-            self.path_input.value = file_path
             await self.load_file(file_path)
 
     async def exit_app(self, e):
@@ -1129,28 +1128,6 @@ class LogAnalyzerApp:
         self.save_config()
         if hasattr(self, "menu_bar"):
             self.menu_bar.update()
-
-    async def on_open_file_click(self, e):
-        """開啟檔案對話框。"""
-        await self._run_safe_async(self._perform_open_file_dialog(), "Opening File")
-
-    async def _perform_open_file_dialog(self):
-        def pick_file_sync():
-            root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
-            path = filedialog.askopenfilename(
-                title="Select Log File",
-                initialdir=self.config.get("last_log_dir", os.path.expanduser("~")),
-                filetypes=[("Log Files", "*.log;*.txt;*.tat"), ("All Files", "*.*")])
-            root.destroy(); return path
-        
-        self.is_picking_file = True
-        file_path = await asyncio.to_thread(pick_file_sync)
-        self.is_picking_file = False
-        
-        if file_path:
-            self.config["last_log_dir"] = os.path.dirname(file_path)
-            self.path_input.value = file_path
-            await self.load_file(file_path)
 
     async def import_tat_filters(self, e=None):
         """導入 TAT 過濾器檔案。"""
@@ -2364,12 +2341,6 @@ class LogAnalyzerApp:
         self.context_menu_dlg.open = True
         self.page.show_dialog(self.context_menu_dlg)
         self.page.update()
-
-    async def on_path_submit(self, e):
-        await self.load_file(e.control.value)
-
-    async def on_load_click(self, e):
-        await self.load_file(self.path_input.value)
 
     async def load_file(self, path):
         """載入 Log 檔案。"""
