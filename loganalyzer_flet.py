@@ -23,6 +23,54 @@ sys.path.append(os.getcwd())
 # 確保能從當前目錄載入 Rust pyd/so
 sys.path.append(os.getcwd())
 
+class ThemeColors:
+    """Centralized color definitions for the application."""
+    # Dark Mode
+    DARK = {
+        "sidebar_bg": "#252526",
+        "log_bg": "#1e1e1e",
+        "top_bar_bg": "#202020",
+        "timeline_bg": "#2d2d2d",
+        "text": "#d4d4d4",
+        "scroll_track": "#2d2d2d",
+        "scroll_thumb": "#555555",
+        "divider": "#3e3e42",
+        "input_bg": "#3c3c3c",
+        "selection_bg": "#264f78",
+        "line_error": "#ff6b6b",
+        "line_warn": "#ffd93d",
+        "line_info": "#4dabf7",
+        "line_default": "#d4d4d4",
+        "status_bg": "#007acc",
+        "search_bg": "#3c3c3c",
+    }
+    
+    # Light Mode
+    LIGHT = {
+        "sidebar_bg": "#ffffff",
+        "log_bg": "#f3f3f3",
+        "top_bar_bg": "#f3f3f3",
+        "timeline_bg": "#ffffff",
+        "text": "#000000",
+        "scroll_track": "#f0f0f0",
+        "scroll_thumb": "#c1c1c1",
+        "divider": "#e0e0e0",
+        "input_bg": "#ffffff",
+        "selection_bg": "#b3d7ff",
+        "line_error": "#cc0000",
+        "line_warn": "#bfa900",
+        "line_info": "#005cc5",
+        "line_default": "#1e1e1e",
+        "status_bg": "#007acc",
+        "search_bg": "#ffffff",
+    }
+    
+    @staticmethod
+    def get(mode):
+        # Handle ThemeMode Enum or string
+        m = str(mode).split(".")[-1].lower()
+        return ThemeColors.DARK if m == "dark" else ThemeColors.LIGHT
+
 def hex_to_rgb(hex_str):
     hex_str = hex_str.lstrip('#')
     if not hex_str: return (0, 0, 0)
@@ -623,28 +671,26 @@ class LogAnalyzerApp:
     async def on_window_event(self, e):
         pass
 
-    def build_ui(self):
-        # --- Theme-Aware Colors ---
-        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+    def _get_colors(self):
+        """獲取當前主題模式的顏色表。"""
+        return ThemeColors.get(self.page.theme_mode)
+
+    def _build_top_bar(self):
+        """建立頂部選單列與標題。"""
+        colors = self._get_colors()
         
-        c_sidebar_bg = "#252526" if is_dark else "#ffffff"
-        c_log_bg = "#1e1e1e" if is_dark else "#f3f3f3"
-        c_scroll_track = "#2d2d2d" if is_dark else "#f0f0f0"
-        c_scroll_thumb = "#555555" if is_dark else "#c1c1c1"
-        c_timeline_area = "#2d2d2d" if is_dark else "#ffffff" # Match sidebar for light mode
-        c_top_bar_bg = "#202020" if is_dark else "#f3f3f3"
-        
-        # --- Custom Top Menu Bar (Replacing AppBar for stability) ---
+        # 建立最近檔案子選單
         self.recent_files_submenu = ft.SubmenuButton(
             content=ft.Text("Recent Files"),
-            controls=[] # Populated later
+            controls=[] 
         )
         self.update_recent_files_menu()
 
+        # 建立主選單列
         self.menu_bar = ft.MenuBar(
             expand=True,
             style=ft.MenuStyle(
-                bgcolor=c_top_bar_bg,
+                bgcolor=colors["top_bar_bg"],
                 alignment=ft.Alignment(-1, -1),
             ),
             controls=[
@@ -657,61 +703,71 @@ class LogAnalyzerApp:
                             on_click=self.on_open_file_click
                         ),
                         self.recent_files_submenu,
-                                                        ft.MenuItemButton(
-                                                            content=ft.Text("Load Filters"),
-                                                            leading=ft.Icon(ft.Icons.FILE_OPEN_OUTLINED),
-                                                            on_click=self.import_tat_filters
-                                                        ),
-                                                        ft.MenuItemButton(
-                                                            content=ft.Text("Save Filters"),
-                                                            leading=ft.Icon(ft.Icons.SAVE),
-                                                            on_click=self.save_tat_filters
-                                                        ),
-                                                        ft.MenuItemButton(
-                                                            content=ft.Text("Save Filters As..."),
-                                                            leading=ft.Icon(ft.Icons.SAVE_AS),
-                                                            on_click=self.save_tat_filters_as
-                                                        ),                        ft.MenuItemButton(
+                        ft.MenuItemButton(
+                            content=ft.Text("Load Filters"),
+                            leading=ft.Icon(ft.Icons.FILE_OPEN_OUTLINED),
+                            on_click=self.import_tat_filters
+                        ),
+                        ft.MenuItemButton(
+                            content=ft.Text("Save Filters"),
+                            leading=ft.Icon(ft.Icons.SAVE),
+                            on_click=self.save_tat_filters
+                        ),
+                        ft.MenuItemButton(
+                            content=ft.Text("Save Filters As..."),
+                            leading=ft.Icon(ft.Icons.SAVE_AS),
+                            on_click=self.save_tat_filters_as
+                        ),
+                        ft.MenuItemButton(
                             content=ft.Text("Exit"),
                             leading=ft.Icon(ft.Icons.EXIT_TO_APP),
                             on_click=self.exit_app
                         )
                     ]
                 ),
-                                        ft.SubmenuButton(
-                                            content=ft.Text("View"),
-                                            controls=[
-                                                ft.MenuItemButton(
-                                                    content=ft.Text("Toggle Sidebar"),
-                                                    on_click=lambda _: self.toggle_sidebar()
-                                                ),
-                                                ft.MenuItemButton(
-                                                    content=ft.Text("Toggle Dark/Light Mode"),
-                                                    on_click=self.toggle_theme
-                                                ),
-                                                ft.MenuItemButton(
-                                                    content=ft.Text("Show Filtered Only"),
-                                                    leading=ft.Icon(ft.Icons.FILTER_ALT),
-                                                    on_click=self.toggle_show_filtered
-                                                )
-                                            ]
-                                        )            ]
+                ft.SubmenuButton(
+                    content=ft.Text("View"),
+                    controls=[
+                        ft.MenuItemButton(
+                            content=ft.Text("Toggle Sidebar"),
+                            on_click=lambda _: self.toggle_sidebar()
+                        ),
+                        ft.MenuItemButton(
+                            content=ft.Text("Toggle Dark/Light Mode"),
+                            on_click=self.toggle_theme
+                        ),
+                        ft.MenuItemButton(
+                            content=ft.Text("Show Filtered Only"),
+                            leading=ft.Icon(ft.Icons.FILTER_ALT),
+                            on_click=self.toggle_show_filtered
+                        )
+                    ]
+                )
+            ]
         )
 
-        self.app_title_text = ft.Text("LogAnalyzer", weight=ft.FontWeight.BOLD, size=16)
+        self.app_title_text = ft.Text("LogAnalyzer", weight=ft.FontWeight.BOLD, size=16, color=colors["text"])
         
-        # Store the Row separately so we can reuse it during container reconstruction
+        # 組裝頂部橫列
         self.top_bar_row = ft.Row([
-            ft.Container(content=ft.Icon(ft.Icons.ANALYTICS), padding=5),
+            ft.Container(content=ft.Icon(ft.Icons.ANALYTICS, color=colors["text"]), padding=5),
             self.app_title_text,
-            ft.VerticalDivider(width=10),
+            ft.VerticalDivider(width=10, color=ft.Colors.with_opacity(0.2, colors["text"])),
             self.menu_bar
         ], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
-        # Initial creation
-        self.top_bar = self.create_top_bar()
+        # 返回封裝好的頂部容器
+        return ft.Container(
+            content=self.top_bar_row,
+            bgcolor=colors["top_bar_bg"],
+            padding=5,
+            height=40
+        )
 
-        # 1. Sidebar (Filters)
+    def _build_sidebar(self):
+        """建立過濾器側邊欄。"""
+        colors = self._get_colors()
+        
         self.filter_list_view = ft.ListView(
             expand=True, 
             spacing=5, 
@@ -725,45 +781,29 @@ class LogAnalyzerApp:
             on_click=self.on_add_filter_click
         )
 
-        self.sidebar = ft.Container(
-            width=300, # Increased width for filters
-            bgcolor=c_sidebar_bg,
+        return ft.Container(
+            width=300,
+            bgcolor=colors["sidebar_bg"],
             padding=10,
             content=ft.Column([
-                ft.Text("Filters", size=20, weight=ft.FontWeight.BOLD),
+                ft.Text("Filters", size=20, weight=ft.FontWeight.BOLD, color=colors["text"]),
                 self.add_filter_btn,
-                ft.Divider(),
+                ft.Divider(color=ft.Colors.with_opacity(0.2, colors["text"])),
                 self.filter_list_view,
             ])
         )
-        
-        # 2. Main Log Area (Center)
-        # 替代方案：手動輸入路徑 (Still kept as fallback in initial view)
-        self.path_input = ft.TextField(
-            label="Log File Path", 
-            width=400,
-            on_submit=self.on_path_submit
-        )
-        self.load_btn = ft.Button(
-            "Load File", 
-            icon="folder_open",
-            on_click=self.on_load_click
-        )
-        
-        self.top_controls = ft.Row([self.path_input, self.load_btn], alignment=ft.MainAxisAlignment.CENTER)
 
-        # --- Log View (Virtual Scroll) ---
+    def _build_log_view(self):
+        """建立 Log 顯示區域與自定義捲軸。"""
+        colors = self._get_colors()
+        
+        # --- Log View (Virtual Scroll) 設定 ---
         self.ROW_HEIGHT = 20
         self.FONT_SIZE = 12
-        # Calculate strict line height multiplier (Flutter 'height' is a multiplier of font size)
         self.LINE_HEIGHT_MULT = self.ROW_HEIGHT / self.FONT_SIZE 
+        self.LINES_PER_PAGE = 20
+        self.TEXT_POOL_SIZE = 50 
         
-        self.LINES_PER_PAGE = 20  # Initial value, will be updated by on_resize
-        self.MAX_LOG_ROWS = 200   # Pre-allocate rows to avoid dynamic list modification crash
-        self.current_start_index = 0
-        
-        # Phase 8: Tight Pool (Optimized for 30-50 visible lines)
-        self.TEXT_POOL_SIZE = 50 # Phase 9: Minimum viable pool for maximum speed
         self.text_pool = []
         for _ in range(self.TEXT_POOL_SIZE):
             t = ft.Text(
@@ -771,7 +811,7 @@ class LogAnalyzerApp:
                 font_family="Consolas, monospace",
                 size=self.FONT_SIZE,
                 no_wrap=True,
-                color="#d4d4d4",
+                color=colors["text"],
                 visible=True,
             )
             c = ft.Container(
@@ -787,7 +827,7 @@ class LogAnalyzerApp:
             controls=self.text_pool,
             spacing=0,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            tight=True, # Critical for fixed-height children
+            tight=True,
         )
 
         self.log_display_column = ft.Container(
@@ -799,27 +839,25 @@ class LogAnalyzerApp:
                 expand=True 
             ),
             expand=True,
-            bgcolor=c_log_bg, 
+            bgcolor=colors["log_bg"], 
         )
         
-        # --- Custom Vertical Scrollbar ---
+        # --- 自定義捲軸 ---
         self.scrollbar_width = 15
-        self.scrollbar_thumb_height = 50 # Fixed height for now, or dynamic later
-        self.scrollbar_track_height = 0 # Will be updated on resize
-        self.thumb_top = 0.0
+        self.scrollbar_thumb_height = 50 
         
         self.scrollbar_thumb = ft.Container(
             width=self.scrollbar_width,
             height=self.scrollbar_thumb_height,
-            bgcolor=c_scroll_thumb,
+            bgcolor=colors["scroll_thumb"],
             border_radius=5,
             top=0
         )
         
         self.scrollbar_track = ft.Container(
             width=self.scrollbar_width,
-            bgcolor=c_scroll_track,
-            expand=True, # Fill vertical space
+            bgcolor=colors["scroll_track"],
+            expand=True,
         )
         
         self.scrollbar_stack = ft.Stack(
@@ -831,20 +869,18 @@ class LogAnalyzerApp:
             expand=True
         )
         
-        self.scrollbar_gesture = ft.GestureDetector(
-            content=self.scrollbar_stack,
-            on_pan_update=self.on_scrollbar_drag,
-            on_tap_down=self.on_scrollbar_tap # Allow jumping to position
-        )
-
         self.scrollbar_container = ft.Container(
-            content=self.scrollbar_gesture,
+            content=ft.GestureDetector(
+                content=self.scrollbar_stack,
+                on_pan_update=self.on_scrollbar_drag,
+                on_tap_down=self.on_scrollbar_tap
+            ),
             width=self.scrollbar_width,
-            bgcolor=c_scroll_track,
+            bgcolor=colors["scroll_track"],
             alignment=ft.Alignment(-1, -1)
         )
 
-        # Log View Area (Container wrapping a Row)
+        # Log 區域容器
         self.log_view_area = ft.Container(
             content=ft.Row(
                 controls=[
@@ -856,9 +892,10 @@ class LogAnalyzerApp:
                 vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
             expand=True,
-            visible=False # Controlled in load_file
+            visible=False 
         )
 
+        # 初始歡迎畫面
         self.initial_content = ft.Container(
             content=ft.Column(
                 [
@@ -877,11 +914,12 @@ class LogAnalyzerApp:
                 alignment=ft.MainAxisAlignment.CENTER,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             ),
+            bgcolor=colors["log_bg"],
             expand=True,
             visible=True
         )
 
-        self.log_area = ft.Column(
+        return ft.Column(
             controls=[
                 self.initial_content,
                 self.log_view_area
@@ -891,26 +929,11 @@ class LogAnalyzerApp:
             alignment=ft.MainAxisAlignment.START,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH
         )
-        
-        # --- Drag & Drop Support (Experimental for Flet 1.0) ---
-        # Note: Page.on_scroll or Page.on_drop may vary in Beta.
-        # We attempt to bind it here.
-        # self.page.on_drop = self.on_page_drop # Experimental
-        
-        # --- Keyboard & Resize Events ---
-        self.page.on_keyboard_event = self.on_keyboard
-        self.page.on_resize = self.on_resize
-        
-        # 3. Timeline (Right)
-        self.timeline = TimelineView(self, width=50)
-        self.timeline_area = ft.Container(
-            width=50, 
-            bgcolor=c_timeline_area,
-            content=self.timeline,
-            alignment=ft.Alignment(-1, -1)
-        )
 
-        # --- Search Bar (Find) ---
+    def _build_search_bar(self):
+        """建立搜尋列（浮動在 Log 區域上方）。"""
+        colors = self._get_colors()
+        
         self.search_input = ft.TextField(
             label="Find",
             height=30,
@@ -920,7 +943,7 @@ class LogAnalyzerApp:
             on_submit=self.on_find_next,
             border_color=ft.Colors.BLUE
         )
-        self.search_results_count = ft.Text(value="0/0", size=12)
+        self.search_results_count = ft.Text(value="0/0", size=12, color=colors["text"])
         
         async def toggle_case(e):
             self.search_case_sensitive = not self.search_case_sensitive
@@ -942,25 +965,26 @@ class LogAnalyzerApp:
                 ft.IconButton(ft.Icons.KEYBOARD_RETURN, tooltip="Wrap Around", icon_size=16, on_click=toggle_wrap,
                               style=ft.ButtonStyle(color=ft.Colors.BLUE)),
                 ft.VerticalDivider(width=1),
-                ft.IconButton(ft.Icons.ARROW_UPWARD, icon_size=16, tooltip="Previous (F2 / Shift+F3)", on_click=self.on_find_prev),
-                ft.IconButton(ft.Icons.ARROW_DOWNWARD, icon_size=16, tooltip="Next (F3 / Enter)", on_click=self.on_find_next),
+                ft.IconButton(ft.Icons.ARROW_UPWARD, icon_size=16, tooltip="Previous", on_click=self.on_find_prev),
+                ft.IconButton(ft.Icons.ARROW_DOWNWARD, icon_size=16, tooltip="Next", on_click=self.on_find_next),
                 self.search_results_count,
                 ft.IconButton(ft.Icons.CLOSE, icon_size=16, on_click=self.hide_search_bar),
             ], spacing=5),
-            bgcolor="#3c3c3c",
+            bgcolor=colors["search_bg"],
             padding=5,
             border_radius=5,
-            border=ft.Border.all(1, ft.Colors.BLUE_400), # Professional subtle border
-            visible=False, # Hidden by default
-            offset=ft.Offset(0, 0),
-            animate_offset=ft.Animation(300, ft.AnimationCurve.DECELERATE),
+            border=ft.Border.all(1, ft.Colors.BLUE_400), 
+            visible=False, 
         )
+        return self.search_bar
 
-        # 4. Status Bar (Bottom)
-        self.status_text = ft.Text("Ready", size=12)
-        self.status_bar = ft.Container(
+    def _build_status_bar(self):
+        """建立底部狀態列。"""
+        colors = self._get_colors()
+        self.status_text = ft.Text("Ready", size=12, color=ft.Colors.WHITE)
+        return ft.Container(
             height=30,
-            bgcolor="#007acc", # VS Code blue
+            bgcolor=colors["status_bg"],
             padding=ft.Padding.only(left=10, right=10),
             content=ft.Row([
                 self.status_text,
@@ -968,34 +992,61 @@ class LogAnalyzerApp:
             alignment=ft.Alignment(-1, 0)
         )
 
-        # --- Main Layout Assembly ---
+    def build_ui(self):
+        # --- Theme-Aware Colors ---
+        colors = self._get_colors()
         
+        # 同步更新頁面背景色
+        self.page.bgcolor = colors["sidebar_bg"]
+        
+        # 1. 構建各個模組
+        self.top_bar = self._build_top_bar()
+        self.sidebar = self._build_sidebar()
+        self.log_area_comp = self._build_log_view()
+        self.search_bar_comp = self._build_search_bar()
+        self.status_bar = self._build_status_bar()
+        
+        # 2. Timeline (Right)
+        self.timeline = TimelineView(self, width=50)
+        self.timeline_area = ft.Container(
+            width=50, 
+            bgcolor=colors["timeline_bg"],
+            content=self.timeline,
+            alignment=ft.Alignment(-1, -1)
+        )
+
+        # 3. Main Layout Assembly
         # Wrap log area in a Stack to overlay the Search Bar
         self.log_stack = ft.Stack([
-            self.log_area,
+            self.log_area_comp,
             ft.Container(
-                content=self.search_bar,
-                top=10, right=20 # Position search bar top-right of log area
+                content=self.search_bar_comp,
+                top=10, right=20 
             )
         ], expand=True)
 
         main_body = ft.Row(
             controls=[
                 self.sidebar,
-                self.log_stack, # Use Stack here
+                self.log_stack, 
                 self.timeline_area
             ],
-            expand=True, # 讓這個 Row 佔滿高度 (扣除 Status Bar)
+            expand=True, 
             spacing=0
         )
         
+        self.page.clean() # 確保更新時乾淨
         self.page.add(
             ft.Column([
-                self.top_bar, # Add Custom Top Bar here
+                self.top_bar, 
                 main_body,
                 self.status_bar
             ], expand=True, spacing=0)
         )
+        
+        # 事件重新綁定
+        self.page.on_keyboard_event = self.on_keyboard
+        self.page.on_resize = self.on_resize
         self.page.update()
 
     async def on_open_file_click(self, e):
@@ -1196,13 +1247,6 @@ class LogAnalyzerApp:
         self.sidebar.visible = not self.sidebar.visible
         self.page.update()
 
-    async def on_page_drop(self, e: ft.DragUpdateEvent):
-        # Experimental handler for OS file drops
-        # In Flet 1.0 Beta, e.src might contain paths or e.files (if added to page)
-        print(f"DEBUG: Drop event detected: {e.data}")
-        # Workaround for path extraction if possible
-        # ... implementation will depend on Flet actual support ...
-
     def update_title(self):
         log_name = os.path.basename(self.file_path) if self.file_path else "No file loaded"
         filter_name = os.path.basename(self.current_tat_path) if self.current_tat_path else "No filter file"
@@ -1213,60 +1257,19 @@ class LogAnalyzerApp:
         # self.app_title_text.value = "LogAnalyzer" # Keep simple or update? Keep simple for UI.
         self.page.update()
 
-    def create_top_bar(self):
-        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
-        bg_color = "#202020" if is_dark else "#f3f3f3"
-        text_color = "#d4d4d4" if is_dark else "#000000"
-        
-        # Re-apply style to MenuBar
-        self.menu_bar.style = ft.MenuStyle(
-            bgcolor=bg_color,
-            alignment=ft.Alignment(-1, -1),
-        )
-        
-        # Update components in-place for the MenuBar
-        self.app_title_text.color = text_color
-        for control in self.top_bar_row.controls:
-            if isinstance(control, ft.Icon):
-                control.color = text_color
-            elif isinstance(control, ft.VerticalDivider):
-                control.color = ft.Colors.with_opacity(0.2, text_color)
-
-        return ft.Container(
-            content=self.top_bar_row,
-            bgcolor=bg_color,
-            padding=5,
-            height=40
-        )
-
     async def toggle_theme(self, e):
+        """切換深色/淺色模式並全面刷新介面顏色。"""
         import ctypes
-        import ctypes.wintypes
         
+        # 1. 切換主題狀態
         if self.page.theme_mode == ft.ThemeMode.DARK:
             self.page.theme_mode = ft.ThemeMode.LIGHT
-            sidebar_bg = "#ffffff"
-            log_view_bg = "#f3f3f3"
-            search_bg = "#ffffff"
-            text_color = "#000000"
-            scrollbar_track_color = "#f0f0f0"
-            scrollbar_thumb_color = "#c1c1c1"
             win_dark_value = 0 
         else:
             self.page.theme_mode = ft.ThemeMode.DARK
-            sidebar_bg = "#252526"
-            log_view_bg = "#1e1e1e"
-            search_bg = "#3c3c3c"
-            text_color = "#d4d4d4"
-            scrollbar_track_color = "#2d2d2d"
-            scrollbar_thumb_color = "#555555"
             win_dark_value = 1
             
-        # Update Page and basic components
-        self.page.bgcolor = sidebar_bg
-        self.log_display_column.bgcolor = log_view_bg
-
-        # --- Native Windows Title Bar Sync ---
+        # 2. 同步 Windows 原生標題列
         if sys.platform == "win32":
             try:
                 hwnd = ctypes.windll.user32.GetForegroundWindow()
@@ -1274,59 +1277,21 @@ class LogAnalyzerApp:
                     ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(ctypes.c_int(win_dark_value)), 4)
             except Exception: pass
 
-        # Update Sidebar & Others
-        self.sidebar.bgcolor = sidebar_bg
-        self.timeline.bgcolor = sidebar_bg
-        self.search_bar.bgcolor = search_bg
-        self.search_input.color = text_color
-        self.search_results_count.color = text_color
+        # 3. 核心：重新組裝 UI (這會套用所有 ThemeColors 的新顏色)
+        self.build_ui()
         
-        # Re-generate Top Bar (The "Magic" fix)
-        new_top_bar = self.create_top_bar()
-        
-        # Find the main column and swap the top bar
-        # Structure: page -> Column -> [top_bar, main_body, status_bar]
-        main_column = self.page.controls[0]
-        main_column.controls[0] = new_top_bar
-        self.top_bar = new_top_bar # Update reference
-        
-        # Update Scrollbar Colors
-        self.scrollbar_track.bgcolor = scrollbar_track_color
-        self.scrollbar_thumb.bgcolor = scrollbar_thumb_color
-        
-        # Redraw timeline with new theme colors
+        # 4. 針對特殊組件 (Timeline) 進行額外刷新
         self.timeline.draw_heatmap()
         self.timeline.draw_indicator()
         self.timeline.update()
         
-        # Light-weight color update for filters instead of full re-render
-        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
-        for i, f in enumerate(self.filters):
-            # Access the Row container from filter_list_view
-            if i < len(self.filter_list_view.controls):
-                item_row_gesture = self.filter_list_view.controls[i]
-                # GestureDetector -> Row -> [Checkbox, Container(Label), Badge]
-                item_row = item_row_gesture.content
-                lbl_container = item_row.controls[1]
-                lbl_text = lbl_container.content
-                
-                # Re-adjust colors
-                adj_bg = adjust_color_for_theme(f.back_color, True, is_dark)
-                adj_fg = adjust_color_for_theme(f.fore_color, False, is_dark)
-                
-                lbl_container.bgcolor = adj_bg
-                lbl_text.color = adj_fg
-                lbl_container.border = ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE) if is_dark else ft.Colors.with_opacity(0.2, ft.Colors.BLACK))
-
-        self.update_log_view()
-                
-        self.page.update()
-        # Safety delay to let client catch up before next interactions
-        await asyncio.sleep(0.1)
+        # 5. 保存設定並更新頁面
+        self.save_config()
         self.page.update()
         
-        # Save config immediately to persist theme choice
-        self.save_config()
+        # 給予極短緩衝確保 Client 渲染完成
+        await asyncio.sleep(0.1)
+        self.page.update()
 
 
     async def show_search_bar(self):
