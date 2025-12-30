@@ -352,6 +352,16 @@ class LogAnalyzerApp:
     def __init__(self, page: ft.Page):
         self.page = page
         
+        # --- Flet 1.0+ Window Event Interception ---
+        # 1. 使用新版 API 設定攔截
+        self.page.window.prevent_close = True
+        
+        # 2. 綁定事件監聽器 (處理器會在稍後定義)
+        self.page.window.on_event = self._on_native_window_event
+        
+        # 3. 立即強制更新以鎖定屬性
+        self.page.update()
+        
         # 1. 基礎屬性初始化
         self._init_state_variables()
         
@@ -477,9 +487,65 @@ class LogAnalyzerApp:
         asyncio.create_task(_heartbeat_serv())
         asyncio.create_task(self.render_loop())
         
-        # C. 基礎視窗事件
-        self.page.window_prevent_close = False 
-        
+    async def _on_native_window_event(self, e):
+        """處理底層視窗事件 (Flet 1.0+ API)。"""
+        # 檢查事件類型是否為關閉請求
+        # e.type 可能是 Enum 物件，轉為字串比較最安全
+        if "close" in str(e.type).lower():
+            # 呼叫我們的統一關閉處理邏輯
+            await self.handle_app_close(e)
+
+    async def handle_app_close(self, e):
+        """
+        處理視窗關閉請求。
+        檢查是否有未儲存的 Filters，若有則彈出 Flet 對話框詢問。
+        """
+        # 1. 忽略檔案選擇期間的訊號 (防止遞迴或誤判)
+        if self.is_picking_file:
+            return
+
+        # 2. 檢查是否需要儲存
+        if self.filters_dirty:
+            await self.show_unsaved_changes_dialog()
+        else:
+            self.save_config()
+            await self.page.window.destroy()
+
+    async def show_unsaved_changes_dialog(self):
+        # 定義對話框回調
+        def close_dlg(e):
+            self.dialog.open = False
+            self.page.update()
+
+        async def on_save(e):
+            self.dialog.open = False
+            self.page.update()
+            # 嘗試儲存
+            await self.save_tat_filters()
+            # 如果儲存成功 (dirty flag 被清除)，則關閉程式
+            if not self.filters_dirty:
+                self.save_config()
+                await self.page.window.destroy()
+
+        async def on_dont_save(e):
+            self.dialog.open = False
+            self.page.update()
+            # 不儲存直接關閉
+            self.save_config()
+            await self.page.window.destroy()
+
+        self.dialog = ft.AlertDialog(
+            title=ft.Text("Unsaved Changes"),
+            content=ft.Text("Filters have been modified. Do you want to save changes?"),
+            actions=[
+                ft.TextButton("Save", on_click=on_save),
+                ft.TextButton("Don't Save", on_click=on_dont_save),
+                ft.TextButton("Cancel", on_click=close_dlg),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.show_dialog(self.dialog)
+
     def load_config(self):
         """強健地載入設定檔。"""
         if os.path.exists(self.config_file):
@@ -941,16 +1007,34 @@ class LogAnalyzerApp:
         from tkinter import filedialog
         
         def pick_file_sync():
-            root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
-            path = filedialog.askopenfilename(
-                title="Select Log File",
-                initialdir=self.config.get("last_log_dir", os.path.expanduser("~")),
-                filetypes=[("Log Files", "*.log;*.txt;*.tat"), ("All Files", "*.*")]
-            )
-            root.destroy(); return path
+            # 使用更穩定的方式啟動對話框
+            # 某些環境下，不要頻繁建立與銷毀 root 更有助於穩定
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes('-topmost', True)
+            
+            try:
+                path = filedialog.askopenfilename(
+                    title="Select Log File",
+                    initialdir=self.config.get("last_log_dir", os.path.expanduser("~")),
+                    filetypes=[("Log Files", "*.log;*.txt;*.tat"), ("All Files", "*.*")]
+                )
+            finally:
+                # 關鍵：先取消 topmost 屬性，再延遲銷毀，
+                # 讓 Windows 有時間平穩地切換焦點回 Flet 視窗
+                root.attributes("-topmost", False)
+                root.update()
+                root.destroy()
+            return path
             
         self.is_picking_file = True
+        # 在開啟對話框前，先讓 Flet 處理完當前所有 UI 變更
+        self.page.update() 
+        
         file_path = await asyncio.to_thread(pick_file_sync)
+        
+        # 對話框關閉後，給予一小段緩衝時間，過濾掉隨之而來的錯誤 on_close 訊號
+        await asyncio.sleep(0.5)
         self.is_picking_file = False
         
         if file_path:
