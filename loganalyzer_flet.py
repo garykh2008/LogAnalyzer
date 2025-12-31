@@ -317,6 +317,7 @@ class LogAnalyzerApp:
             "main_window_geometry": "1200x800+100+100",
             "note_view_visible": False,
             "sidebar_visible": False,
+            "sidebar_position": "left",
             "sash_main_y": 360
         }
         self.config = self.default_config.copy()
@@ -561,6 +562,23 @@ class LogAnalyzerApp:
                             content=ft.Text("Toggle Dark/Light Mode"),
                             on_click=self.toggle_theme
                         ),
+                        ft.SubmenuButton(
+                            content=ft.Text("Sidebar Position"),
+                            controls=[
+                                ft.MenuItemButton(
+                                    content=ft.Text("Left"),
+                                    on_click=lambda _: self.change_sidebar_position("left")
+                                ),
+                                ft.MenuItemButton(
+                                    content=ft.Text("Right"),
+                                    on_click=lambda _: self.change_sidebar_position("right")
+                                ),
+                                ft.MenuItemButton(
+                                    content=ft.Text("Bottom"),
+                                    on_click=lambda _: self.change_sidebar_position("bottom")
+                                ),
+                            ]
+                        ),
                         ft.MenuItemButton(
                             content=ft.Text("Show Filtered Only"),
                             leading=ft.Icon(ft.Icons.FILTER_ALT, size=18),
@@ -599,34 +617,52 @@ class LogAnalyzerApp:
         )
 
     def _build_sidebar(self):
-        """建立過濾器側邊欄。"""
+        """建立過濾器側邊欄，支援左/右/下位置。"""
         colors = self._get_colors()
+        pos = self.config.get("sidebar_position", "left")
         
+        # 根據位置決定寬高
+        is_bottom = pos == "bottom"
+        sidebar_width = 280 if not is_bottom else None
+        sidebar_height = None if not is_bottom else 200
+
         self.filter_list_view = ft.ReorderableListView(
             expand=True, 
-            spacing=8, # More spacing between items
+            spacing=2,
             padding=ft.padding.only(top=10),
             on_reorder=self.on_filter_reorder,
         )
 
-        self.add_filter_btn = ft.Button(
-            "Add Filter", 
-            icon=ft.Icons.ADD, 
-            on_click=self.on_add_filter_click,
-            style=ft.ButtonStyle(
-                shape=ft.RoundedRectangleBorder(radius=8), # Modern rounded button
+        # 在底部模式下，Add Filter 按鈕可以跟標題排在同一行
+        title_row = ft.Row([
+            ft.Text("Filters", size=16, weight=ft.FontWeight.BOLD, color=colors["text"]),
+            ft.VerticalDivider(width=10, color=ft.Colors.TRANSPARENT) if is_bottom else ft.Container(),
+            ft.ElevatedButton(
+                content=ft.Row(
+                    [
+                        ft.Icon(ft.Icons.ADD, size=16),
+                        ft.Text("Add Filter", size=12),
+                    ],
+                    spacing=5,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                ),
+                height=30,
+                on_click=self.on_add_filter_click,
+                style=ft.ButtonStyle(
+                    padding=ft.padding.symmetric(horizontal=10),
+                    shape=ft.RoundedRectangleBorder(radius=6)
+                )
             )
-        )
+        ], alignment=ft.MainAxisAlignment.START)
 
         return ft.Container(
-            width=280,
+            width=sidebar_width,
+            height=sidebar_height,
             visible=self.config.get("sidebar_visible", False),
             bgcolor=colors["sidebar_bg"],
             padding=ft.padding.all(15),
             content=ft.Column([
-                ft.Text("Filters", size=22, weight=ft.FontWeight.BOLD, color=colors["text"]),
-                self.add_filter_btn,
-                # ft.Divider(color=ft.Colors.with_opacity(0.1, colors["text"])), # Lighter divider or remove
+                title_row,
                 self.filter_list_view,
             ], spacing=10)
         )
@@ -855,14 +891,35 @@ class LogAnalyzerApp:
             )
         ], expand=True)
 
-        main_body = ft.Row(
-            controls=[
-                self.sidebar,
-                self.log_stack, 
-            ],
-            expand=True, 
-            spacing=0
-        )
+        pos = self.config.get("sidebar_position", "left")
+        
+        if pos == "bottom":
+            main_body = ft.Column(
+                controls=[
+                    self.log_stack,
+                    self.sidebar, 
+                ],
+                expand=True, 
+                spacing=0
+            )
+        elif pos == "right":
+            main_body = ft.Row(
+                controls=[
+                    self.log_stack,
+                    self.sidebar, 
+                ],
+                expand=True, 
+                spacing=0
+            )
+        else: # left (default)
+            main_body = ft.Row(
+                controls=[
+                    self.sidebar,
+                    self.log_stack, 
+                ],
+                expand=True, 
+                spacing=0
+            )
         
         self.page.clean() # 確保更新時乾淨
         self.page.add(
@@ -1124,6 +1181,15 @@ class LogAnalyzerApp:
         self.sidebar.visible = not self.sidebar.visible
         self.config["sidebar_visible"] = self.sidebar.visible
         self.page.update()
+
+    def change_sidebar_position(self, pos):
+        """更改側邊欄位置並重建佈局。"""
+        self.config["sidebar_position"] = pos
+        self.save_config()
+        # 重新建構 UI 以套用佈局變更
+        self.build_ui()
+        # 重建 UI 後需確保過濾器列表正確渲染
+        asyncio.create_task(self.render_filters())
 
     def update_title(self):
         log_name = os.path.basename(self.file_path) if self.file_path else "No file loaded"
@@ -1980,8 +2046,8 @@ class LogAnalyzerApp:
                     overflow=ft.TextOverflow.ELLIPSIS,
                 ),
                 bgcolor=adj_bg, # Adjusted
-                padding=ft.Padding(12, 4, 12, 4), # Increased horizontal padding for pill look
-                border_radius=20, # Pill shape
+                padding=ft.Padding(8, 2, 8, 2), # Compact padding
+                border_radius=15, # Slightly tighter pill shape
                 expand=True,
             )
             
@@ -1989,9 +2055,10 @@ class LogAnalyzerApp:
             hit_badge = ft.Container(
                 content=ft.Text(str(f.hit_count), size=10, color="black", weight=ft.FontWeight.BOLD),
                 bgcolor="#bdc3c7" if f.hit_count == 0 else "#f1c40f",
-                padding=ft.Padding.symmetric(horizontal=6, vertical=2),
-                border_radius=10,
-                alignment=ft.Alignment(0, 0)
+                padding=ft.Padding.symmetric(horizontal=6, vertical=0), # More horizontal, less vertical
+                border_radius=8,
+                alignment=ft.Alignment(0, 0),
+                height=16, # Fixed height for better proportion
             )
 
             # Row container
@@ -2008,8 +2075,9 @@ class LogAnalyzerApp:
                         cb,
                         lbl_tag,
                         hit_badge
-                    ], spacing=5, alignment=ft.MainAxisAlignment.START),
+                    ], spacing=2, alignment=ft.MainAxisAlignment.START),
                     padding=ft.padding.only(right=35), # 為 ReorderableListView 的拖曳手把留出空間
+                    height=28, # Enforce compact height
                 ),
                 on_double_tap=on_double_tap,
                 on_secondary_tap=on_secondary_tap,
