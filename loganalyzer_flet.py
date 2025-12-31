@@ -209,15 +209,15 @@ class Filter:
 
     def to_tat_xml(self):
         """Converts filter to TextAnalysisTool XML format."""
-        # Simple XML fragment generation
         en = 'y' if self.enabled else 'n'
         reg = 'y' if self.is_regex else 'n'
-        exc = 'y' if self.is_exclude else 'n'
+        exc = 'y' if self.is_exclude else 'n' # Use 'y'/'n' for consistency
         # Remove '#' for TAT color format
         fg = self.fore_color.lstrip('#')
         bg = self.back_color.lstrip('#')
         
-        return f'<Filter enabled="{en}" regex="{reg}" exclude="{exc}" foreColor="{fg}" backColor="{bg}">{self.text}</Filter>'
+        # Match btm.tat format for compatibility
+        return f'<filter enabled="{en}" excluding="{exc}" description="" foreColor="{fg}" backColor="{bg}" type="matches_text" case_sensitive="{reg}" regex="{reg}" text="{self.text}"></filter>'
 
 
 class LogAnalyzerApp:
@@ -1151,18 +1151,27 @@ class LogAnalyzerApp:
         tree = ET.parse(path)
         root = tree.getroot()
         new_filters = []
-        for f_node in root.iter():
-            if f_node.tag.lower() == 'filter':
-                en = f_node.get('enabled', 'y').lower() == 'y'
-                reg = f_node.get('regex', 'n').lower() == 'y'
-                exc = (f_node.get('exclude', 'n').lower() == 'y') or (f_node.get('excluding', 'n').lower() == 'y')
-                fg = f_node.get('foreColor', '000000')
-                bg = f_node.get('backColor', 'ffffff')
-                if not fg.startswith("#"): fg = "#" + fg
-                if not bg.startswith("#"): bg = "#" + bg
-                text = f_node.get('text')
-                if text is None: text = f_node.text if f_node.text else ""
-                new_filters.append(Filter(text, fg, bg, en, reg, exc))
+        for f_node in root.iter('filter'): # Explicitly iterate 'filter' tags
+            en = f_node.get('enabled', 'y').lower() == 'y'
+            # Compatible with both 'exclude' and 'excluding'
+            exc_attr = f_node.get('exclude', f_node.get('excluding', 'n')).lower()
+            exc = exc_attr == 'y'
+            
+            # Compatible with both 'regex' and 'case_sensitive' for determining regex
+            reg_attr = f_node.get('regex', f_node.get('case_sensitive', 'n')).lower()
+            reg = reg_attr == 'y'
+
+            fg = f_node.get('foreColor', '000000')
+            bg = f_node.get('backColor', 'ffffff')
+            if not fg.startswith("#"): fg = "#" + fg
+            if not bg.startswith("#"): bg = "#" + bg
+            
+            # For btm.tat, text is an attribute
+            text = f_node.get('text')
+            if text is None: # For older format, text might be directly inside tag
+                text = f_node.text if f_node.text else ""
+            
+            new_filters.append(Filter(text, fg, bg, en, reg, exc))
         if new_filters:
             self.filters.extend(new_filters)
             await self.render_filters()
@@ -1210,10 +1219,13 @@ class LogAnalyzerApp:
 
     async def _write_filters_to_file(self, path):
         """實體寫入過濾器檔案。"""
-        xml_content = '<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<TextAnalysisTool.NET>\n'   
+        xml_content = '<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n'
+        xml_content += '<TextAnalysisTool.NET version="2017-01-24" showOnlyFilteredLines="True">\n'
+        xml_content += '  <filters>\n'
         for f in self.filters:
-            xml_content += f"  {f.to_tat_xml()}\n"
-        xml_content += "</TextAnalysisTool.NET>"
+            xml_content += f"    {f.to_tat_xml()}\n"
+        xml_content += '  </filters>\n'
+        xml_content += '</TextAnalysisTool.NET>'
         with open(path, 'w', encoding='utf-8') as f:
             f.write(xml_content)
         self.config["last_filter_dir"] = os.path.dirname(path)
