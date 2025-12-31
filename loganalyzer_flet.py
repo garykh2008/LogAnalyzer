@@ -30,7 +30,6 @@ class ThemeColors:
         "sidebar_bg": "#252526",
         "log_bg": "#1e1e1e",
         "top_bar_bg": "#202020",
-        "timeline_bg": "#2d2d2d",
         "text": "#d4d4d4",
         "scroll_track": "#2d2d2d",
         "scroll_thumb": "#555555",
@@ -50,7 +49,6 @@ class ThemeColors:
         "sidebar_bg": "#ffffff",
         "log_bg": "#f3f3f3",
         "top_bar_bg": "#f3f3f3",
-        "timeline_bg": "#ffffff",
         "text": "#000000",
         "scroll_track": "#f0f0f0",
         "scroll_thumb": "#c1c1c1",
@@ -224,182 +222,6 @@ class Filter:
         
         return f'<Filter enabled="{en}" regex="{reg}" exclude="{exc}" foreColor="{fg}" backColor="{bg}">{self.text}</Filter>'
 
-
-class TimelineView(ft.Container):
-    def __init__(self, app, width=50):
-        is_dark = app.page.theme_mode == ft.ThemeMode.DARK
-        bg = "#1e1e1e" if is_dark else "#ffffff"
-        
-        super().__init__(
-            width=width,
-            bgcolor=bg,
-            padding=0,
-            alignment=ft.Alignment(-1, -1)
-        )
-        self.app = app
-        self.events = [] # List of (ts, filter_text, raw_idx)
-        self.total_lines = 0
-        self.current_scroll_index = 0
-        
-        # Static Layer: Heatmap
-        self.heatmap_canvas = cv.Canvas(
-            shapes=[],
-            expand=True,
-        )
-        
-        # Dynamic Layer: Viewport Indicator
-        self.indicator_canvas = cv.Canvas(
-            shapes=[],
-            expand=True,
-        )
-        
-        # Stack layers
-        self.layers = ft.Stack([
-            self.heatmap_canvas,
-            self.indicator_canvas
-        ], expand=True)
-        
-        # GestureDetector for interaction
-        self.gesture = ft.GestureDetector(
-            content=self.layers,
-            on_tap_down=self.on_tap_down,
-            on_pan_update=self.on_pan_update,
-            expand=True
-        )
-        
-        self.content = self.gesture
-
-    def update_data(self, events, total_lines, update=True):
-        self.events = events
-        self.total_lines = total_lines
-        self.draw_heatmap(update=update)
-        self.draw_indicator()
-        if update:
-            self.update()
-
-    def update_scroll(self, index):
-        self.current_scroll_index = index
-        self.draw_indicator()
-        self.indicator_canvas.update()
-
-    def set_height(self, height):
-        self.height = height
-        self.draw_heatmap()
-        self.draw_indicator()
-        self.update()
-
-    def draw_heatmap(self, update=True):
-        self.heatmap_canvas.shapes.clear()
-        
-        # Use explicitly set height, default to 500 if not set
-        canvas_height = self.height if self.height else 500
-        is_dark = self.app.page.theme_mode == ft.ThemeMode.DARK
-        
-        # Avoid division by zero
-        if self.total_lines <= 0:
-            if update:
-                self.heatmap_canvas.update()
-            return
-
-        # 1. Draw Heatmap (Background)
-        if self.events:
-            color_map = {}
-            for f in self.app.filters:
-                if f.enabled:
-                    # 關鍵：針對當前主題調整顏色
-                    color_map[f.text] = adjust_color_for_theme(f.back_color, True, is_dark)
-
-            scale = canvas_height / self.total_lines
-            for _, text, raw_idx in self.events:
-                y = raw_idx * scale
-                color = color_map.get(text, "#FF0000")
-                h = max(2, scale) 
-                self.heatmap_canvas.shapes.append(
-                    cv.Rect(
-                        x=0, y=y, 
-                        width=self.width, height=h,
-                        paint=ft.Paint(color=color, style=ft.PaintingStyle.FILL)
-                    )
-                )
-        if update:
-            self.heatmap_canvas.update()
-
-    def draw_indicator(self):
-        self.indicator_canvas.shapes.clear()
-        canvas_height = self.height if self.height else 500
-        is_dark = self.app.page.theme_mode == ft.ThemeMode.DARK
-        fg_color = ft.Colors.WHITE if is_dark else ft.Colors.BLACK
-
-        if self.total_lines > 0:
-            lines_per_page = self.app.LINES_PER_PAGE
-            current_filtered_idx = self.app.current_start_index
-            
-            start_raw = 0
-            end_raw = 0
-            
-            if self.app.filtered_indices:
-                if current_filtered_idx < len(self.app.filtered_indices):
-                    start_raw = self.app.filtered_indices[current_filtered_idx]
-                else:
-                    start_raw = self.total_lines
-                
-                end_filtered_idx = min(current_filtered_idx + lines_per_page, len(self.app.filtered_indices) - 1)
-                if end_filtered_idx >= 0 and end_filtered_idx < len(self.app.filtered_indices):
-                    end_raw = self.app.filtered_indices[end_filtered_idx]
-                else:
-                    end_raw = start_raw
-            else:
-                start_raw = current_filtered_idx
-                end_raw = min(current_filtered_idx + lines_per_page, self.total_lines)
-
-            y_start = (start_raw / self.total_lines) * canvas_height
-            y_end = (end_raw / self.total_lines) * canvas_height
-            h = max(4, y_end - y_start)
-            
-            # Draw Indicator
-            indicator = cv.Rect(
-                x=0, y=y_start, 
-                width=self.width, height=h,
-                paint=ft.Paint(
-                    color=fg_color, 
-                    style=ft.PaintingStyle.STROKE,
-                    stroke_width=2
-                )
-            )
-            self.indicator_canvas.shapes.append(indicator)
-
-    async def on_tap_down(self, e: ft.TapEvent):
-        await self.handle_interaction(e.local_position.y)
-
-    async def on_pan_update(self, e: ft.DragUpdateEvent):
-        await self.handle_interaction(e.local_position.y) # Delta handling handled by position update
-
-    async def handle_interaction(self, y):
-        # Calculate index from Y
-        canvas_height = self.page.height - 60 # Sync with draw logic
-        if canvas_height <= 0: return
-        
-        percentage = y / canvas_height
-        target_raw_idx = int(percentage * self.total_lines)
-        
-        # We need to jump to the NEAREST filtered index for this raw index
-        new_filtered_idx = 0
-        
-        if self.app.filtered_indices:
-            # Binary search or simple scan to find closest
-            # For now, simple scan (optimization needed for large logs)
-            # Find i such that filtered_indices[i] >= target_raw_idx
-            
-            # Using bisect module would be better, but let's implement simple search for MVP
-            import bisect
-            idx = bisect.bisect_left(self.app.filtered_indices, target_raw_idx)
-            if idx >= len(self.app.filtered_indices):
-                idx = len(self.app.filtered_indices) - 1
-            new_filtered_idx = idx
-        else:
-            new_filtered_idx = target_raw_idx
-            
-        self.app.jump_to_index(new_filtered_idx, update_slider=True)
 
 class LogAnalyzerApp:
     def __init__(self, page: ft.Page):
@@ -1011,15 +833,6 @@ class LogAnalyzerApp:
         self.search_bar_comp = self._build_search_bar()
         self.status_bar = self._build_status_bar()
         
-        # 2. Timeline (Right)
-        self.timeline = TimelineView(self, width=50)
-        self.timeline_area = ft.Container(
-            width=50, 
-            bgcolor=colors["timeline_bg"],
-            content=self.timeline,
-            alignment=ft.Alignment(-1, -1)
-        )
-
         # 3. Main Layout Assembly
         # Wrap log area in a Stack to overlay the Search Bar
         self.log_stack = ft.Stack([
@@ -1034,7 +847,6 @@ class LogAnalyzerApp:
             controls=[
                 self.sidebar,
                 self.log_stack, 
-                self.timeline_area
             ],
             expand=True, 
             spacing=0
@@ -1100,10 +912,6 @@ class LogAnalyzerApp:
         if hasattr(self, "search_results_count"):
             self.search_results_count.color = colors["text"]
         
-        # 6. 時間軸區域
-        if hasattr(self, "timeline_area"):
-            self.timeline_area.bgcolor = colors["timeline_bg"]
-
         # 7. 狀態列
         if hasattr(self, "status_bar"):
             self.status_bar.bgcolor = colors["status_bg"]
@@ -1330,10 +1138,6 @@ class LogAnalyzerApp:
             await self.render_filters(update_page=False)
             # 更新 Log 每一行的顏色 (因為 update_log_view 內部會根據當前主題選擇顏色)
             self.update_log_view()
-            # 更新時間軸 (因為主題改變，heatmap 顏色和 indicator 顏色可能需要調整)
-            if hasattr(self, "timeline"):
-                self.timeline.draw_heatmap(update=False)
-                self.timeline.draw_indicator()
         
         # 5. 保存設定並更新
         self.save_config()
@@ -1494,7 +1298,6 @@ class LogAnalyzerApp:
             # Update specific controls only - DO NOT use page.update()
             self.log_list_column.update()
             self.scrollbar_stack.update()
-            self.timeline.update_scroll(self.current_start_index)
         finally:
             self.is_updating = False
             # If target changed during the update, schedule next frame immediately
@@ -1812,7 +1615,6 @@ class LogAnalyzerApp:
 
             # Re-sync thumb position
             self.sync_scrollbar_position()
-            self.timeline.set_height(self.scrollbar_track_height)
             
         self.page.update()
 
@@ -1965,18 +1767,13 @@ class LogAnalyzerApp:
             self.filtered_indices = None
             self.line_tags_codes = None
             total_count = self.log_engine.line_count()
-            self.timeline.update_data([], total_count)
         else:
             # 呼叫引擎 (背景執行緒執行防止卡頓)
             results = await asyncio.to_thread(self.log_engine.filter, active_filters)
             
-            # 解包結果
-            self.line_tags_codes, self.filtered_indices, hit_counts, timeline_events = results
+            # 解包結果 (忽略 timeline_events)
+            self.line_tags_codes, self.filtered_indices, hit_counts, _ = results
             total_count = len(self.filtered_indices)
-            
-            # 更新 Timeline
-            raw_count = self.log_engine.line_count()
-            self.timeline.update_data(timeline_events, raw_count)
             
             # 更新過濾器命中數
             for idx, count in enumerate(hit_counts):
