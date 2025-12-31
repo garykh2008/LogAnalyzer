@@ -84,3 +84,4 @@
 - [ ] **Help & Docs**:
     - [ ] Keyboard Shortcuts dialog.
     - [ ] Documentation HTML viewer.
+    - [x] About dialog.

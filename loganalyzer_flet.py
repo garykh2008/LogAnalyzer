@@ -258,6 +258,10 @@ class LogAnalyzerApp:
         self.page.padding = 0
         self.page.spacing = 0
         
+        # App Info
+        self.APP_NAME = "Log Analyzer (Flet Edition)"
+        self.VERSION = "V1.7" # To be updated manually for releases
+        
         # App 引擎與路徑
         self.log_engine = None
         self.file_path = None
@@ -582,6 +586,16 @@ class LogAnalyzerApp:
                             content=ft.Text("Show Filtered Only"),
                             leading=ft.Icon(ft.Icons.FILTER_ALT, size=18),
                             on_click=self.toggle_show_filtered
+                        )
+                    ]
+                ),
+                ft.SubmenuButton(
+                    content=ft.Text("Help", weight=ft.FontWeight.W_500),
+                    controls=[
+                        ft.MenuItemButton(
+                            content=ft.Text("About"),
+                            leading=ft.Icon(ft.Icons.INFO_OUTLINE, size=18),
+                            on_click=self.show_about_dialog
                         )
                     ]
                 )
@@ -2484,6 +2498,24 @@ class LogAnalyzerApp:
 
         asyncio.create_task(_remove_toast())
 
+    async def show_about_dialog(self, e):
+        """Displays the About dialog."""
+        self.dialog = ft.AlertDialog(
+            title=ft.Text(f"About {self.APP_NAME}"),
+            content=ft.Column(
+                [
+                    ft.Text(f"Version: {self.VERSION}"),
+                    ft.Text("A high-performance log analysis tool."),
+                    ft.Text("Developed with Flet & Rust"),
+                ],
+                tight=True,
+            ),
+            actions=[
+                ft.TextButton("Close", on_click=lambda _: [setattr(self.dialog, 'open', False), self.page.update()]),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.show_dialog(self.dialog)
     async def _perform_load_logic(self, path):
         """實際的檔案載入與引擎初始化邏輯。"""
         start_time = time.time()
