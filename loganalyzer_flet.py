@@ -1794,9 +1794,9 @@ class LogAnalyzerApp:
 
     async def toggle_show_filtered(self, e=None):
         self.show_only_filtered = not self.show_only_filtered
-        self.page.snack_bar = ft.SnackBar(ft.Text(f"Mode: {'Filtered Only' if self.show_only_filtered else 'Full View'}"))
-        self.page.snack_bar.open = True
+        self.show_toast(f"Mode: {'Filtered Only' if self.show_only_filtered else 'Full View'}")
         self.current_start_index = 0 # Reset to top
+        self.update_status_bar() # Update line counts in status bar
         self.update_log_view()
         self.sync_scrollbar_position()
         self.page.update()
@@ -1811,19 +1811,25 @@ class LogAnalyzerApp:
             self.page.update()
             
         try:
-            return await coro
+            result = await coro
+            # If the coroutine returns a result message, show it as a Toast
+            if isinstance(result, str) and status_msg:
+                self.show_toast(result)
+            
+            # Clean up status bar if it's still showing the transient progress message
+            # (Meaning the task didn't update the status bar itself, e.g. when no log is loaded)
+            if status_msg and self.status_text.value == f"{status_msg}...":
+                self.status_text.value = "Ready"
+                self.status_text.update()
+                
+            return result
         except Exception as e:
             print(f"UNHANDLED ERROR: {e}", flush=True)
             import traceback
             traceback.print_exc()
             
             # 顯示錯誤提示給使用者
-            self.page.snack_bar = ft.SnackBar(
-                content=ft.Text(f"Error: {str(e)}"),
-                bgcolor=ft.Colors.ERROR
-            )
-            self.page.snack_bar.open = True
-            self.page.update()
+            self.show_toast(f"Error: {str(e)}", is_error=True)
             return None
 
     async def apply_filters(self):
@@ -1872,9 +1878,7 @@ class LogAnalyzerApp:
         self.current_start_index = 0
         self.jump_to_index(0, update_slider=True)
         
-        mode = "Showing" if self.show_only_filtered else "Total"
-        count = total_count if self.show_only_filtered else self.log_engine.line_count()
-        self.status_text.value = f"{mode} {count} lines"
+        self.update_status_bar()
         self.needs_render = True
         # self.page.update() # REMOVED: Rely on render_loop
         # self.update_log_view() # jump_to_index already calls update_log_view
@@ -2308,9 +2312,7 @@ class LogAnalyzerApp:
             # Use the deprecated but functional method as per project notes
             await self.page.clipboard.set(text)
             
-            self.page.snack_bar = ft.SnackBar(ft.Text(f"Copied {len(lines)} lines to clipboard."))
-            self.page.snack_bar.open = True
-            self.page.update()
+            self.show_toast(f"Copied {len(lines)} lines to clipboard.")
         except Exception as ex:
             print(f"Copy Error: {ex}")
 
@@ -2368,6 +2370,85 @@ class LogAnalyzerApp:
         clean_path = path.strip().strip('\"\'')
         await self._run_safe_async(self._perform_load_logic(clean_path), f"Loading {os.path.basename(clean_path)}")
 
+    def update_status_bar(self):
+        """更新底部狀態列的行數統計資訊。"""
+        if not self.log_engine:
+            self.status_text.value = "Ready"
+        else:
+            total = self.log_engine.line_count()
+            # 決定目前「顯示」的行數
+            if self.show_only_filtered and self.filtered_indices is not None:
+                shown = len(self.filtered_indices)
+            else:
+                shown = total
+            
+            self.status_text.value = f"Showing {shown:,} lines (Total {total:,})"
+        
+        if hasattr(self, "status_text") and self.status_text.page:
+            self.status_text.update()
+
+    def show_toast(self, message, is_error=False, duration=3.0):
+        """Displays a custom toast notification in the overlay."""
+        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+        
+        if is_error:
+            bg_color = ft.Colors.RED_800
+            fg_color = ft.Colors.WHITE
+        else:
+            # Theme-aware colors: Dark mode uses dark grey, Light mode uses soft grey/white
+            bg_color = "#333333" if is_dark else "#E0E0E0"
+            fg_color = ft.Colors.WHITE if is_dark else ft.Colors.BLACK
+        
+        # Create the toast content
+        toast_content = ft.Container(
+            content=ft.Text(message, color=fg_color, size=13, weight=ft.FontWeight.W_500),
+            bgcolor=bg_color,
+            padding=ft.padding.symmetric(horizontal=15, vertical=8),
+            border_radius=8,
+            opacity=0, # Start hidden for fade-in
+            animate_opacity=300,
+            alignment=ft.Alignment(0, 0), # Center content inside toast
+            shadow=ft.BoxShadow(
+                blur_radius=10, 
+                color=ft.Colors.with_opacity(0.3, ft.Colors.BLACK if is_dark else ft.Colors.GREY_700)
+            ),
+        )
+        
+        # Wrapper for positioning at bottom center
+        toast_wrapper = ft.Container(
+            content=ft.Row(
+                [toast_content], 
+                alignment=ft.MainAxisAlignment.CENTER,
+            ),
+            bottom=50,
+            left=0,
+            right=0,
+        )
+        
+        self.page.overlay.append(toast_wrapper)
+        self.page.update()
+        
+        # Trigger Fade In
+        toast_content.opacity = 1
+        toast_content.update()
+        
+        # Auto-remove task
+        async def _remove_toast():
+            await asyncio.sleep(duration)
+            try:
+                # Fade Out
+                toast_content.opacity = 0
+                toast_content.update()
+                await asyncio.sleep(0.3) # Wait for animation
+                
+                if toast_wrapper in self.page.overlay:
+                    self.page.overlay.remove(toast_wrapper)
+                    self.page.update()
+            except Exception:
+                pass # Page might be closed
+
+        asyncio.create_task(_remove_toast())
+
     async def _perform_load_logic(self, path):
         """實際的檔案載入與引擎初始化邏輯。"""
         start_time = time.time()
@@ -2401,7 +2482,11 @@ class LogAnalyzerApp:
         
         self.update_log_view()
         engine_type = "Rust" if HAS_RUST else "Mock"
-        self.status_text.value = f"[{engine_type}] Loaded {os.path.basename(path)} ({line_count:,} lines) in {duration:.3f}s"
+        
+        # Show load stats in SnackBar instead of overwriting Status Bar
+        load_msg = f"[{engine_type}] Loaded {os.path.basename(path)} ({line_count:,} lines) in {duration:.3f}s"
+        self.show_toast(load_msg)
+        
         self.needs_render = True
 
 async def main(page: ft.Page):
