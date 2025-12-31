@@ -601,11 +601,11 @@ class LogAnalyzerApp:
         """建立過濾器側邊欄。"""
         colors = self._get_colors()
         
-        self.filter_list_view = ft.ListView(
+        self.filter_list_view = ft.ReorderableListView(
             expand=True, 
             spacing=8, # More spacing between items
             padding=ft.padding.only(top=10),
-            auto_scroll=False
+            on_reorder=self.on_filter_reorder,
         )
 
         self.add_filter_btn = ft.Button(
@@ -1156,11 +1156,14 @@ class LogAnalyzerApp:
         self.update_ui_colors()
         
         # 4. 更新內容顏色
+        # A. 恢復過濾器標籤 (不論是否載入 log 都應更新顏色)
+        await self.render_filters(update_page=False)
+        self.filter_list_view.update() # 強制局部刷新以處理 ReorderableListView 的 key 變更
+        
         if self.log_engine:
-            # 更新過濾器標籤顏色
-            await self.render_filters(update_page=False)
-            # 更新 Log 每一行的顏色 (因為 update_log_view 內部會根據當前主題選擇顏色)
+            # 更新 Log 每一行的顏色
             self.update_log_view()
+            # 更新時間軸已移除 (Timeline removed)
         
         # 5. 保存設定並更新
         self.save_config()
@@ -1934,9 +1937,10 @@ class LogAnalyzerApp:
 
     async def render_filters(self, update_page=True):
         self.filter_list_view.controls.clear()
-        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+        # 使用與 ThemeColors 一致的穩定判斷邏輯
+        is_dark = str(self.page.theme_mode).split(".")[-1].lower() == "dark"
         
-        for f in self.filters:
+        for i, f in enumerate(self.filters):
             # Checkbox for enabled state
             async def on_cb_change(e, obj=f):
                 obj.enabled = e.control.value
@@ -1971,7 +1975,6 @@ class LogAnalyzerApp:
                 padding=ft.Padding(12, 4, 12, 4), # Increased horizontal padding for pill look
                 border_radius=20, # Pill shape
                 expand=True,
-                # border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE) if is_dark else ft.Colors.with_opacity(0.2, ft.Colors.BLACK)) # Removed border
             )
             
             # Hit Count Badge
@@ -1991,11 +1994,15 @@ class LogAnalyzerApp:
                 self.open_filter_context_menu(e, obj)
 
             item_row = ft.GestureDetector(
-                content=ft.Row([
-                    cb,
-                    lbl_tag,
-                    hit_badge
-                ], spacing=5, alignment=ft.MainAxisAlignment.START),
+                key=f"{id(f)}_{is_dark}", # 關鍵：包含主題資訊，強制主題切換時完全重繪
+                content=ft.Container(
+                    content=ft.Row([
+                        cb,
+                        lbl_tag,
+                        hit_badge
+                    ], spacing=5, alignment=ft.MainAxisAlignment.START),
+                    padding=ft.padding.only(right=35), # 為 ReorderableListView 的拖曳手把留出空間
+                ),
                 on_double_tap=on_double_tap,
                 on_secondary_tap=on_secondary_tap,
             )
@@ -2006,6 +2013,29 @@ class LogAnalyzerApp:
         
         if update_page:
             self.page.update()
+
+    async def on_filter_reorder(self, e):
+        """處理過濾器拖曳排序事件。"""
+        # e.old_index: 被拖曳項目的原始位置
+        # e.new_index: 拖曳到的新位置
+        
+        # 從事件物件中取得索引 (使用通用方式以相容不同版本)
+        old_idx = getattr(e, "old_index", None)
+        new_idx = getattr(e, "new_index", None)
+        
+        if old_idx is None or new_idx is None:
+            return
+            
+        # 1. 更新資料列表
+        f = self.filters.pop(old_idx)
+        self.filters.insert(new_idx, f)
+        self.filters_dirty = True
+        
+        # 2. 重新渲染介面
+        await self.render_filters()
+        
+        # 3. 重新執行過濾邏輯 (因為順序影響配色優先權)
+        await self.apply_filters()
 
     def open_filter_context_menu(self, e, obj):
         def close_dlg(ev):
