@@ -316,6 +316,7 @@ class LogAnalyzerApp:
             "window_maximized": False,
             "main_window_geometry": "1200x800+100+100",
             "note_view_visible": False,
+            "sidebar_visible": False,
             "sash_main_y": 360
         }
         self.config = self.default_config.copy()
@@ -619,6 +620,7 @@ class LogAnalyzerApp:
 
         return ft.Container(
             width=280,
+            visible=self.config.get("sidebar_visible", False),
             bgcolor=colors["sidebar_bg"],
             padding=ft.padding.all(15),
             content=ft.Column([
@@ -1120,6 +1122,7 @@ class LogAnalyzerApp:
 
     def toggle_sidebar(self):
         self.sidebar.visible = not self.sidebar.visible
+        self.config["sidebar_visible"] = self.sidebar.visible
         self.page.update()
 
     def update_title(self):
@@ -1495,6 +1498,11 @@ class LogAnalyzerApp:
         self.jump_to_index(int(e.control.value), update_slider=False)
 
     async def on_keyboard(self, e: ft.KeyboardEvent):
+        # Global Shortcuts (Work without log loaded)
+        if e.ctrl and e.key.lower() == "b":
+            self.toggle_sidebar()
+            return
+
         if not self.log_engine:
             return
 
