@@ -81,7 +81,7 @@
 - [ ] **Multi-Log Merging**:
     - [ ] Interleave multiple logs by timestamp.
     - [ ] Source file identification in Log View.
-- [ ] **Help & Docs**:
-    - [ ] Keyboard Shortcuts dialog.
+- [x] **Help & Docs**:
+    - [x] Keyboard Shortcuts dialog.
     - [x] Documentation HTML viewer.
     - [x] About dialog.

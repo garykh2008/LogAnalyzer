@@ -594,6 +594,11 @@ class LogAnalyzerApp:
                     content=ft.Text("Help", weight=ft.FontWeight.W_500),
                     controls=[
                         ft.MenuItemButton(
+                            content=ft.Text("Keyboard Shortcuts"),
+                            leading=ft.Icon(ft.Icons.KEYBOARD, size=18),
+                            on_click=self.show_keyboard_shortcuts_dialog
+                        ),
+                        ft.MenuItemButton(
                             content=ft.Text("Documentation"),
                             leading=ft.Icon(ft.Icons.DESCRIPTION, size=18),
                             on_click=self.open_documentation
@@ -2543,6 +2548,72 @@ class LogAnalyzerApp:
             webbrowser.open('file://' + os.path.realpath(doc_path))
         except Exception as ex:
             self.show_toast(f"Failed to open documentation:\n{ex}", is_error=True)
+
+    async def show_keyboard_shortcuts_dialog(self, e):
+        """Displays a dialog with a summary of keyboard shortcuts."""
+        shortcuts_data = [
+            ("General & View", ""),
+            ("Ctrl + B", "Toggle Sidebar (Left/Right/Bottom)"),
+            ("Ctrl + F", "Show Find Bar"),
+            ("Ctrl + H", "Toggle 'Show Filtered Only'"),
+            ("Ctrl + C", "Copy selected lines"),
+            ("Esc", "Hide Find Bar"),
+            ("", ""),
+            ("Navigation", ""),
+            ("Arrow Up/Down", "Move selection up/down (1 line)"),
+            ("Page Up/Down", "Move selection up/down (page)"),
+            ("Home/End", "Jump to first/last line"),
+            ("Ctrl + Arrow Up/Down", "Move selection faster"),
+            ("F2", "Find previous occurrence"),
+            ("F3", "Find next occurrence"),
+            ("Shift + F3", "Find previous occurrence"), # Flet doesn't distinguish F3/Shift+F3
+            ("Enter (in Find)", "Find next occurrence"),
+            ("Shift + Enter (in Find)", "Find previous occurrence"),
+            ("", ""),
+            ("Filter List", ""),
+            ("Double-Click (filter)", "Edit filter"),
+            ("Right-Click (filter)", "Open filter context menu"),
+            ("", ""),
+            ("Log View", ""),
+            ("Double-Click (log line)", "Add Filter from selected line"),
+            ("Right-Click (log line)", "Open log line context menu"),
+            ("", ""),
+            ("Dialogs", ""),
+            ("Escape", "Close dialog"),
+        ]
+
+        items = []
+        for key, desc in shortcuts_data:
+            if not key and not desc:
+                items.append(ft.Divider())
+                continue
+            
+            items.append(
+                ft.Row([
+                    ft.Container(
+                        content=ft.Text(key, weight=ft.FontWeight.BOLD),
+                        width=150, # Fixed width for keys
+                        alignment=ft.Alignment(-1, 0), # Align left center
+                    ),
+                    ft.Text(desc, expand=True)
+                ])
+            )
+
+        self.dialog = ft.AlertDialog(
+            title=ft.Text("Keyboard Shortcuts"),
+            content=ft.Column(
+                items,
+                scroll=ft.ScrollMode.ADAPTIVE,
+                tight=True,
+                height=400, # Max height for scrollable content
+                width=500, # Fixed width for content
+            ),
+            actions=[
+                ft.TextButton("Close", on_click=lambda _: [setattr(self.dialog, 'open', False), self.page.update()]),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.show_dialog(self.dialog)
 
     async def show_about_dialog(self, e):
         """Displays the About dialog."""
