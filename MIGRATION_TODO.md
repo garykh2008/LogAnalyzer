@@ -83,5 +83,5 @@
     - [ ] Source file identification in Log View.
 - [ ] **Help & Docs**:
     - [ ] Keyboard Shortcuts dialog.
-    - [ ] Documentation HTML viewer.
+    - [x] Documentation HTML viewer.
     - [x] About dialog.

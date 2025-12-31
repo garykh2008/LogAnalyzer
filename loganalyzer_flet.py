@@ -10,6 +10,7 @@ import warnings
 import threading
 import tkinter as tk
 from tkinter import filedialog
+import webbrowser # Add this import
 
 # 隱藏 Flet 1.0 的過期警告
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -592,6 +593,11 @@ class LogAnalyzerApp:
                 ft.SubmenuButton(
                     content=ft.Text("Help", weight=ft.FontWeight.W_500),
                     controls=[
+                        ft.MenuItemButton(
+                            content=ft.Text("Documentation"),
+                            leading=ft.Icon(ft.Icons.DESCRIPTION, size=18),
+                            on_click=self.open_documentation
+                        ),
                         ft.MenuItemButton(
                             content=ft.Text("About"),
                             leading=ft.Icon(ft.Icons.INFO_OUTLINE, size=18),
@@ -2509,6 +2515,34 @@ class LogAnalyzerApp:
                 pass # Page might be closed
 
         asyncio.create_task(_remove_toast())
+
+        asyncio.create_task(_remove_toast())
+
+    # --- [Helper] Path Resource Finder ---
+    def resource_path(self, relative_path):
+        """Get absolute path to resource, works for dev and for PyInstaller"""
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = os.path.abspath(".")
+        return os.path.join(base_path, relative_path)
+
+    async def open_documentation(self, e):
+        """Opens the documentation HTML file in the default web browser."""
+        doc_filename = f"Log_Analyzer_{self.VERSION}_Docs_EN.html"
+        doc_path = self.resource_path(os.path.join("Doc", doc_filename))
+
+        # Check if the file exists, as resource_path might return a non-existent path
+        if not os.path.exists(doc_path):
+            self.show_toast(f"Documentation file not found:\n{doc_path}", is_error=True)
+            return
+
+        try:
+            # webbrowser opens the local file path
+            webbrowser.open('file://' + os.path.realpath(doc_path))
+        except Exception as ex:
+            self.show_toast(f"Failed to open documentation:\n{ex}", is_error=True)
 
     async def show_about_dialog(self, e):
         """Displays the About dialog."""
