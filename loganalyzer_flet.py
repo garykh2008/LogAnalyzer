@@ -141,9 +141,6 @@ def get_event_prop(event, prop_name, default=None):
                 return val
 
     # 3. Last Resort: Inspect and Debug
-    # print(f"DEBUG: Attribute '{prop_name}' not found in {type(event).__name__}")
-    # valid_attrs = [a for a in dir(event) if not a.startswith('_')]
-    # print(f"DEBUG: Available attributes: {valid_attrs}")
     
     return default
 
@@ -152,7 +149,6 @@ class MockLogEngine:
     def __init__(self, path):
         self.path = path
         # 模擬讀取
-        print(f"[MockEngine] Pretending to read {path}")
         self._lines = 1000 # 假裝有 1000 行
         
     def line_count(self):
@@ -163,7 +159,6 @@ class MockLogEngine:
 
     def filter(self, filters):
         # filters: List of (text, is_regex, is_exclude, is_event, original_index)
-        print(f"[MockEngine] Filtering with {len(filters)} filters...")
         
         # 簡單模擬：如果 filter text 是 "error"，就只回傳偶數行
         # 回傳格式: (line_tags_codes, filtered_indices, hit_counts, timeline_events)
@@ -349,8 +344,8 @@ class LogAnalyzerApp:
                     except: break
             
             threading.Thread(target=_wakeup_serv, daemon=True).start()
-        except Exception as e:
-            print(f"DEBUG: Failed to start wakeup thread: {e}")
+        except Exception:
+            pass
 
         # B. 啟動協程級別心跳 (主動通訊確保視窗信號 flush)
         async def _heartbeat_serv():
@@ -431,7 +426,6 @@ class LogAnalyzerApp:
                     data = json.load(f)
                     if isinstance(data, dict):
                         self.config.update(data)
-                print(f"Config loaded from {self.config_file}")
             except Exception as e:
                 print(f"Error loading config: {e}. Using defaults.")
 
@@ -468,7 +462,6 @@ class LogAnalyzerApp:
         try:
             # Apply Theme Mode first
             target_mode = self.config.get("theme_mode", "dark")
-            print(f"DEBUG: Applying theme mode: {target_mode}")
             self.page.theme_mode = ft.ThemeMode.DARK if target_mode == "dark" else ft.ThemeMode.LIGHT
             
             # Sync Native Windows Title Bar
@@ -1174,18 +1167,16 @@ class LogAnalyzerApp:
 
 
     async def show_search_bar(self):
-        # print("DEBUG: show_search_bar called")
         self.search_bar.visible = True
         self.page.update() # First update to make it visible
         
         # Then focus
         try:
             await self.search_input.focus()
-        except Exception as e:
-            print(f"DEBUG: Focus error: {e}")
+        except Exception:
+            pass
             
         self.page.update() # Second update to ensure focus state is rendered
-        # print("DEBUG: search_bar should be visible now")
 
     async def hide_search_bar(self, e=None):
         self.search_bar.visible = False
@@ -1218,7 +1209,6 @@ class LogAnalyzerApp:
                 self.log_engine.search, query, False, self.search_case_sensitive
             )
             self.current_search_idx = -1
-            # print(f"DEBUG: Found {len(self.search_results)} search results")
 
         if not self.search_results:
             self.update_results_count("0/0")
@@ -1467,12 +1457,6 @@ class LogAnalyzerApp:
         
         # REMOVED page.update() here, it's now in the render_loop
 
-
-
-        
-        # 效能監控 (可選)
-        # print(f"Render frame took: {(time.time() - t_start)*1000:.2f}ms")
-
     def jump_to_index(self, idx, update_slider=True, immediate=False):
         if not self.log_engine:
             return
@@ -1568,8 +1552,6 @@ class LogAnalyzerApp:
 
         # Clamp range
         new_view_idx = max(0, min(new_view_idx, total_items - 1))
-        
-        # print(f"DEBUG: Navigating to ViewIdx: {new_view_idx}, Total: {total_items}")
         
         # Map back to raw index for selection
         if self.show_only_filtered and self.filtered_indices is not None:
@@ -1710,7 +1692,6 @@ class LogAnalyzerApp:
         
         self.thumb_top = percentage * max_top
         self.scrollbar_thumb.top = self.thumb_top
-        # print(f"DEBUG: Sync Scrollbar: idx={self.current_start_index}, max_idx={max_idx}, track={self.scrollbar_track_height}, thumb_top={self.thumb_top}")
         # Explicitly update thumb to ensure visual sync if page.update misses it?
         # self.scrollbar_thumb.update()
 
@@ -1779,7 +1760,6 @@ class LogAnalyzerApp:
         """實際的過濾計算邏輯。"""
         # 前置條件檢查：必須有 log 檔案載入才能過濾
         if not self.log_engine:
-            print("DEBUG: No log engine, skipping filter logic.", flush=True)
             return
             
         # 收集啟用的 Filters
@@ -1958,7 +1938,6 @@ class LogAnalyzerApp:
         for f in self.filters:
             # Checkbox for enabled state
             async def on_cb_change(e, obj=f):
-                print(f"DEBUG: Filter '{obj.text}' enabled set to {e.control.value}")
                 obj.enabled = e.control.value
                 self.filters_dirty = True
                 await self.apply_filters()
@@ -2247,7 +2226,6 @@ class LogAnalyzerApp:
 
     async def _perform_load_logic(self, path):
         """實際的檔案載入與引擎初始化邏輯。"""
-        print(f"DEBUG: Initializing engine with {path}", flush=True)
         start_time = time.time()
         
         # 初始化引擎
@@ -2258,7 +2236,6 @@ class LogAnalyzerApp:
         
         line_count = self.log_engine.line_count()
         duration = time.time() - start_time
-        print(f"DEBUG: Loaded {line_count} lines in {duration:.3f}s", flush=True)
         
         self.file_path = path
         self.update_title()
