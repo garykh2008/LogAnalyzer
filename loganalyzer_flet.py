@@ -634,25 +634,34 @@ class LogAnalyzerApp:
         )
 
         # 在底部模式下，Add Filter 按鈕可以跟標題排在同一行
+        self.add_filter_btn = ft.ElevatedButton(
+            content=ft.Row(
+                [
+                    ft.Icon(ft.Icons.ADD, size=16),
+                    ft.Text("Add Filter", size=12),
+                ],
+                spacing=5,
+                alignment=ft.MainAxisAlignment.CENTER,
+            ),
+            height=30,
+            on_click=self.on_add_filter_click,
+            style=ft.ButtonStyle(
+                bgcolor={
+                    ft.ControlState.DEFAULT: ft.Colors.BLUE_700 if self.page.theme_mode == ft.ThemeMode.DARK else ft.Colors.BLUE_50,
+                    ft.ControlState.HOVERED: ft.Colors.BLUE_600 if self.page.theme_mode == ft.ThemeMode.DARK else ft.Colors.BLUE_100,
+                },
+                color={
+                    ft.ControlState.DEFAULT: ft.Colors.WHITE if self.page.theme_mode == ft.ThemeMode.DARK else ft.Colors.BLUE_700,
+                },
+                padding=ft.padding.symmetric(horizontal=10),
+                shape=ft.RoundedRectangleBorder(radius=6)
+            )
+        )
+
         title_row = ft.Row([
             ft.Text("Filters", size=16, weight=ft.FontWeight.BOLD, color=colors["text"]),
             ft.VerticalDivider(width=10, color=ft.Colors.TRANSPARENT) if is_bottom else ft.Container(),
-            ft.ElevatedButton(
-                content=ft.Row(
-                    [
-                        ft.Icon(ft.Icons.ADD, size=16),
-                        ft.Text("Add Filter", size=12),
-                    ],
-                    spacing=5,
-                    alignment=ft.MainAxisAlignment.CENTER,
-                ),
-                height=30,
-                on_click=self.on_add_filter_click,
-                style=ft.ButtonStyle(
-                    padding=ft.padding.symmetric(horizontal=10),
-                    shape=ft.RoundedRectangleBorder(radius=6)
-                )
-            )
+            self.add_filter_btn
         ], alignment=ft.MainAxisAlignment.START)
 
         return ft.Container(
@@ -974,6 +983,26 @@ class LogAnalyzerApp:
                  for control in self.sidebar.content.controls:
                      if isinstance(control, ft.Text):
                          control.color = colors["text"]
+                     elif isinstance(control, ft.Row):
+                         for sub_control in control.controls:
+                             if isinstance(sub_control, ft.Text):
+                                 sub_control.color = colors["text"]
+                                 sub_control.update() # Ensure visual update
+            
+            # Update Add Filter Button Style
+            if hasattr(self, "add_filter_btn"):
+                self.add_filter_btn.style = ft.ButtonStyle(
+                    bgcolor={
+                        ft.ControlState.DEFAULT: ft.Colors.BLUE_700 if is_dark else ft.Colors.BLUE_50,
+                        ft.ControlState.HOVERED: ft.Colors.BLUE_600 if is_dark else ft.Colors.BLUE_100,
+                    },
+                    color={
+                        ft.ControlState.DEFAULT: ft.Colors.WHITE if is_dark else ft.Colors.BLUE_700,
+                    },
+                    padding=ft.padding.symmetric(horizontal=10),
+                    shape=ft.RoundedRectangleBorder(radius=6)
+                )
+                self.add_filter_btn.update()
 
         # 4. Log 區域
         if hasattr(self, "log_display_column"):
