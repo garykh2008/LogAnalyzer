@@ -17,12 +17,12 @@
 ### 1. Helper Functions
 - [x] `is_true(value)` / `fix_color` / `hex_to_rgb`: Inlined or implemented.
 - [x] `adjust_color_for_theme`: Handled by `toggle_theme` logic and smart color adjustment.
-- [ ] `bool_to_tat` / `color_to_tat`: Pending (for Filter File I/O).
+- [x] `bool_to_tat` / `color_to_tat`: Implemented within `Filter.to_tat_xml` for file I/O.
 
 ### 2. `Filter` Class
 - [x] Basic class with `enabled`, `is_regex`, `is_exclude`, `is_event`.
 - [x] Added `hit_count` support.
-- [ ] `to_dict` method for persistence.
+- [x] `to_tat_xml` method for persistence (.tat).
 
 ### 3. `LogFileState` Class
 - [x] Basic state in `LogAnalyzerApp`.
@@ -49,21 +49,25 @@
 - [x] **Top Menu Bar**: Custom MenuBar implementation.
     - [x] `File`: Open, Recent Files, Exit.
     - [x] `File`: Load/Save Filters (.tat).
-    - [x] `View`: Toggle Sidebar, Toggle Dark Mode.
+    - [x] `View`: Toggle Sidebar (Ctrl+B), Position (Left/Right/Bottom).
+    - [x] `View`: Toggle Dark Mode.
     - [x] `View`: Find (Ctrl+F).
     - [ ] `View`: Go to Line (Ctrl+G).
 - [x] **Welcome Message**: Initial screen matching loganalyzer.py.
 - [ ] **Drag & Drop**: Implement OS-level file drop.
-- [x] **Status Bar**: Live status, line counts, and timings.
-- [ ] **Filter System Improvement**:
+- [x] **Status Bar**: Live status (Showing/Total) with persistent counts.
+- [x] **Notification System**: Custom Theme-aware Toast Overlay (replaces SnackBar).
+- [x] **Filter System Improvement**:
     - [x] Filter Editor Dialog with Color Grid and Readability Adjustment.
     - [x] Double-click to edit, Secondary tap for context menu.
     - [x] Toggle "Show Filtered Only" mode (Ctrl+H).
+    - [x] Compact UI: Tight spacing and reduced button sizes.
+    - [x] Drag & Drop Reordering.
 - [ ] **Notes View Panel**: Add a toggleable bottom/side panel to list all notes.
 - [ ] **Minimap / Search Markers**: Vertical bar next to scrollbar showing match positions.
 
 ### 7. Functional Methods
-- [x] **Theming**: `toggle_theme` with Turbo-compatible sync.
+- [x] **Theming**: `toggle_theme` with deep recursion for Sidebar components.
 - [x] **File I/O**: `load_file` with Rust engine and Recent Files support.
 - [x] **Filter Logic**: `apply_filters` with async Rust call.
 - [x] **Navigation**: Turbo scrolling with acceleration and Clamping.
