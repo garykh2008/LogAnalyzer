@@ -671,6 +671,7 @@ class LogAnalyzerApp:
                 content=self.log_list_column,
                 on_scroll=self.on_log_scroll,
                 on_tap_down=self.on_log_area_tap,
+                on_double_tap=self.on_log_area_double_tap,
                 on_secondary_tap_down=self.on_log_area_secondary_tap,
                 expand=True 
             ),
@@ -1805,10 +1806,10 @@ class LogAnalyzerApp:
         # Instead of adding directly, open the dialog
         await self.open_filter_dialog()
 
-    async def open_filter_dialog(self, filter_obj=None):
+    async def open_filter_dialog(self, filter_obj=None, initial_text=None):
         # Create a temporary state for the dialog
         is_new = filter_obj is None
-        d_text = filter_obj.text if not is_new else ""
+        d_text = (initial_text if initial_text else "") if is_new else filter_obj.text
         d_fore = filter_obj.fore_color if not is_new else "#FFFFFF"
         d_back = filter_obj.back_color if not is_new else "#000000"
         d_regex = filter_obj.is_regex if not is_new else False
@@ -2040,9 +2041,47 @@ class LogAnalyzerApp:
         self.page.show_dialog(self.filter_ctx)
 
 
+    async def on_log_area_double_tap(self, e):
+        # Double tap event in Flet doesn't provide coordinates, 
+        # so we use the one captured by the last on_tap_down
+        local_y = getattr(self, "last_log_tap_y", 0)
+        row_idx = int(local_y / self.ROW_HEIGHT)
+        
+        class MockEvent:
+            def __init__(self, data):
+                self.control = type('obj', (object,), {'data': data})
+        
+        mock_e = MockEvent(row_idx)
+        await self.on_log_double_click(mock_e)
+
+    async def on_log_double_click(self, e):
+        row_idx = e.control.data
+        view_idx = self.current_start_index + row_idx
+        
+        # Determine total items
+        if self.show_only_filtered and self.filtered_indices is not None:
+            total_items = len(self.filtered_indices)
+        else:
+            total_items = self.log_engine.line_count() if self.log_engine else 0
+            
+        if view_idx >= total_items: return
+        
+        # Map to real_idx
+        if self.show_only_filtered and self.filtered_indices is not None:
+            real_idx = self.filtered_indices[view_idx]
+        else:
+            real_idx = view_idx
+            
+        # Get line text from engine
+        if self.log_engine:
+            line_text = self.log_engine.get_line(real_idx)
+            await self.open_filter_dialog(initial_text=line_text.strip())
+
     async def on_log_area_tap(self, e: ft.TapEvent):
         # Calculate which row was clicked based on local_y
         local_y = get_event_prop(e, "local_y", 0)
+        self.last_log_tap_y = local_y # Store for double tap usage
+        
         row_height = self.ROW_HEIGHT
         row_idx = int(local_y / row_height)
         
@@ -2189,24 +2228,23 @@ class LogAnalyzerApp:
             self.context_menu_dlg.open = False
             self.page.update()
 
-        async def filter_include(e):
-            # TODO: Implement actual filter logic
-            close_dlg(None)
-            
-        async def filter_exclude(e):
-            # TODO: Implement actual filter logic
-            close_dlg(None)
-
         # Using AlertDialog as a simple context menu
         copy_label = f"Copy Line" if len(self.selected_indices) <= 1 else f"Copy {len(self.selected_indices)} Lines"
         
         self.context_menu_dlg = ft.AlertDialog(
             title=ft.Text(f"Line {real_idx + 1} Actions"),
             content=ft.Column([
-                ft.ListTile(leading=ft.Icon(ft.Icons.COPY), title=ft.Text(copy_label), on_click=lambda _: [asyncio.create_task(self.copy_selected_lines()), close_dlg(None)]),
-                ft.ListTile(leading=ft.Icon(ft.Icons.FILTER_ALT), title=ft.Text("Filter Include"), on_click=filter_include),
-                ft.ListTile(leading=ft.Icon(ft.Icons.FILTER_ALT_OFF), title=ft.Text("Filter Exclude"), on_click=filter_exclude),
-            ], height=200, width=300),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.COPY), 
+                    title=ft.Text(copy_label), 
+                    on_click=lambda _: [asyncio.create_task(self.copy_selected_lines()), close_dlg(None)]
+                ),
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.ADD), 
+                    title=ft.Text("Add Filter from Line"), 
+                    on_click=lambda _: [asyncio.create_task(self.on_log_double_click(e)), close_dlg(None)]
+                ),
+            ], height=140, width=300),
             actions=[
                 ft.TextButton("Cancel", on_click=close_dlg),
             ],
