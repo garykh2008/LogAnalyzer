@@ -316,7 +316,6 @@ class LogAnalyzerApp:
             "window_maximized": False,
             "main_window_geometry": "1200x800+100+100",
             "note_view_visible": False,
-            "sidebar_visible": False,
             "sidebar_position": "left",
             "sash_main_y": 360
         }
@@ -667,7 +666,7 @@ class LogAnalyzerApp:
         return ft.Container(
             width=sidebar_width,
             height=sidebar_height,
-            visible=self.config.get("sidebar_visible", False),
+            visible=False,
             bgcolor=colors["sidebar_bg"],
             padding=ft.padding.all(15),
             content=ft.Column([
@@ -1158,6 +1157,11 @@ class LogAnalyzerApp:
             self.current_tat_path = path
             self.filters_dirty = False
             self.update_title()
+            
+            # 如果側邊欄是關閉的，載入 Filter 後自動開啟
+            if not self.sidebar.visible:
+                self.toggle_sidebar()
+                
             self.save_config()
             return f"Imported {len(new_filters)} filters"
         return "No filters found"
@@ -1211,7 +1215,6 @@ class LogAnalyzerApp:
 
     def toggle_sidebar(self):
         self.sidebar.visible = not self.sidebar.visible
-        self.config["sidebar_visible"] = self.sidebar.visible
         self.page.update()
 
     def change_sidebar_position(self, pos):
