@@ -269,12 +269,13 @@ class TimelineView(ft.Container):
         
         self.content = self.gesture
 
-    def update_data(self, events, total_lines):
+    def update_data(self, events, total_lines, update=True):
         self.events = events
         self.total_lines = total_lines
-        self.draw_heatmap()
+        self.draw_heatmap(update=update)
         self.draw_indicator()
-        self.update()
+        if update:
+            self.update()
 
     def update_scroll(self, index):
         self.current_scroll_index = index
@@ -287,15 +288,17 @@ class TimelineView(ft.Container):
         self.draw_indicator()
         self.update()
 
-    def draw_heatmap(self):
+    def draw_heatmap(self, update=True):
         self.heatmap_canvas.shapes.clear()
         
         # Use explicitly set height, default to 500 if not set
         canvas_height = self.height if self.height else 500
+        is_dark = self.app.page.theme_mode == ft.ThemeMode.DARK
         
         # Avoid division by zero
         if self.total_lines <= 0:
-            self.heatmap_canvas.update()
+            if update:
+                self.heatmap_canvas.update()
             return
 
         # 1. Draw Heatmap (Background)
@@ -303,7 +306,8 @@ class TimelineView(ft.Container):
             color_map = {}
             for f in self.app.filters:
                 if f.enabled:
-                    color_map[f.text] = f.back_color
+                    # 關鍵：針對當前主題調整顏色
+                    color_map[f.text] = adjust_color_for_theme(f.back_color, True, is_dark)
 
             scale = canvas_height / self.total_lines
             for _, text, raw_idx in self.events:
@@ -317,7 +321,8 @@ class TimelineView(ft.Container):
                         paint=ft.Paint(color=color, style=ft.PaintingStyle.FILL)
                     )
                 )
-        self.heatmap_canvas.update()
+        if update:
+            self.heatmap_canvas.update()
 
     def draw_indicator(self):
         self.indicator_canvas.shapes.clear()
@@ -992,7 +997,7 @@ class LogAnalyzerApp:
             alignment=ft.Alignment(-1, 0)
         )
 
-    def build_ui(self):
+    def build_ui(self, update_page=True):
         # --- Theme-Aware Colors ---
         colors = self._get_colors()
         
@@ -1047,7 +1052,69 @@ class LogAnalyzerApp:
         # 事件重新綁定
         self.page.on_keyboard_event = self.on_keyboard
         self.page.on_resize = self.on_resize
-        self.page.update()
+        
+        if update_page:
+            self.page.update()
+
+    def update_ui_colors(self):
+        """原地更新所有 UI 控件的顏色，而不重建 UI 結構。"""
+        colors = self._get_colors()
+        
+        # 1. 頁面與基礎背景
+        self.page.bgcolor = colors["sidebar_bg"]
+        
+        # 2. 頂部欄位
+        if hasattr(self, "top_bar"):
+            self.top_bar.bgcolor = colors["top_bar_bg"]
+        if hasattr(self, "menu_bar"):
+            self.menu_bar.style.bgcolor = colors["top_bar_bg"]
+        if hasattr(self, "app_title_text"):
+            self.app_title_text.color = colors["text"]
+            
+        if hasattr(self, "top_bar_row"):
+            for control in self.top_bar_row.controls:
+                if isinstance(control, ft.Container) and isinstance(control.content, ft.Icon):
+                    control.content.color = colors["text"]
+                elif isinstance(control, ft.VerticalDivider):
+                    control.color = ft.Colors.with_opacity(0.2, colors["text"])
+
+        # 3. 側邊欄
+        if hasattr(self, "sidebar"):
+            self.sidebar.bgcolor = colors["sidebar_bg"]
+            if isinstance(self.sidebar.content, ft.Column):
+                 for control in self.sidebar.content.controls:
+                     if isinstance(control, ft.Text):
+                         control.color = colors["text"]
+                     elif isinstance(control, ft.Divider):
+                         control.color = ft.Colors.with_opacity(0.2, colors["text"])
+
+        # 4. Log 區域
+        if hasattr(self, "log_display_column"):
+            self.log_display_column.bgcolor = colors["log_bg"]
+        if hasattr(self, "initial_content"):
+            self.initial_content.bgcolor = colors["log_bg"]
+
+        # 5. 搜尋列
+        if hasattr(self, "search_bar"):
+            self.search_bar.bgcolor = colors["search_bg"]
+        if hasattr(self, "search_results_count"):
+            self.search_results_count.color = colors["text"]
+        
+        # 6. 時間軸區域
+        if hasattr(self, "timeline_area"):
+            self.timeline_area.bgcolor = colors["timeline_bg"]
+
+        # 7. 狀態列
+        if hasattr(self, "status_bar"):
+            self.status_bar.bgcolor = colors["status_bg"]
+
+        # 8. 捲軸
+        if hasattr(self, "scrollbar_track"):
+            self.scrollbar_track.bgcolor = colors["scroll_track"]
+        if hasattr(self, "scrollbar_container"):
+            self.scrollbar_container.bgcolor = colors["scroll_track"]
+        if hasattr(self, "scrollbar_thumb"):
+            self.scrollbar_thumb.bgcolor = colors["scroll_thumb"]
 
     async def on_open_file_click(self, e):
         """開啟檔案對話框。"""
@@ -1235,7 +1302,7 @@ class LogAnalyzerApp:
         self.page.update()
 
     async def toggle_theme(self, e):
-        """切換深色/淺色模式並全面刷新介面顏色。"""
+        """切換深色/淺色模式並原地更新顏色，防止閃爍。"""
         import ctypes
         
         # 1. 切換主題狀態
@@ -1254,20 +1321,22 @@ class LogAnalyzerApp:
                     ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(ctypes.c_int(win_dark_value)), 4)
             except Exception: pass
 
-        # 3. 核心：重新組裝 UI (這會套用所有 ThemeColors 的新顏色)
-        self.build_ui()
+        # 3. 原地更新顏色 (不重建 UI，不呼叫 clean/add)
+        self.update_ui_colors()
         
-        # 4. 針對特殊組件 (Timeline) 進行額外刷新
-        self.timeline.draw_heatmap()
-        self.timeline.draw_indicator()
-        self.timeline.update()
+        # 4. 更新內容顏色
+        if self.log_engine:
+            # 更新過濾器標籤顏色
+            await self.render_filters(update_page=False)
+            # 更新 Log 每一行的顏色 (因為 update_log_view 內部會根據當前主題選擇顏色)
+            self.update_log_view()
+            # 更新時間軸 (因為主題改變，heatmap 顏色和 indicator 顏色可能需要調整)
+            if hasattr(self, "timeline"):
+                self.timeline.draw_heatmap(update=False)
+                self.timeline.draw_indicator()
         
-        # 5. 保存設定並更新頁面
+        # 5. 保存設定並更新
         self.save_config()
-        self.page.update()
-        
-        # 給予極短緩衝確保 Client 渲染完成
-        await asyncio.sleep(0.1)
         self.page.update()
 
 
@@ -2056,7 +2125,7 @@ class LogAnalyzerApp:
             await self.apply_filters()
             self.page.update()
 
-    async def render_filters(self):
+    async def render_filters(self, update_page=True):
         self.filter_list_view.controls.clear()
         is_dark = self.page.theme_mode == ft.ThemeMode.DARK
         
@@ -2129,7 +2198,8 @@ class LogAnalyzerApp:
             
             self.filter_list_view.controls.append(item_row)
         
-        self.page.update()
+        if update_page:
+            self.page.update()
 
     def open_filter_context_menu(self, e, obj):
         def close_dlg(ev):
