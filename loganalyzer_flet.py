@@ -25,42 +25,44 @@ sys.path.append(os.getcwd())
 
 class ThemeColors:
     """Centralized color definitions for the application."""
-    # Dark Mode
+    # Dark Mode - High Contrast Layering
     DARK = {
-        "sidebar_bg": "#252526",
-        "log_bg": "#1e1e1e",
-        "top_bar_bg": "#202020",
-        "text": "#d4d4d4",
-        "scroll_track": "#2d2d2d",
-        "scroll_thumb": "#555555",
-        "divider": "#3e3e42",
-        "input_bg": "#3c3c3c",
-        "selection_bg": "#264f78",
-        "line_error": "#ff6b6b",
-        "line_warn": "#ffd93d",
-        "line_info": "#4dabf7",
-        "line_default": "#d4d4d4",
-        "status_bg": "#007acc",
-        "search_bg": "#3c3c3c",
+        "sidebar_bg": "#1E1E1E",     
+        "log_bg": "#000000",         
+        "top_bar_bg": "#333333",     
+        "text": "#E0E0E0",           
+        "scroll_track": "#000000",
+        "scroll_thumb": "#444444",
+        "divider": "#333333",
+        "input_bg": "#333333",
+        "selection_bg": "#264F78",
+        "line_error": "#F44336",
+        "line_warn": "#FFEB3B",
+        "line_info": "#2196F3",
+        "line_default": "#E0E0E0",
+        "status_bg": "#005A9E",      # 專業深藍
+        "status_text": "#FFFFFF",    # 白色文字
+        "search_bg": "#2D2D2D",
     }
     
-    # Light Mode
+    # Light Mode - Paper & Ink Contrast
     LIGHT = {
-        "sidebar_bg": "#ffffff",
-        "log_bg": "#f3f3f3",
-        "top_bar_bg": "#f3f3f3",
-        "text": "#000000",
-        "scroll_track": "#f0f0f0",
-        "scroll_thumb": "#c1c1c1",
-        "divider": "#e0e0e0",
-        "input_bg": "#ffffff",
-        "selection_bg": "#b3d7ff",
-        "line_error": "#cc0000",
-        "line_warn": "#bfa900",
-        "line_info": "#005cc5",
-        "line_default": "#1e1e1e",
-        "status_bg": "#007acc",
-        "search_bg": "#ffffff",
+        "sidebar_bg": "#F5F5F5",     
+        "log_bg": "#FFFFFF",         
+        "top_bar_bg": "#E0E0E0",     
+        "text": "#202124",
+        "scroll_track": "#FFFFFF",
+        "scroll_thumb": "#CCCCCC",
+        "divider": "#D0D0D0",
+        "input_bg": "#F1F3F4",
+        "selection_bg": "#E8F0FE",
+        "line_error": "#D93025",
+        "line_warn": "#F9AB00",
+        "line_info": "#1A73E8",
+        "line_default": "#202124",
+        "status_bg": "#E1F5FE",      # 極淺藍色
+        "status_text": "#005A9E",    # 深藍色文字
+        "search_bg": "#F1F3F4",
     }
     
     @staticmethod
@@ -513,47 +515,49 @@ class LogAnalyzerApp:
         )
         self.update_recent_files_menu()
 
-        # 建立主選單列
+        # 建立主選單列 - 背景與父容器保持一致
         self.menu_bar = ft.MenuBar(
             expand=True,
             style=ft.MenuStyle(
-                bgcolor=colors["top_bar_bg"],
+                bgcolor=colors["top_bar_bg"], # 與頂欄容器完全一致
                 alignment=ft.Alignment(-1, -1),
+                mouse_cursor=ft.MouseCursor.CLICK,
+                shadow_color=ft.Colors.TRANSPARENT, # 移除選單自帶陰影
             ),
             controls=[
                 ft.SubmenuButton(
-                    content=ft.Text("File"),
+                    content=ft.Text("File", weight=ft.FontWeight.W_500),
                     controls=[
                         ft.MenuItemButton(
                             content=ft.Text("Open File..."),
-                            leading=ft.Icon(ft.Icons.FOLDER_OPEN),
+                            leading=ft.Icon(ft.Icons.FOLDER_OPEN, size=18),
                             on_click=self.on_open_file_click
                         ),
                         self.recent_files_submenu,
                         ft.MenuItemButton(
                             content=ft.Text("Load Filters"),
-                            leading=ft.Icon(ft.Icons.FILE_OPEN_OUTLINED),
+                            leading=ft.Icon(ft.Icons.FILE_OPEN_OUTLINED, size=18),
                             on_click=self.import_tat_filters
                         ),
                         ft.MenuItemButton(
                             content=ft.Text("Save Filters"),
-                            leading=ft.Icon(ft.Icons.SAVE),
+                            leading=ft.Icon(ft.Icons.SAVE, size=18),
                             on_click=self.save_tat_filters
                         ),
                         ft.MenuItemButton(
                             content=ft.Text("Save Filters As..."),
-                            leading=ft.Icon(ft.Icons.SAVE_AS),
+                            leading=ft.Icon(ft.Icons.SAVE_AS, size=18),
                             on_click=self.save_tat_filters_as
                         ),
                         ft.MenuItemButton(
                             content=ft.Text("Exit"),
-                            leading=ft.Icon(ft.Icons.EXIT_TO_APP),
+                            leading=ft.Icon(ft.Icons.EXIT_TO_APP, size=18),
                             on_click=self.exit_app
                         )
                     ]
                 ),
                 ft.SubmenuButton(
-                    content=ft.Text("View"),
+                    content=ft.Text("View", weight=ft.FontWeight.W_500),
                     controls=[
                         ft.MenuItemButton(
                             content=ft.Text("Toggle Sidebar"),
@@ -565,7 +569,7 @@ class LogAnalyzerApp:
                         ),
                         ft.MenuItemButton(
                             content=ft.Text("Show Filtered Only"),
-                            leading=ft.Icon(ft.Icons.FILTER_ALT),
+                            leading=ft.Icon(ft.Icons.FILTER_ALT, size=18),
                             on_click=self.toggle_show_filtered
                         )
                     ]
@@ -573,22 +577,31 @@ class LogAnalyzerApp:
             ]
         )
 
-        self.app_title_text = ft.Text("LogAnalyzer", weight=ft.FontWeight.BOLD, size=16, color=colors["text"])
+        self.app_title_text = ft.Text("LogAnalyzer", weight=ft.FontWeight.BOLD, size=14, color=colors["text"])
         
         # 組裝頂部橫列
         self.top_bar_row = ft.Row([
-            ft.Container(content=ft.Icon(ft.Icons.ANALYTICS, color=colors["text"]), padding=5),
+            ft.Container(
+                content=ft.Icon(ft.Icons.ANALYTICS, color=colors["text"], size=20), 
+                padding=ft.padding.only(left=15, right=5)
+            ),
             self.app_title_text,
-            ft.VerticalDivider(width=10, color=ft.Colors.with_opacity(0.2, colors["text"])),
+            ft.Container(width=15), # 固定的視覺間隔
             self.menu_bar
-        ], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        ], spacing=0, alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
         # 返回封裝好的頂部容器
         return ft.Container(
             content=self.top_bar_row,
             bgcolor=colors["top_bar_bg"],
-            padding=5,
-            height=40
+            padding=0,
+            height=45,
+            shadow=ft.BoxShadow(
+                spread_radius=1,
+                blur_radius=4,
+                color=ft.Colors.with_opacity(0.4, ft.Colors.BLACK),
+                offset=ft.Offset(0, 2) # 向下投影
+            )
         )
 
     def _build_sidebar(self):
@@ -597,27 +610,30 @@ class LogAnalyzerApp:
         
         self.filter_list_view = ft.ListView(
             expand=True, 
-            spacing=5, 
-            padding=5,
+            spacing=8, # More spacing between items
+            padding=ft.padding.only(top=10),
             auto_scroll=False
         )
 
         self.add_filter_btn = ft.Button(
             "Add Filter", 
             icon=ft.Icons.ADD, 
-            on_click=self.on_add_filter_click
+            on_click=self.on_add_filter_click,
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=8), # Modern rounded button
+            )
         )
 
         return ft.Container(
-            width=300,
+            width=280,
             bgcolor=colors["sidebar_bg"],
-            padding=10,
+            padding=ft.padding.all(15),
             content=ft.Column([
-                ft.Text("Filters", size=20, weight=ft.FontWeight.BOLD, color=colors["text"]),
+                ft.Text("Filters", size=22, weight=ft.FontWeight.BOLD, color=colors["text"]),
                 self.add_filter_btn,
-                ft.Divider(color=ft.Colors.with_opacity(0.2, colors["text"])),
+                # ft.Divider(color=ft.Colors.with_opacity(0.1, colors["text"])), # Lighter divider or remove
                 self.filter_list_view,
-            ])
+            ], spacing=10)
         )
 
     def _build_log_view(self):
@@ -791,7 +807,7 @@ class LogAnalyzerApp:
                               style=ft.ButtonStyle(color=ft.Colors.GREY)),
                 ft.IconButton(ft.Icons.KEYBOARD_RETURN, tooltip="Wrap Around", icon_size=16, on_click=toggle_wrap,
                               style=ft.ButtonStyle(color=ft.Colors.BLUE)),
-                ft.VerticalDivider(width=1),
+                # ft.VerticalDivider(width=1), # Removed divider
                 ft.IconButton(ft.Icons.ARROW_UPWARD, icon_size=16, tooltip="Previous", on_click=self.on_find_prev),
                 ft.IconButton(ft.Icons.ARROW_DOWNWARD, icon_size=16, tooltip="Next", on_click=self.on_find_next),
                 self.search_results_count,
@@ -799,8 +815,8 @@ class LogAnalyzerApp:
             ], spacing=5),
             bgcolor=colors["search_bg"],
             padding=5,
-            border_radius=5,
-            border=ft.Border.all(1, ft.Colors.BLUE_400), 
+            border_radius=8, # Slightly larger radius
+            shadow=ft.BoxShadow(blur_radius=10, color=ft.Colors.with_opacity(0.3, ft.Colors.BLACK)), # Modern shadow instead of border
             visible=False, 
         )
         return self.search_bar
@@ -808,11 +824,11 @@ class LogAnalyzerApp:
     def _build_status_bar(self):
         """建立底部狀態列。"""
         colors = self._get_colors()
-        self.status_text = ft.Text("Ready", size=12, color=ft.Colors.WHITE)
+        self.status_text = ft.Text("Ready", size=12, color=colors["status_text"])
         return ft.Container(
-            height=30,
+            height=25, # 稍微縮窄一點，更顯精緻
             bgcolor=colors["status_bg"],
-            padding=ft.Padding.only(left=10, right=10),
+            padding=ft.Padding.only(left=15, right=10),
             content=ft.Row([
                 self.status_text,
             ], alignment=ft.MainAxisAlignment.START),
@@ -871,6 +887,7 @@ class LogAnalyzerApp:
     def update_ui_colors(self):
         """原地更新所有 UI 控件的顏色，而不重建 UI 結構。"""
         colors = self._get_colors()
+        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
         
         # 1. 頁面與基礎背景
         self.page.bgcolor = colors["sidebar_bg"]
@@ -878,8 +895,17 @@ class LogAnalyzerApp:
         # 2. 頂部欄位
         if hasattr(self, "top_bar"):
             self.top_bar.bgcolor = colors["top_bar_bg"]
+            # 更新頂欄陰影
+            self.top_bar.shadow = ft.BoxShadow(
+                spread_radius=1,
+                blur_radius=4,
+                color=ft.Colors.with_opacity(0.4 if is_dark else 0.2, ft.Colors.BLACK),
+                offset=ft.Offset(0, 2)
+            )
+            
         if hasattr(self, "menu_bar"):
             self.menu_bar.style.bgcolor = colors["top_bar_bg"]
+            
         if hasattr(self, "app_title_text"):
             self.app_title_text.color = colors["text"]
             
@@ -887,8 +913,6 @@ class LogAnalyzerApp:
             for control in self.top_bar_row.controls:
                 if isinstance(control, ft.Container) and isinstance(control.content, ft.Icon):
                     control.content.color = colors["text"]
-                elif isinstance(control, ft.VerticalDivider):
-                    control.color = ft.Colors.with_opacity(0.2, colors["text"])
 
         # 3. 側邊欄
         if hasattr(self, "sidebar"):
@@ -897,8 +921,6 @@ class LogAnalyzerApp:
                  for control in self.sidebar.content.controls:
                      if isinstance(control, ft.Text):
                          control.color = colors["text"]
-                     elif isinstance(control, ft.Divider):
-                         control.color = ft.Colors.with_opacity(0.2, colors["text"])
 
         # 4. Log 區域
         if hasattr(self, "log_display_column"):
@@ -909,12 +931,19 @@ class LogAnalyzerApp:
         # 5. 搜尋列
         if hasattr(self, "search_bar"):
             self.search_bar.bgcolor = colors["search_bg"]
+            # Update shadow color for theme
+            self.search_bar.shadow = ft.BoxShadow(
+                blur_radius=10, 
+                color=ft.Colors.with_opacity(0.3, ft.Colors.BLACK if is_dark else ft.Colors.GREY_400)
+            )
         if hasattr(self, "search_results_count"):
             self.search_results_count.color = colors["text"]
         
         # 7. 狀態列
         if hasattr(self, "status_bar"):
             self.status_bar.bgcolor = colors["status_bg"]
+        if hasattr(self, "status_text"):
+            self.status_text.color = colors["status_text"]
 
         # 8. 捲軸
         if hasattr(self, "scrollbar_track"):
@@ -1959,10 +1988,10 @@ class LogAnalyzerApp:
                     overflow=ft.TextOverflow.ELLIPSIS,
                 ),
                 bgcolor=adj_bg, # Adjusted
-                padding=ft.Padding(8, 2, 8, 2),
-                border_radius=4,
+                padding=ft.Padding(12, 4, 12, 4), # Increased horizontal padding for pill look
+                border_radius=20, # Pill shape
                 expand=True,
-                border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE) if is_dark else ft.Colors.with_opacity(0.2, ft.Colors.BLACK))
+                # border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE) if is_dark else ft.Colors.with_opacity(0.2, ft.Colors.BLACK)) # Removed border
             )
             
             # Hit Count Badge
