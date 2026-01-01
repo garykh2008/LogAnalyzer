@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import threading
+import bisect
 import webbrowser
 import tkinter as tk
 from tkinter import filedialog
@@ -885,7 +886,30 @@ class LogAnalyzerApp:
             self.search_results = await asyncio.to_thread(
                 self.log_engine.search, query, False, self.search_case_sensitive
             )
-            self.current_search_idx = -1
+
+            # Find nearest starting point relative to current position
+            current_raw = self.selection_anchor
+            if current_raw == -1:
+                # Map current start index to raw
+                if self.show_only_filtered and self.filtered_indices is not None:
+                    if self.current_start_index < len(self.filtered_indices):
+                        current_raw = self.filtered_indices[self.current_start_index]
+                    else:
+                        current_raw = 0
+                else:
+                    current_raw = self.current_start_index
+
+            # Find insertion point
+            idx = bisect.bisect_left(self.search_results, current_raw)
+
+            if backward:
+                # If backward, we want the item BEFORE the insertion point (which is <= current)
+                # Logic below does -= 1, so we set to idx
+                self.current_search_idx = idx
+            else:
+                # If forward, we want the item AT the insertion point (which is >= current)
+                # Logic below does += 1, so we set to idx - 1
+                self.current_search_idx = idx - 1
 
         if not self.search_results:
             self.update_results_count("0/0")
@@ -929,13 +953,14 @@ class LogAnalyzerApp:
         # We need to find the filtered index corresponding to this raw index
         target_view_idx = self._get_view_index_from_raw(target_raw_idx)
 
-        # If the search result is filtered out, we jump to the nearest visible line?
-        # For now, if view_idx is None, we stay at current position but select it
-        if target_view_idx is not None:
-            self.jump_to_index(target_view_idx, update_slider=True, immediate=True, center=True)
-        else:
-            self.status_bar_comp.update_status(f"Result on line {target_raw_idx+1} is filtered out.")
-            self.page.update()
+        # If the search result is filtered out, switch to Full View
+        if target_view_idx is None:
+            await self.toggle_show_filtered()
+            target_view_idx = target_raw_idx # In full view, view index == raw index
+            self.show_toast(f"Switched to Full View to show result on line {target_raw_idx+1}")
+
+        # Execute jump
+        self.jump_to_index(target_view_idx, update_slider=True, immediate=True, center=True)
 
         # Explicitly trigger render to update selection highlight
         self.needs_render = True
