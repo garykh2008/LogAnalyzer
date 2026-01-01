@@ -84,7 +84,7 @@ class SearchBar:
 
         history_items = []
         if not self.app.search_history:
-            history_items.append(ft.PopupMenuItem(text="No history", enabled=False))
+            history_items.append(ft.PopupMenuItem(content=ft.Text("No history"), enabled=False))
         else:
             for query in self.app.search_history:
                 # Capture query in closure
@@ -96,7 +96,7 @@ class SearchBar:
 
                 history_items.append(
                     ft.PopupMenuItem(
-                        text=query,
+                        content=ft.Text(query),
                         on_click=on_history_click
                     )
                 )
