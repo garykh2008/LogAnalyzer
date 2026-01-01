@@ -944,10 +944,7 @@ class LogAnalyzerApp:
 
         search_query = self.search_bar_comp.search_input.value.lower() if (self.search_bar.visible and self.search_bar_comp.search_input.value) else None
 
-        if self.show_only_filtered and self.filtered_indices is not None:
-            total_items = len(self.filtered_indices)
-        else:
-            total_items = self.log_engine.line_count()
+        total_items = self.navigator.total_items
 
         # Turbo Rendering Path: Optimized for minimum Python overhead and IPC payload
         _get_lines_batch = getattr(self.log_engine, 'get_lines_batch', None)
@@ -1053,25 +1050,8 @@ class LogAnalyzerApp:
         # REMOVED page.update() here, it's now in the render_loop
 
     def jump_to_index(self, idx, update_slider=True, immediate=False):
-        if not self.log_engine:
-            return
-
-        # Determine total items based on filter state
-        if self.show_only_filtered and self.filtered_indices is not None:
-            total_items = len(self.filtered_indices)
-        else:
-            total_items = self.log_engine.line_count()
-
-        # 邊界檢查
-        if idx < 0: idx = 0
-        max_idx = max(0, total_items - self.LINES_PER_PAGE)
-        if idx > max_idx: idx = max_idx
-
-        self.target_start_index = idx
-
-        if immediate:
-            # Snap immediately
-            asyncio.create_task(self.immediate_render())
+        # Delegate to navigator
+        self.navigator.scroll_to(idx, immediate=immediate)
 
     async def on_slider_change(self, e):
         # Time-based debounce is still useful but less critical if we don't update slider
@@ -1095,7 +1075,7 @@ class LogAnalyzerApp:
             return
 
         # Determine total items
-        total_items = len(self.filtered_indices) if self.filtered_indices is not None else self.log_engine.line_count()
+        total_items = self.navigator.total_items
         if total_items == 0: return
 
         # Clipboard Shortcuts
@@ -1487,10 +1467,7 @@ class LogAnalyzerApp:
         view_idx = self.current_start_index + row_idx
 
         # Determine total items
-        if self.show_only_filtered and self.filtered_indices is not None:
-            total_items = len(self.filtered_indices)
-        else:
-            total_items = self.log_engine.line_count() if self.log_engine else 0
+        total_items = self.navigator.total_items
 
         if view_idx >= total_items: return
 
@@ -1553,10 +1530,7 @@ class LogAnalyzerApp:
         view_idx = self.current_start_index + row_idx
 
         # Determine total items matching update_log_view logic
-        if self.show_only_filtered and self.filtered_indices is not None:
-            total_items = len(self.filtered_indices)
-        else:
-            total_items = self.log_engine.line_count()
+        total_items = self.navigator.total_items
 
         if view_idx >= total_items: return
 
