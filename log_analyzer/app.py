@@ -746,6 +746,9 @@ class LogAnalyzerApp:
         if self.log_engine:
              self.initial_content.visible = False
              self.log_view_area.visible = True
+             # Force recalculate layout metrics before updating view
+             asyncio.create_task(self.on_resize(None))
+
              self.update_log_view()
              self.navigator.sync_scrollbar_position()
 
