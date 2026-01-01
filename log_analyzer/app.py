@@ -99,8 +99,6 @@ class LogAnalyzerApp:
         # Focus Management
         self.active_pane = "log"  # "log" or "filter"
         self.selected_filter_index = -1
-        self.log_focus_node = ft.FocusNode()
-        self.filter_focus_node = ft.FocusNode()
 
         # 系統標記
         self.is_closing = False
@@ -438,7 +436,6 @@ class LogAnalyzerApp:
         # Use a transparent button to accept focus but not obstruct view
         self.log_focus_target = ft.ElevatedButton(
             text="", width=1, height=1, opacity=0,
-            focus_node=self.log_focus_node,
             style=ft.ButtonStyle(overlay_color=ft.Colors.TRANSPARENT)
         )
 
@@ -758,9 +755,16 @@ class LogAnalyzerApp:
             if self.filters and self.selected_filter_index == -1:
                 self.selected_filter_index = 0
                 asyncio.create_task(self.render_filters())
-            self.filter_focus_node.request_focus()
+
+            # Request focus on sidebar dummy target
+            if hasattr(self.sidebar_comp, 'sidebar_focus_target'):
+                try:
+                    self.sidebar_comp.sidebar_focus_target.focus()
+                except Exception: pass
         elif pane == "log":
-            self.log_focus_node.request_focus()
+            try:
+                self.log_focus_target.focus()
+            except Exception: pass
 
     def change_sidebar_position(self, pos):
         """更改側邊欄位置並重建佈局。"""

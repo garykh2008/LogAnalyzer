@@ -59,7 +59,6 @@ class Sidebar:
         # Dummy focus target for Sidebar
         self.sidebar_focus_target = ft.ElevatedButton(
             text="", width=1, height=1, opacity=0,
-            focus_node=self.app.filter_focus_node,
             style=ft.ButtonStyle(overlay_color=ft.Colors.TRANSPARENT)
         )
 
