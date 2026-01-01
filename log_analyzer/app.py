@@ -969,12 +969,8 @@ class LogAnalyzerApp:
             target_view_idx = target_raw_idx # In full view, view index == raw index
             self.show_toast(f"Switched to Full View to show result on line {target_raw_idx+1}")
 
-        # Execute jump
+        # Execute jump (this handles rendering)
         self.jump_to_index(target_view_idx, update_slider=True, immediate=True, center=True)
-
-        # Explicitly trigger render to update selection highlight
-        self.needs_render = True
-        self.update_log_view()
 
         # Ensure focus stays on search input if we are in search mode,
         # to allow repeated Enter presses to trigger on_submit

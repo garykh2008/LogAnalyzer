@@ -13,6 +13,33 @@ class MockLogEngine:
     def get_line(self, idx):
         return f"Mock Line #{idx} from {os.path.basename(self.path)}"
 
+    def get_lines_batch(self, indices):
+        """Batch fetch lines. Returns list of (line_text, level_code)."""
+        results = []
+        for idx in indices:
+            if 0 <= idx < self._lines:
+                # Simulating level code: 0=Info, 1=Error, 2=Warn, 3=Info
+                level = idx % 4
+                text = self.get_line(idx)
+                results.append((text, level))
+            else:
+                results.append(("", 0))
+        return results
+
+    def search(self, query, regex, case_sensitive):
+        """Simple mock search implementation."""
+        # Returns list of raw indices where query is found.
+        # For mock, we just return indices that contain the query if it's "Line", else random.
+        results = []
+        q = query.lower() if not case_sensitive else query
+        for i in range(self._lines):
+            line = self.get_line(i)
+            if not case_sensitive:
+                line = line.lower()
+            if q in line:
+                results.append(i)
+        return results
+
     def filter(self, filters):
         # filters: List of (text, is_regex, is_exclude, is_event, original_index)
 
