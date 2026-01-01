@@ -57,8 +57,8 @@ class Sidebar:
         ], alignment=ft.MainAxisAlignment.START)
 
         # Dummy focus target for Sidebar
-        self.sidebar_focus_target = ft.ElevatedButton(
-            text="", width=1, height=1, opacity=0,
+        self.sidebar_focus_target = ft.Button(
+            content=ft.Text(""), width=1, height=1, opacity=0,
             style=ft.ButtonStyle(overlay_color=ft.Colors.TRANSPARENT)
         )
 

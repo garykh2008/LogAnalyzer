@@ -434,8 +434,8 @@ class LogAnalyzerApp:
 
         # Dummy focus target for Log View
         # Use a transparent button to accept focus but not obstruct view
-        self.log_focus_target = ft.ElevatedButton(
-            text="", width=1, height=1, opacity=0,
+        self.log_focus_target = ft.Button(
+            content=ft.Text(""), width=1, height=1, opacity=0,
             style=ft.ButtonStyle(overlay_color=ft.Colors.TRANSPARENT)
         )
 
