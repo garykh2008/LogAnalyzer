@@ -733,10 +733,25 @@ class LogAnalyzerApp:
         """更改側邊欄位置並重建佈局。"""
         self.config["sidebar_position"] = pos
         self.save_config()
+
+        # Save current state
+        was_visible = self.sidebar.visible
+
         # 重新建構 UI 以套用佈局變更
         self.build_ui()
+
+        # Restore state
+        self.sidebar.visible = was_visible
+
+        if self.log_engine:
+             self.initial_content.visible = False
+             self.log_view_area.visible = True
+             self.update_log_view()
+             self.navigator.sync_scrollbar_position()
+
         # 重建 UI 後需確保過濾器列表正確渲染
         asyncio.create_task(self.render_filters())
+        self.page.update()
 
     def update_title(self):
         log_name = os.path.basename(self.file_path) if self.file_path else "No file loaded"
