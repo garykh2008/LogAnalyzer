@@ -64,6 +64,9 @@ class LogAnalyzerApp:
         self.APP_NAME = "Log Analyzer (Flet Edition)"
         self.VERSION = "V1.7" # To be updated manually for releases
 
+        # Search History
+        self.search_history = []
+
         # App 引擎與路徑
         self.log_engine = None
         self.file_path = None
@@ -135,6 +138,7 @@ class LogAnalyzerApp:
             "font_size": 12,
             "theme_mode": "dark",
             "recent_files": [],
+            "search_history": [],
             "window_maximized": False,
             "main_window_geometry": "1200x800+100+100",
             "note_view_visible": False,
@@ -883,6 +887,18 @@ class LogAnalyzerApp:
         is_new_search = (query != self.search_query or not self.search_results)
 
         if is_new_search:
+            # Update history
+            if query and query.strip():
+                if query in self.search_history:
+                    self.search_history.remove(query)
+                self.search_history.insert(0, query)
+                if len(self.search_history) > 10:
+                    self.search_history.pop()
+
+                # Update UI history menu if component exists
+                if self.search_bar_comp:
+                    self.search_bar_comp.update_history_menu()
+
             self.search_query = query
             # Call Rust engine search (returns list of raw indices)
             self.search_results = await asyncio.to_thread(

@@ -7,6 +7,7 @@ class SearchBar:
         self.search_input = None
         self.search_results_count = None
         self.search_bar_container = None
+        self.history_button = None
 
     def build(self):
         colors = self.app._get_colors()
@@ -21,6 +22,14 @@ class SearchBar:
             border_color=ft.Colors.BLUE
         )
         self.search_results_count = ft.Text(value="0/0", size=12, color=colors["text"])
+
+        self.history_button = ft.PopupMenuButton(
+            icon=ft.Icons.HISTORY,
+            tooltip="Search History",
+            icon_size=16,
+            items=[]
+        )
+        self.update_history_menu()
 
         async def toggle_case(e):
             self.app.search_case_sensitive = not self.app.search_case_sensitive
@@ -39,6 +48,7 @@ class SearchBar:
         self.search_bar_container = ft.Container(
             content=ft.Row([
                 self.search_input,
+                self.history_button,
                 ft.IconButton(ft.Icons.ABC, tooltip="Match Case", icon_size=16, on_click=toggle_case,
                               style=ft.ButtonStyle(color=ft.Colors.GREY)),
                 ft.IconButton(ft.Icons.KEYBOARD_RETURN, tooltip="Wrap Around", icon_size=16, on_click=toggle_wrap,
@@ -68,3 +78,28 @@ class SearchBar:
             )
         if self.search_results_count:
             self.search_results_count.color = colors["text"]
+
+    def update_history_menu(self):
+        if not self.history_button: return
+
+        history_items = []
+        if not self.app.search_history:
+            history_items.append(ft.PopupMenuItem(text="No history", enabled=False))
+        else:
+            for query in self.app.search_history:
+                # Capture query in closure
+                def on_history_click(e, q=query):
+                    self.search_input.value = q
+                    # Trigger search logic
+                    self.search_input.focus()
+                    asyncio.create_task(self.app.perform_search(backward=False))
+
+                history_items.append(
+                    ft.PopupMenuItem(
+                        text=query,
+                        on_click=on_history_click
+                    )
+                )
+
+        self.history_button.items = history_items
+        self.history_button.update()
