@@ -19,6 +19,7 @@ from log_analyzer.ui.components.sidebar import Sidebar
 from log_analyzer.ui.components.search_bar import SearchBar
 from log_analyzer.ui.components.status_bar import StatusBar
 from log_analyzer.ui.dialogs import Dialogs
+from log_analyzer.core.navigation import NavigationController
 
 class LogAnalyzerApp:
     def __init__(self, page: ft.Page):
@@ -105,6 +106,9 @@ class LogAnalyzerApp:
         self.search_bar_comp = SearchBar(self)
         self.status_bar_comp = StatusBar(self)
         self.dialogs = Dialogs(self)
+
+        # Navigation Controller
+        self.navigator = NavigationController(self)
 
     def _init_settings(self):
         """載入設定檔並立即套用視窗初始化外觀。"""
@@ -879,45 +883,7 @@ class LogAnalyzerApp:
         self.page.update()
 
     async def on_log_scroll(self, e: ft.ScrollEvent):
-        if not self.log_engine: return
-
-        # Throttling handled by render_loop if we use target_start_index,
-        # but here we calculate new target.
-
-        delta = e.scroll_delta.y
-
-        # Dynamic acceleration
-        # If delta is large (fast scroll), increase step
-        # Standard mouse wheel is often ~100.
-        base_step = 3
-        if abs(delta) >= 100:
-             step = int(abs(delta) / 10) # e.g. 100 -> 10 lines
-        elif abs(delta) > 20:
-             step = 5
-        else:
-             step = base_step
-
-        step = max(1, step) # Minimum 1 line
-
-        if delta > 0:
-            new_idx = self.target_start_index + step
-        elif delta < 0:
-            new_idx = self.target_start_index - step
-        else:
-            return
-
-        # Immediate Update Path for responsiveness
-        target = int(new_idx)
-
-        # Boundary Check (Clamping)
-        total_items = len(self.filtered_indices) if self.filtered_indices is not None else (self.log_engine.line_count() if self.log_engine else 0)
-        max_idx = max(0, total_items - self.LINES_PER_PAGE)
-
-        target = max(0, min(target, max_idx))
-        self.target_start_index = target
-
-        if not self.is_updating:
-            asyncio.create_task(self.immediate_render())
+        self.navigator.handle_mouse_wheel(e.scroll_delta.y)
 
     async def immediate_render(self):
         if self.is_updating: return
@@ -1222,70 +1188,15 @@ class LogAnalyzerApp:
         self.page.update()
 
     async def on_scrollbar_drag(self, e: ft.DragUpdateEvent):
-        # Update thumb position visually
         delta = get_event_prop(e, 'delta_y', default=0)
-
-        self.thumb_top += delta
-
-        # Clamp position
-        max_top = self.scrollbar_track_height - self.scrollbar_thumb_height
-        if max_top < 0: max_top = 0
-
-        self.thumb_top = max(0.0, min(self.thumb_top, max_top))
-        self.scrollbar_thumb.top = self.thumb_top
-        self.scrollbar_thumb.update() # Fast local update
-
-        # Calculate index
-        if max_top > 0:
-            percentage = self.thumb_top / max_top
-
-            # Total lines
-            total_items = len(self.filtered_indices) if self.filtered_indices is not None else (self.log_engine.line_count() if self.log_engine else 0)
-            max_idx = max(0, total_items - self.LINES_PER_PAGE)
-
-            new_idx = int(percentage * max_idx)
-            # Update target and trigger immediate render
-            self.target_start_index = new_idx
-            if not self.is_updating:
-                asyncio.create_task(self.immediate_render())
+        self.navigator.handle_scrollbar_drag(delta)
 
     async def on_scrollbar_tap(self, e: ft.TapEvent):
-        # Jump to position
         local_y = get_event_prop(e, 'local_y', default=0)
-
-        click_y = local_y - (self.scrollbar_thumb_height / 2) # Center thumb on click
-
-        max_top = self.scrollbar_track_height - self.scrollbar_thumb_height
-        if max_top <= 0: return
-
-        self.thumb_top = max(0.0, min(click_y, max_top))
-        # self.scrollbar_thumb.top = self.thumb_top
-
-        percentage = self.thumb_top / max_top
-        total_items = len(self.filtered_indices) if self.filtered_indices is not None else (self.log_engine.line_count() if self.log_engine else 0)
-        max_idx = max(0, total_items - self.LINES_PER_PAGE)
-        new_idx = int(percentage * max_idx)
-
-        self.jump_to_index(new_idx, update_slider=True, immediate=True) # immediate=True will trigger render
+        self.navigator.handle_scrollbar_tap(local_y)
 
     def sync_scrollbar_position(self):
-        if not self.log_engine: return
-
-        total_items = len(self.filtered_indices) if self.filtered_indices is not None else self.log_engine.line_count()
-        max_idx = max(0, total_items - self.LINES_PER_PAGE)
-        if max_idx <= 0:
-            self.thumb_top = 0
-            self.scrollbar_thumb.top = 0
-            return
-
-        percentage = self.current_start_index / max_idx
-        max_top = self.scrollbar_track_height - self.scrollbar_thumb_height
-        if max_top < 0: max_top = 0
-
-        self.thumb_top = percentage * max_top
-        self.scrollbar_thumb.top = self.thumb_top
-        # Explicitly update thumb to ensure visual sync if page.update misses it?
-        # self.scrollbar_thumb.update()
+        self.navigator.sync_scrollbar_position()
 
     async def render_loop(self):
         """Background task that polls for index changes."""
