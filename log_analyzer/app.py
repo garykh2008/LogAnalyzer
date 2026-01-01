@@ -840,6 +840,7 @@ class LogAnalyzerApp:
 
     async def show_search_bar(self):
         self.search_bar.visible = True
+        self.active_pane = "search" # Prevent keyboard navigation interference
         self.page.update() # First update to make it visible
 
         # Then focus
@@ -1124,6 +1125,9 @@ class LogAnalyzerApp:
             return
         if e.key == "Escape":
             await self.hide_search_bar()
+            # Restore focus to log view after closing search
+            if self.active_pane == "search":
+                await self.set_active_pane("log")
             return
         if e.key == "F2":
             await self.perform_search(backward=True)
@@ -1136,6 +1140,11 @@ class LogAnalyzerApp:
             return
 
         # --- Context-Aware Navigation ---
+
+        # If search is active, do not navigate logs/filters with keys
+        # unless specialized keys are handled above (like Enter/F3)
+        if self.active_pane == "search":
+            return
 
         if self.active_pane == "filter":
             await self._handle_filter_navigation(e)
