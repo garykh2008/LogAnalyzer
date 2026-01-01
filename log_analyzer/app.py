@@ -1185,8 +1185,13 @@ class LogAnalyzerApp:
             status_h = self.status_bar.height if self.status_bar.height else 30
             menu_h = self.top_bar.height if self.top_bar.height else 40
 
+            # Sidebar adjustment if at bottom
+            sidebar_h = 0
+            if self.config.get("sidebar_position") == "bottom" and self.sidebar.visible:
+                sidebar_h = 200 # Fixed height from sidebar.py
+
             # Safe margin calculation
-            self.scrollbar_track_height = self.page.height - status_h - menu_h
+            self.scrollbar_track_height = self.page.height - status_h - menu_h - sidebar_h
 
             # Dynamic LINES_PER_PAGE
             line_height = self.ROW_HEIGHT
