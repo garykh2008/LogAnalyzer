@@ -20,12 +20,16 @@ class NavigationController:
         val = self.app.scrollbar_track_height - self.app.scrollbar_thumb_height
         return max(0, val)
 
-    def scroll_to(self, index, immediate=True):
-        """Scrolls to a specific line index."""
+    def scroll_to(self, index, immediate=True, center=False):
+        """Scrolls to a specific line index. If center is True, tries to center the line."""
         if not self.app.log_engine:
             return
 
         target = int(index)
+
+        if center:
+            target -= self.app.LINES_PER_PAGE // 2
+
         max_idx = self.max_scroll_index
         target = max(0, min(target, max_idx))
 

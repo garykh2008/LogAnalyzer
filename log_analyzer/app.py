@@ -841,6 +841,10 @@ class LogAnalyzerApp:
     async def show_search_bar(self):
         self.search_bar.visible = True
         self.active_pane = "search" # Prevent keyboard navigation interference
+
+        # Reset count display on show, as per user request to clear record before new search
+        self.update_results_count("")
+
         self.page.update() # First update to make it visible
 
         # Then focus
@@ -928,7 +932,7 @@ class LogAnalyzerApp:
         # If the search result is filtered out, we jump to the nearest visible line?
         # For now, if view_idx is None, we stay at current position but select it
         if target_view_idx is not None:
-            self.jump_to_index(target_view_idx, update_slider=True, immediate=True)
+            self.jump_to_index(target_view_idx, update_slider=True, immediate=True, center=True)
         else:
             self.status_bar_comp.update_status(f"Result on line {target_raw_idx+1} is filtered out.")
             self.page.update()
@@ -1090,9 +1094,9 @@ class LogAnalyzerApp:
 
         # REMOVED page.update() here, it's now in the render_loop
 
-    def jump_to_index(self, idx, update_slider=True, immediate=False):
+    def jump_to_index(self, idx, update_slider=True, immediate=False, center=False):
         # Delegate to navigator
-        self.navigator.scroll_to(idx, immediate=immediate)
+        self.navigator.scroll_to(idx, immediate=immediate, center=center)
 
     async def on_slider_change(self, e):
         # Time-based debounce is still useful but less critical if we don't update slider
