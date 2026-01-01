@@ -99,6 +99,8 @@ class LogAnalyzerApp:
         # Focus Management
         self.active_pane = "log"  # "log" or "filter"
         self.selected_filter_index = -1
+        self.log_focus_node = ft.FocusNode()
+        self.filter_focus_node = ft.FocusNode()
 
         # 系統標記
         self.is_closing = False
@@ -432,15 +434,29 @@ class LogAnalyzerApp:
             visible=True
         )
 
-        return ft.Column(
+        # Dummy focus target for Log View
+        # Use a transparent button to accept focus but not obstruct view
+        self.log_focus_target = ft.ElevatedButton(
+            text="", width=1, height=1, opacity=0,
+            focus_node=self.log_focus_node,
+            style=ft.ButtonStyle(overlay_color=ft.Colors.TRANSPARENT)
+        )
+
+        return ft.Stack(
             controls=[
-                self.initial_content,
-                self.log_view_area
+                ft.Column(
+                    controls=[
+                        self.initial_content,
+                        self.log_view_area
+                    ],
+                    spacing=0,
+                    expand=True,
+                    alignment=ft.MainAxisAlignment.START,
+                    horizontal_alignment=ft.CrossAxisAlignment.STRETCH
+                ),
+                self.log_focus_target
             ],
-            spacing=0,
-            expand=True,
-            alignment=ft.MainAxisAlignment.START,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH
+            expand=True
         )
 
     def build_ui(self, update_page=True):
@@ -736,19 +752,15 @@ class LogAnalyzerApp:
         self.page.update()
 
     def set_active_pane(self, pane):
-        if self.active_pane != pane:
-            self.active_pane = pane
-            # Optional: Visual feedback could be added here
-            # e.g., dimming the inactive pane or highlighting the active one
-            if pane == "filter":
-                # Ensure a valid selection if none exists
-                if self.filters and self.selected_filter_index == -1:
-                    self.selected_filter_index = 0
-                    asyncio.create_task(self.render_filters())
-            elif pane == "log":
-                # Maybe clear filter selection visualization?
-                # For now we keep it to show state
-                pass
+        self.active_pane = pane
+        if pane == "filter":
+            # Ensure a valid selection if none exists
+            if self.filters and self.selected_filter_index == -1:
+                self.selected_filter_index = 0
+                asyncio.create_task(self.render_filters())
+            self.filter_focus_node.request_focus()
+        elif pane == "log":
+            self.log_focus_node.request_focus()
 
     def change_sidebar_position(self, pos):
         """更改側邊欄位置並重建佈局。"""
@@ -1133,6 +1145,16 @@ class LogAnalyzerApp:
         idx = self.selected_filter_index
         if idx == -1: idx = 0
 
+        if e.key == " ":
+            # Toggle enabled state
+            if 0 <= idx < len(self.filters):
+                f = self.filters[idx]
+                f.enabled = not f.enabled
+                self.filters_dirty = True
+                await self.render_filters() # Re-render to update checkbox and selection
+                await self.apply_filters()
+            return
+
         if e.key in ["ArrowDown", "Arrow Down"]:
             idx += 1
         elif e.key in ["ArrowUp", "Arrow Up"]:
@@ -1146,9 +1168,6 @@ class LogAnalyzerApp:
         if idx != self.selected_filter_index:
             self.selected_filter_index = idx
             await self.render_filters() # Re-render to show selection highlight
-
-            # TODO: Scroll sidebar if needed (ListView scroll_to is not directly exposed well on ReorderableListView in older Flet)
-            # But since list is small usually, it might be fine.
 
     async def _handle_log_navigation(self, e):
         # Determine total items

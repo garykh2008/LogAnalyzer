@@ -56,6 +56,13 @@ class Sidebar:
             self.add_filter_btn
         ], alignment=ft.MainAxisAlignment.START)
 
+        # Dummy focus target for Sidebar
+        self.sidebar_focus_target = ft.ElevatedButton(
+            text="", width=1, height=1, opacity=0,
+            focus_node=self.app.filter_focus_node,
+            style=ft.ButtonStyle(overlay_color=ft.Colors.TRANSPARENT)
+        )
+
         self.container = ft.Container(
             width=sidebar_width,
             height=sidebar_height,
@@ -63,10 +70,13 @@ class Sidebar:
             bgcolor=colors["sidebar_bg"],
             padding=ft.padding.all(15),
             content=ft.GestureDetector(
-                content=ft.Column([
-                    title_row,
-                    self.filter_list_view,
-                ], spacing=10),
+                content=ft.Stack([
+                    ft.Column([
+                        title_row,
+                        self.filter_list_view,
+                    ], spacing=10),
+                    self.sidebar_focus_target
+                ]),
                 on_tap_down=lambda _: self.app.set_active_pane("filter")
             )
         )
