@@ -96,6 +96,10 @@ class LogAnalyzerApp:
         self.shift_pressed = False
         self.last_log_tap_y = 0
 
+        # Focus Management
+        self.active_pane = "log"  # "log" or "filter"
+        self.selected_filter_index = -1
+
         # 系統標記
         self.is_closing = False
         self.is_picking_file = False
@@ -731,6 +735,21 @@ class LogAnalyzerApp:
         asyncio.create_task(self.on_resize(None))
         self.page.update()
 
+    def set_active_pane(self, pane):
+        if self.active_pane != pane:
+            self.active_pane = pane
+            # Optional: Visual feedback could be added here
+            # e.g., dimming the inactive pane or highlighting the active one
+            if pane == "filter":
+                # Ensure a valid selection if none exists
+                if self.filters and self.selected_filter_index == -1:
+                    self.selected_filter_index = 0
+                    asyncio.create_task(self.render_filters())
+            elif pane == "log":
+                # Maybe clear filter selection visualization?
+                # For now we keep it to show state
+                pass
+
     def change_sidebar_position(self, pos):
         """更改側邊欄位置並重建佈局。"""
         self.config["sidebar_position"] = pos
@@ -1076,10 +1095,6 @@ class LogAnalyzerApp:
         if not self.log_engine:
             return
 
-        # Determine total items
-        total_items = self.navigator.total_items
-        if total_items == 0: return
-
         # Clipboard Shortcuts
         if e.ctrl and e.key.lower() == "c":
             await self.copy_selected_lines()
@@ -1104,6 +1119,41 @@ class LogAnalyzerApp:
         if e.key == "Enter" and self.search_bar.visible:
             await self.perform_search(backward=e.shift)
             return
+
+        # --- Context-Aware Navigation ---
+
+        if self.active_pane == "filter":
+            await self._handle_filter_navigation(e)
+        else:
+            await self._handle_log_navigation(e)
+
+    async def _handle_filter_navigation(self, e):
+        if not self.filters: return
+
+        idx = self.selected_filter_index
+        if idx == -1: idx = 0
+
+        if e.key in ["ArrowDown", "Arrow Down"]:
+            idx += 1
+        elif e.key in ["ArrowUp", "Arrow Up"]:
+            idx -= 1
+        else:
+            return
+
+        # Clamp
+        idx = max(0, min(idx, len(self.filters) - 1))
+
+        if idx != self.selected_filter_index:
+            self.selected_filter_index = idx
+            await self.render_filters() # Re-render to show selection highlight
+
+            # TODO: Scroll sidebar if needed (ListView scroll_to is not directly exposed well on ReorderableListView in older Flet)
+            # But since list is small usually, it might be fine.
+
+    async def _handle_log_navigation(self, e):
+        # Determine total items
+        total_items = self.navigator.total_items
+        if total_items == 0: return
 
         # --- Selection-based Navigation ---
         # Find current view index of the anchor
@@ -1399,6 +1449,16 @@ class LogAnalyzerApp:
             async def on_secondary_tap(e, obj=f):
                 self.open_filter_context_menu(e, obj)
 
+            # --- Selection Highlight Logic ---
+            is_selected = (i == self.selected_filter_index)
+            border = ft.border.all(2, ft.Colors.BLUE) if is_selected else None
+            bg_color = ft.Colors.with_opacity(0.1, ft.Colors.BLUE) if is_selected else None
+
+            async def on_tap(e, idx=i):
+                self.selected_filter_index = idx
+                self.set_active_pane("filter")
+                await self.render_filters()
+
             item_row = ft.GestureDetector(
                 key=f"{id(f)}_{is_dark}", # 關鍵：包含主題資訊，強制主題切換時完全重繪
                 content=ft.Container(
@@ -1407,9 +1467,13 @@ class LogAnalyzerApp:
                         lbl_tag,
                         hit_badge
                     ], spacing=2, alignment=ft.MainAxisAlignment.START),
-                    padding=ft.padding.only(right=35), # 為 ReorderableListView 的拖曳手把留出空間
+                    padding=ft.padding.only(right=35, left=5), # 為 ReorderableListView 的拖曳手把留出空間
                     height=28, # Enforce compact height
+                    border=border,
+                    bgcolor=bg_color,
+                    border_radius=5,
                 ),
+                on_tap=on_tap,
                 on_double_tap=on_double_tap,
                 on_secondary_tap=on_secondary_tap,
             )
@@ -1485,6 +1549,8 @@ class LogAnalyzerApp:
             await self.open_filter_dialog(initial_text=line_text.strip())
 
     async def on_log_area_tap(self, e: ft.TapEvent):
+        self.set_active_pane("log")
+
         # Calculate which row was clicked based on local_y
         local_y = get_event_prop(e, "local_y", 0)
         self.last_log_tap_y = local_y # Store for double tap usage

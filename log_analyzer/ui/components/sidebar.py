@@ -62,10 +62,13 @@ class Sidebar:
             visible=False,
             bgcolor=colors["sidebar_bg"],
             padding=ft.padding.all(15),
-            content=ft.Column([
-                title_row,
-                self.filter_list_view,
-            ], spacing=10)
+            content=ft.GestureDetector(
+                content=ft.Column([
+                    title_row,
+                    self.filter_list_view,
+                ], spacing=10),
+                on_tap_down=lambda _: self.app.set_active_pane("filter")
+            )
         )
         return self.container
 
