@@ -434,9 +434,8 @@ class LogAnalyzerApp:
 
         # Dummy focus target for Log View
         # Use a transparent button to accept focus but not obstruct view
-        self.log_focus_target = ft.Button(
-            content=ft.Text(""), width=1, height=1, opacity=0,
-            style=ft.ButtonStyle(overlay_color=ft.Colors.TRANSPARENT)
+        self.log_focus_target = ft.TextField(
+            value="", width=1, height=1, opacity=0, read_only=True, border_width=0
         )
 
         return ft.Stack(
@@ -1144,6 +1143,12 @@ class LogAnalyzerApp:
             await self._handle_log_navigation(e)
 
     async def _handle_filter_navigation(self, e):
+        # Force focus back to sidebar to prevent wandering
+        if hasattr(self.sidebar_comp, 'sidebar_focus_target'):
+            try:
+                await self.sidebar_comp.sidebar_focus_target.focus()
+            except Exception: pass
+
         if not self.filters: return
 
         idx = self.selected_filter_index
@@ -1174,6 +1179,11 @@ class LogAnalyzerApp:
             await self.render_filters() # Re-render to show selection highlight
 
     async def _handle_log_navigation(self, e):
+        # Force focus back to log view to prevent wandering
+        try:
+            await self.log_focus_target.focus()
+        except Exception: pass
+
         # Determine total items
         total_items = self.navigator.total_items
         if total_items == 0: return

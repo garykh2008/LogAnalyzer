@@ -57,9 +57,8 @@ class Sidebar:
         ], alignment=ft.MainAxisAlignment.START)
 
         # Dummy focus target for Sidebar
-        self.sidebar_focus_target = ft.Button(
-            content=ft.Text(""), width=1, height=1, opacity=0,
-            style=ft.ButtonStyle(overlay_color=ft.Colors.TRANSPARENT)
+        self.sidebar_focus_target = ft.TextField(
+            value="", width=1, height=1, opacity=0, read_only=True, border_width=0
         )
 
         async def on_sidebar_tap(_):
