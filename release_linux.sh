@@ -45,7 +45,7 @@ else
 fi
 
 echo "[Linux Build] Installing Python dependencies into venv..."
-pip install pyinstaller markdown tkinterdnd2 maturin
+pip install pyinstaller markdown maturin flet
 
 # Check for Rust
 echo "[Linux Build] Checking for Rust environment..."
@@ -76,7 +76,6 @@ echo "[Linux Build] Detected version: $VERSION"
 
 # 5. PyInstaller
 echo "[Linux Build] Running PyInstaller..."
-TKINTERDND2_PATH=$(python3 -c "import os, tkinterdnd2; print(os.path.abspath(os.path.dirname(tkinterdnd2.__file__)))")
 ABS_PATH=$(pwd)
 
 # Use temp directories for build artifacts to avoid WSL/NTFS permission issues (chmod)
@@ -91,12 +90,13 @@ pyinstaller --noconfirm --noconsole --onefile --clean \
     --workpath "$TEMP_WORK" \
     --specpath "$TEMP_WORK" \
     --add-data "$ABS_PATH/Doc:Doc" \
-    --add-data "$TKINTERDND2_PATH:tkinterdnd2" \
+    --add-data "$ABS_PATH/log_analyzer:log_analyzer" \
     --add-data "$ABS_PATH/loganalyzer.ico:." \
     --icon="$ABS_PATH/loganalyzer.ico" \
     --hidden-import log_engine_rs \
+    --hidden-import flet \
     --name "LogAnalyzer_Linux_${VERSION}" \
-    "loganalyzer.py"
+    "loganalyzer_flet.py"
 
 # Copy the binary back to the project directory
 echo "[Linux Build] Copying binary to release/linux/..."
