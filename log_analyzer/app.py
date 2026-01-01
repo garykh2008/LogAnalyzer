@@ -874,8 +874,8 @@ class LogAnalyzerApp:
             self.update_log_view()
             return
 
-        # If query or case-sensitivity changed, perform a new global search
-        if query != self.search_query:
+        # If query or case-sensitivity changed, OR if results were cleared (e.g. by hide), perform a new global search
+        if query != self.search_query or not self.search_results:
             self.search_query = query
             # Call Rust engine search (returns list of raw indices)
             self.search_results = await asyncio.to_thread(
@@ -928,10 +928,14 @@ class LogAnalyzerApp:
         # If the search result is filtered out, we jump to the nearest visible line?
         # For now, if view_idx is None, we stay at current position but select it
         if target_view_idx is not None:
-            self.jump_to_index(target_view_idx, update_slider=True)
+            self.jump_to_index(target_view_idx, update_slider=True, immediate=True)
         else:
             self.status_bar_comp.update_status(f"Result on line {target_raw_idx+1} is filtered out.")
             self.page.update()
+
+        # Explicitly trigger render to update selection highlight
+        self.needs_render = True
+        self.update_log_view()
 
     def update_results_count(self, text):
         self.search_bar_comp.search_results_count.value = text
