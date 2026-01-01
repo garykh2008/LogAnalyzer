@@ -976,6 +976,13 @@ class LogAnalyzerApp:
         self.needs_render = True
         self.update_log_view()
 
+        # Ensure focus stays on search input if we are in search mode,
+        # to allow repeated Enter presses to trigger on_submit
+        if self.active_pane == "search":
+            try:
+                await self.search_bar_comp.search_input.focus()
+            except Exception: pass
+
     def update_results_count(self, text):
         self.search_bar_comp.search_results_count.value = text
         self.page.update()
