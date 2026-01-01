@@ -879,13 +879,21 @@ class LogAnalyzerApp:
             self.update_log_view()
             return
 
-        # If query or case-sensitivity changed, OR if results were cleared (e.g. by hide), perform a new global search
-        if query != self.search_query or not self.search_results:
+        # Check if we need to perform a new search (query changed or results cleared)
+        is_new_search = (query != self.search_query or not self.search_results)
+
+        if is_new_search:
             self.search_query = query
             # Call Rust engine search (returns list of raw indices)
             self.search_results = await asyncio.to_thread(
                 self.log_engine.search, query, False, self.search_case_sensitive
             )
+
+            if not self.search_results:
+                self.update_results_count("0/0")
+                self.status_bar_comp.update_status(f"No results for '{query}'")
+                self.page.update()
+                return
 
             # Find nearest starting point relative to current position
             current_raw = self.selection_anchor
@@ -899,47 +907,49 @@ class LogAnalyzerApp:
                 else:
                     current_raw = self.current_start_index
 
-            # Find insertion point
-            idx = bisect.bisect_left(self.search_results, current_raw)
+            # --- "Find Nearest" Logic ---
+            if backward:
+                # Find insertion point (left). Elements to left are < current_raw.
+                # If current_raw is a match, bisect_left returns its index.
+                # We want the previous match, so idx - 1.
+                idx = bisect.bisect_left(self.search_results, current_raw)
+                self.current_search_idx = idx - 1
+                # Wrap around if needed (start from end if currently at beginning)
+                if self.current_search_idx < 0:
+                    self.current_search_idx = len(self.search_results) - 1
+            else:
+                # Find insertion point (right). Elements to right are > current_raw.
+                # If current_raw is a match, bisect_right returns index + 1 (next match).
+                idx = bisect.bisect_right(self.search_results, current_raw)
+                self.current_search_idx = idx
+                # Wrap around if needed (start from beginning if currently at end)
+                if self.current_search_idx >= len(self.search_results):
+                    self.current_search_idx = 0
+
+        else:
+            # --- "Find Next" Logic (Existing Results) ---
+            if not self.search_results: return
 
             if backward:
-                # If backward, we want the item BEFORE the insertion point (which is <= current)
-                # Logic below does -= 1, so we set to idx
-                self.current_search_idx = idx
-            else:
-                # If forward, we want the item AT the insertion point (which is >= current)
-                # Logic below does += 1, so we set to idx - 1
-                self.current_search_idx = idx - 1
-
-        if not self.search_results:
-            self.update_results_count("0/0")
-            self.status_bar_comp.update_status(f"No results for '{query}'")
-            self.page.update()
-            return
-
-        # Navigation logic with Wrap Around support
-        old_idx = self.current_search_idx
-
-        if backward:
-            if self.current_search_idx <= 0:
-                if self.search_wrap:
-                    self.current_search_idx = len(self.search_results) - 1
+                if self.current_search_idx <= 0:
+                    if self.search_wrap:
+                        self.current_search_idx = len(self.search_results) - 1
+                    else:
+                        self.status_bar_comp.update_status("Reached Top")
+                        self.page.update()
+                        return
                 else:
-                    self.status_bar_comp.update_status("Reached Top")
-                    self.page.update()
-                    return
+                    self.current_search_idx -= 1
             else:
-                self.current_search_idx -= 1
-        else:
-            if self.current_search_idx >= len(self.search_results) - 1:
-                if self.search_wrap:
-                    self.current_search_idx = 0
+                if self.current_search_idx >= len(self.search_results) - 1:
+                    if self.search_wrap:
+                        self.current_search_idx = 0
+                    else:
+                        self.status_bar_comp.update_status("Reached Bottom")
+                        self.page.update()
+                        return
                 else:
-                    self.status_bar_comp.update_status("Reached Bottom")
-                    self.page.update()
-                    return
-            else:
-                self.current_search_idx += 1
+                    self.current_search_idx += 1
 
         self.update_results_count(f"{self.current_search_idx + 1}/{len(self.search_results)}")
 
@@ -1168,15 +1178,24 @@ class LogAnalyzerApp:
         if e.key == "F3":
             await self.perform_search(backward=e.shift)
             return
-        if e.key == "Enter" and self.search_bar.visible:
-            await self.perform_search(backward=e.shift)
-            return
-
         # --- Context-Aware Navigation ---
 
         # If search is active, do not navigate logs/filters with keys
         # unless specialized keys are handled above (like Enter/F3)
         if self.active_pane == "search":
+            # Let TextField.on_submit handle Enter to avoid double triggering search
+            if e.key == "Enter":
+                return
+
+            # Allow F3 to work even while typing
+            if e.key == "F3":
+                await self.perform_search(backward=e.shift)
+                return
+
+            return
+
+        if e.key == "Enter" and self.search_bar.visible:
+            await self.perform_search(backward=e.shift)
             return
 
         if self.active_pane == "filter":
