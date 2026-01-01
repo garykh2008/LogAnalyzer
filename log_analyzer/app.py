@@ -727,6 +727,8 @@ class LogAnalyzerApp:
 
     def toggle_sidebar(self):
         self.sidebar.visible = not self.sidebar.visible
+        # Force a layout recalculation in case the sidebar position affects the log view (e.g. bottom mode)
+        asyncio.create_task(self.on_resize(None))
         self.page.update()
 
     def change_sidebar_position(self, pos):
