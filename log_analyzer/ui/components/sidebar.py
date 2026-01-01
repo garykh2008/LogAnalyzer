@@ -62,6 +62,9 @@ class Sidebar:
             style=ft.ButtonStyle(overlay_color=ft.Colors.TRANSPARENT)
         )
 
+        async def on_sidebar_tap(_):
+            await self.app.set_active_pane("filter")
+
         self.container = ft.Container(
             width=sidebar_width,
             height=sidebar_height,
@@ -76,7 +79,7 @@ class Sidebar:
                     ], spacing=10),
                     self.sidebar_focus_target
                 ]),
-                on_tap_down=lambda _: self.app.set_active_pane("filter")
+                on_tap_down=on_sidebar_tap
             )
         )
         return self.container

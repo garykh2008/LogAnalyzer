@@ -748,7 +748,7 @@ class LogAnalyzerApp:
         asyncio.create_task(self.on_resize(None))
         self.page.update()
 
-    def set_active_pane(self, pane):
+    async def set_active_pane(self, pane):
         self.active_pane = pane
         if pane == "filter":
             # Ensure a valid selection if none exists
@@ -759,11 +759,11 @@ class LogAnalyzerApp:
             # Request focus on sidebar dummy target
             if hasattr(self.sidebar_comp, 'sidebar_focus_target'):
                 try:
-                    self.sidebar_comp.sidebar_focus_target.focus()
+                    await self.sidebar_comp.sidebar_focus_target.focus()
                 except Exception: pass
         elif pane == "log":
             try:
-                self.log_focus_target.focus()
+                await self.log_focus_target.focus()
             except Exception: pass
 
     def change_sidebar_position(self, pos):
@@ -1479,7 +1479,7 @@ class LogAnalyzerApp:
 
             async def on_tap(e, idx=i):
                 self.selected_filter_index = idx
-                self.set_active_pane("filter")
+                await self.set_active_pane("filter")
                 await self.render_filters()
 
             item_row = ft.GestureDetector(
@@ -1572,7 +1572,7 @@ class LogAnalyzerApp:
             await self.open_filter_dialog(initial_text=line_text.strip())
 
     async def on_log_area_tap(self, e: ft.TapEvent):
-        self.set_active_pane("log")
+        await self.set_active_pane("log")
 
         # Calculate which row was clicked based on local_y
         local_y = get_event_prop(e, "local_y", 0)
