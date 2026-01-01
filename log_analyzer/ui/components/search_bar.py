@@ -29,7 +29,7 @@ class SearchBar:
             icon_size=16,
             items=[]
         )
-        self.update_history_menu()
+        self.update_history_menu(update=False)
 
         async def toggle_case(e):
             self.app.search_case_sensitive = not self.app.search_case_sensitive
@@ -79,7 +79,7 @@ class SearchBar:
         if self.search_results_count:
             self.search_results_count.color = colors["text"]
 
-    def update_history_menu(self):
+    def update_history_menu(self, update=True):
         if not self.history_button: return
 
         history_items = []
@@ -102,4 +102,5 @@ class SearchBar:
                 )
 
         self.history_button.items = history_items
-        self.history_button.update()
+        if update:
+            self.history_button.update()
