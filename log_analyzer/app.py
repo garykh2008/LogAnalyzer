@@ -1531,11 +1531,15 @@ class LogAnalyzerApp:
     def open_filter_context_menu(self, e, obj):
         self.dialogs.show_filter_context_menu(obj)
 
+    def _get_row_index_from_local_y(self, local_y):
+        """Converts local Y coordinate to row index."""
+        return int(local_y / self.ROW_HEIGHT)
+
     async def on_log_area_double_tap(self, e):
         # Double tap event in Flet doesn't provide coordinates,
         # so we use the one captured by the last on_tap_down
         local_y = getattr(self, "last_log_tap_y", 0)
-        row_idx = int(local_y / self.ROW_HEIGHT)
+        row_idx = self._get_row_index_from_local_y(local_y)
 
         class MockEvent:
             def __init__(self, data):
@@ -1572,8 +1576,7 @@ class LogAnalyzerApp:
         local_y = get_event_prop(e, "local_y", 0)
         self.last_log_tap_y = local_y # Store for double tap usage
 
-        row_height = self.ROW_HEIGHT
-        row_idx = int(local_y / row_height)
+        row_idx = self._get_row_index_from_local_y(local_y)
 
         # --- WINDOWS ULTIMATE FIX: Direct OS Query ---
         ctrl = False
@@ -1602,8 +1605,7 @@ class LogAnalyzerApp:
 
     async def on_log_area_secondary_tap(self, e: ft.TapEvent):
         local_y = get_event_prop(e, "local_y", 0)
-        row_height = self.ROW_HEIGHT
-        row_idx = int(local_y / row_height)
+        row_idx = self._get_row_index_from_local_y(local_y)
 
         class MockEvent:
             def __init__(self, data):
