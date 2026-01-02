@@ -30,7 +30,23 @@ fi
 # 2. Check and Install Python3-tk (Removed as Flet doesn't require it for core function, but sometimes useful for dialogs fallback)
 # Keeping it optional or removing strict check
 
-# 3. Check and Install Python3-venv (Required for building release)
+# 3. Check and Install Python3-pip
+if command -v pip3 &>/dev/null; then
+    echo -e "${GREEN}[V] Python3-pip is already installed.${NC}"
+else
+    echo -e "${YELLOW}[!] Python3-pip not found. Attempting to install...${NC}"
+
+    sudo apt-get install -y python3-pip
+
+    if command -v pip3 &>/dev/null; then
+        echo -e "${GREEN}[V] Python3-pip installed successfully.${NC}"
+    else
+        echo -e "${RED}[X] Failed to install Python3-pip.${NC}"
+        exit 1
+    fi
+fi
+
+# 4. Check and Install Python3-venv (Required for building release)
 if python3 -c "import venv" &>/dev/null; then
     echo -e "${GREEN}[V] Python3-venv is already installed.${NC}"
 else
@@ -46,7 +62,7 @@ else
     fi
 fi
 
-# 4. Check and Install Rust (Required for extension)
+# 5. Check and Install Rust (Required for extension)
 if command -v cargo &>/dev/null; then
     echo -e "${GREEN}[V] Rust (cargo) is already installed.${NC}"
 else
@@ -62,8 +78,8 @@ else
     echo -e "${GREEN}[V] Rust installed. You may need to restart your shell or run 'source \$HOME/.cargo/env'.${NC}"
 fi
 
-# 5. Install Python dependencies (including Flet)
+# 6. Install Python dependencies (including Flet)
 echo -e "${YELLOW}[!] Installing/Updating Python libraries (flet, maturin, pyinstaller)...${NC}"
-pip3 install flet maturin pyinstaller markdown
+python3 -m pip install flet maturin pyinstaller markdown
 
 echo -e "${GREEN}--- All checks completed successfully ---${NC}"
