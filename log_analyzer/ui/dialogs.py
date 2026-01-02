@@ -208,8 +208,9 @@ class Dialogs:
             self.app.page.update()
 
         async def menu_edit(ev):
-            await self.app.open_filter_dialog(filter_obj)
+            # Close dialog first, then open the new one
             close_dlg(None)
+            await self.app.open_filter_dialog(filter_obj)
 
         async def menu_top(ev):
             await self.app.move_filter_to_top(filter_obj)

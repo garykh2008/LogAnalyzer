@@ -766,6 +766,11 @@ class LogAnalyzerApp:
                     await self.sidebar_comp.sidebar_focus_target.focus()
                 except Exception: pass
         elif pane == "log":
+            # Clear filter selection visual
+            if self.selected_filter_index != -1:
+                self.selected_filter_index = -1
+                asyncio.create_task(self.render_filters())
+
             try:
                 await self.log_focus_target.focus()
             except Exception: pass
@@ -1255,8 +1260,9 @@ class LogAnalyzerApp:
         idx = max(0, min(idx, len(self.filters) - 1))
 
         if idx != self.selected_filter_index:
+            old_idx = self.selected_filter_index
             self.selected_filter_index = idx
-            await self.render_filters() # Re-render to show selection highlight
+            await self.update_filter_selection_visuals(old_idx, idx)
 
     async def _handle_log_navigation(self, e):
         # Force focus back to log view to prevent wandering
@@ -1568,9 +1574,13 @@ class LogAnalyzerApp:
             bg_color = ft.Colors.with_opacity(0.1, ft.Colors.BLUE) if is_selected else None
 
             async def on_tap(e, idx=i):
+                old_idx = self.selected_filter_index
                 self.selected_filter_index = idx
                 await self.set_active_pane("filter")
-                await self.render_filters()
+                # Optimize: Update only affected rows if possible,
+                # but currently render_filters is fast enough if we don't rebuild everything?
+                # Actually, for "obvious delay", we should try to update styles directly.
+                await self.update_filter_selection_visuals(old_idx, idx)
 
             item_row = ft.GestureDetector(
                 key=f"{id(f)}_{is_dark}", # 關鍵：包含主題資訊，強制主題切換時完全重繪
@@ -1597,6 +1607,24 @@ class LogAnalyzerApp:
 
         if update_page:
             self.page.update()
+
+    async def update_filter_selection_visuals(self, old_idx, new_idx):
+        """Updates the visual selection state of filters without full re-render."""
+        controls = self.sidebar_comp.filter_list_view.controls
+
+        # Helper to apply style
+        def apply_style(idx, is_sel):
+            if 0 <= idx < len(controls):
+                container = controls[idx].content
+                container.border = ft.border.all(2, ft.Colors.BLUE) if is_sel else None
+                container.bgcolor = ft.Colors.with_opacity(0.1, ft.Colors.BLUE) if is_sel else None
+                container.update()
+
+        if old_idx != -1 and old_idx != new_idx:
+            apply_style(old_idx, False)
+
+        if new_idx != -1:
+            apply_style(new_idx, True)
 
     async def on_filter_reorder(self, e):
         """處理過濾器拖曳排序事件。"""
