@@ -30,18 +30,52 @@ fi
 # 2. Check and Install Python3-tk (Removed as Flet doesn't require it for core function, but sometimes useful for dialogs fallback)
 # Keeping it optional or removing strict check
 
-# 3. Check and Install Python3-pip
-if command -v pip3 &>/dev/null; then
-    echo -e "${GREEN}[V] Python3-pip is already installed.${NC}"
+# 3. Check and Install Python3-pip (Robust Fallback Strategy)
+if python3 -m pip --version &>/dev/null; then
+    echo -e "${GREEN}[V] pip is already installed.${NC}"
 else
-    echo -e "${YELLOW}[!] Python3-pip not found. Attempting to install...${NC}"
+    echo -e "${YELLOW}[!] pip not found. Attempting to install...${NC}"
 
-    sudo apt-get install -y python3-pip
-
-    if command -v pip3 &>/dev/null; then
-        echo -e "${GREEN}[V] Python3-pip installed successfully.${NC}"
+    # Strategy A: Try apt-get
+    echo -e "${YELLOW}Method 1: Attempting apt-get install python3-pip...${NC}"
+    sudo apt-get update
+    if sudo apt-get install -y python3-pip; then
+        echo -e "${GREEN}[V] Installed via apt-get.${NC}"
     else
-        echo -e "${RED}[X] Failed to install Python3-pip.${NC}"
+        echo -e "${YELLOW}[!] apt-get failed. Method 2: Attempting ensurepip...${NC}"
+
+        # Strategy B: Try ensurepip (Standard Library)
+        if python3 -m ensurepip --upgrade; then
+            echo -e "${GREEN}[V] Installed via ensurepip.${NC}"
+        else
+            echo -e "${YELLOW}[!] ensurepip failed. Method 3: Downloading get-pip.py...${NC}"
+
+            # Strategy C: Download get-pip.py
+            if ! command -v curl &>/dev/null; then
+                 sudo apt-get install -y curl
+            fi
+
+            if curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py; then
+                if python3 get-pip.py; then
+                    echo -e "${GREEN}[V] Installed via get-pip.py.${NC}"
+                    rm get-pip.py
+                else
+                    echo -e "${RED}[X] Failed to run get-pip.py.${NC}"
+                    rm get-pip.py
+                    exit 1
+                fi
+            else
+                echo -e "${RED}[X] Failed to download get-pip.py.${NC}"
+                exit 1
+            fi
+        fi
+    fi
+
+    # Final Verification
+    if python3 -m pip --version &>/dev/null; then
+        echo -e "${GREEN}[V] pip installed successfully.${NC}"
+    else
+        echo -e "${RED}[X] Failed to install pip. Please check your environment.${NC}"
         exit 1
     fi
 fi
@@ -57,7 +91,8 @@ else
     if python3 -c "import venv" &>/dev/null; then
         echo -e "${GREEN}[V] Python3-venv installed successfully.${NC}"
     else
-        echo -e "${RED}[X] Failed to install Python3-venv.${NC}"
+        echo -e "${RED}[X] Failed to install Python3-venv. This is often a separate package on Debian/Ubuntu.${NC}"
+        # Fallback suggestion, but venv is harder to bootstrap without apt
         exit 1
     fi
 fi
