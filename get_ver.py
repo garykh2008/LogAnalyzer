@@ -1,7 +1,8 @@
 import re
 import os
 
-PYTHON_FILE = 'loganalyzer.py'
+# Updated to point to the new location of the version string
+PYTHON_FILE = os.path.join('log_analyzer', 'app.py')
 
 def get_version():
 	"""

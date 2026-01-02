@@ -3,7 +3,8 @@ import re
 import os
 
 def update_version(new_version):
-    file_path = 'loganalyzer.py'
+    # Updated to point to the new location
+    file_path = os.path.join('log_analyzer', 'app.py')
     
     if not os.path.exists(file_path):
         print(f"[Error] Target file not found: {file_path}")
@@ -28,14 +29,11 @@ def update_version(new_version):
         
         if new_content == content:
             print("[Warning] File content did not change. Is the version already set correctly?")
-            # We can either exit or continue. Let's continue to allow re-running.
             pass
 
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
             
-        # No print on success, let the batch script handle reporting.
-
     except Exception as e:
         print(f"[Error] An unexpected error occurred while updating version: {e}")
         sys.exit(1)
