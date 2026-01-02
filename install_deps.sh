@@ -27,8 +27,21 @@ else
     fi
 fi
 
-# 2. Check and Install Python3-tk (Removed as Flet doesn't require it for core function, but sometimes useful for dialogs fallback)
-# Keeping it optional or removing strict check
+# 2. Check and Install Python3-tk
+if python3 -c "import tkinter" &>/dev/null; then
+    echo -e "${GREEN}[V] Python3-tk is already installed.${NC}"
+else
+    echo -e "${YELLOW}[!] Python3-tk not found. Attempting to install...${NC}"
+
+    sudo apt-get install -y python3-tk
+
+    if python3 -c "import tkinter" &>/dev/null; then
+        echo -e "${GREEN}[V] Python3-tk installed successfully.${NC}"
+    else
+        echo -e "${RED}[X] Failed to install Python3-tk.${NC}"
+        exit 1
+    fi
+fi
 
 # 3. Check and Install Python3-pip (Robust Fallback Strategy)
 if python3 -m pip --version &>/dev/null; then
@@ -98,7 +111,7 @@ else
 fi
 
 # 5. Check and Install Rust (Required for extension)
-if command -v cargo &>/dev/null; then
+if [ -f "$HOME/.cargo/bin/cargo" ] || command -v cargo &>/dev/null; then
     echo -e "${GREEN}[V] Rust (cargo) is already installed.${NC}"
 else
     echo -e "${YELLOW}[!] Rust not found. Attempting to install via rustup...${NC}"
