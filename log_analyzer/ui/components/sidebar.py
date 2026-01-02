@@ -89,15 +89,26 @@ class Sidebar:
 
         if self.container:
             self.container.bgcolor = colors["sidebar_bg"]
-            if isinstance(self.container.content, ft.Column):
-                 for control in self.container.content.controls:
-                     if isinstance(control, ft.Text):
-                         control.color = colors["text"]
-                     elif isinstance(control, ft.Row):
-                         for sub_control in control.controls:
-                             if isinstance(sub_control, ft.Text):
-                                 sub_control.color = colors["text"]
-                                 sub_control.update()
+
+            # Navigate the structure: Container -> GestureDetector -> Stack -> Column -> Row -> Text
+            # self.container.content is GestureDetector
+            # .content is Stack
+            # .controls[0] is Column
+            try:
+                gd = self.container.content
+                if isinstance(gd, ft.GestureDetector):
+                    stack = gd.content
+                    if isinstance(stack, ft.Stack):
+                        col = stack.controls[0]
+                        if isinstance(col, ft.Column):
+                            title_row = col.controls[0]
+                            if isinstance(title_row, ft.Row):
+                                for sub in title_row.controls:
+                                    if isinstance(sub, ft.Text):
+                                        sub.color = colors["text"]
+                                        sub.update()
+            except Exception as e:
+                print(f"Error updating sidebar colors: {e}")
 
             # Update Add Filter Button Style
             if self.add_filter_btn:

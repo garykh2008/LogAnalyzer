@@ -1576,11 +1576,12 @@ class LogAnalyzerApp:
             async def on_tap(e, idx=i):
                 old_idx = self.selected_filter_index
                 self.selected_filter_index = idx
-                await self.set_active_pane("filter")
-                # Optimize: Update only affected rows if possible,
-                # but currently render_filters is fast enough if we don't rebuild everything?
-                # Actually, for "obvious delay", we should try to update styles directly.
-                await self.update_filter_selection_visuals(old_idx, idx)
+
+                # Run visual update and focus switch concurrently to reduce perceived delay
+                await asyncio.gather(
+                    self.update_filter_selection_visuals(old_idx, idx),
+                    self.set_active_pane("filter")
+                )
 
             item_row = ft.GestureDetector(
                 key=f"{id(f)}_{is_dark}", # 關鍵：包含主題資訊，強制主題切換時完全重繪
