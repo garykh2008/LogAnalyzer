@@ -8,6 +8,14 @@ NC='\033[0m' # No Color
 
 echo -e "${YELLOW}Starting check for dependencies...${NC}"
 
+# 0. Check for Root Execution
+if [ "$EUID" -eq 0 ]; then
+    echo -e "${RED}[!] Please do not run this script as root (sudo).${NC}"
+    echo -e "${YELLOW}Run it as: ./install_deps.sh${NC}"
+    echo -e "${YELLOW}The script will request sudo access when necessary.${NC}"
+    exit 1
+fi
+
 # 1. Check and Install Python3
 if command -v python3 &>/dev/null; then
     echo -e "${GREEN}[V] Python3 is already installed.${NC}"
@@ -142,6 +150,6 @@ fi
 
 # 6. Install Python dependencies (including Flet)
 echo -e "${YELLOW}[!] Installing/Updating Python libraries (flet, maturin, pyinstaller)...${NC}"
-python3 -m pip install flet maturin pyinstaller markdown
+python3 -m pip install --user flet maturin pyinstaller markdown
 
 echo -e "${GREEN}--- All checks completed successfully ---${NC}"
