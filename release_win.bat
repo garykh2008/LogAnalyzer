@@ -17,7 +17,7 @@ setlocal EnableDelayedExpansion
 
 :: --- Dependency Check & Install ---
 echo [Init] Checking and installing dependencies...
-pip install pyinstaller markdown tkinterdnd2 maturin
+pip install pyinstaller markdown maturin flet
 if %errorlevel% neq 0 (
     echo [Error] Failed to install dependencies.
     exit /b 1
@@ -74,13 +74,14 @@ if /I "%OLD_VER%"=="%NEW_VER%" (
 
 :: --- 3. Update Version in Python Script ---
 echo.
-echo [Step 2/7] Updating version in loganalyzer.py...
+echo [Step 2/7] Updating version in log_analyzer/app.py...
+:: Note: _update_version.py might need adjustment if it looks for version in loganalyzer.py
 python _update_version.py %NEW_VER%
 if %errorlevel% neq 0 (
     echo [Error] Failed to update version number using _update_version.py.
     exit /b 1
 )
-echo      Successfully updated loganalyzer.py to %NEW_VER%.
+echo      Successfully updated version to %NEW_VER%.
 
 :: --- 4. Build, Commit, and Tag ---
 echo.
@@ -112,8 +113,7 @@ if exist "%OLD_HTML_FILE%" (
 
 :: Add all new/modified files
 echo      Adding new release files to Git...
-git add loganalyzer.py "%NEW_HTML_FILE%"
-git add loganalyzer.py "%NEW_HTML_FILE%"
+git add log_analyzer/app.py "%NEW_HTML_FILE%"
 
 :: --- 6. Commit ---
 set "GIT_COMMIT_MSG=Release %NEW_VER%"
@@ -189,14 +189,10 @@ goto :eof
 :build_process
 set "BUILD_VER=%~1"
 
-set "PYTHON_FILE=loganalyzer.py"
+set "PYTHON_FILE=loganalyzer_flet.py"
 set "DOC_SCRIPT=build_docs.py"
 set "DOC_DIR=Doc"
 set "REL_WIN=release\windows"
-
-echo      [Build] Finding tkinterdnd2 path...
-for /f "delims=" %%i in ('python -c "import os, tkinterdnd2; print(os.path.dirname(tkinterdnd2.__file__))"') do set "TKINTERDND2_PATH=%%i"
-if not defined TKINTERDND2_PATH ( echo [Error] tkinterdnd2 not found. && exit /b 1 )
 
 echo      [Build] Updating Rust Extension...
 call update_rust.bat
@@ -213,7 +209,19 @@ if not exist "%REL_WIN%" mkdir "%REL_WIN%"
 if not exist "build" mkdir "build"
 set "ABS_DOC_SRC=%~dp0%DOC_DIR%"
 set "ABS_ICON_PATH=%~dp0loganalyzer.ico"
-pyinstaller --noconfirm --noconsole --onefile --clean --distpath "%REL_WIN%" --workpath "build" --specpath "build" --add-data "%ABS_DOC_SRC%;%DOC_DIR%" --add-data "!TKINTERDND2_PATH!;tkinterdnd2" --add-data "%ABS_ICON_PATH%;." --icon="%ABS_ICON_PATH%" --hidden-import log_engine_rs --name "LogAnalyzer_%BUILD_VER%" "%PYTHON_FILE%" > build/pyinstaller.log 2>&1
+set "ABS_PKG_PATH=%~dp0log_analyzer"
+
+:: We need to include the log_analyzer package and ensure Flet works.
+:: Hidden import logic is crucial for dynamic imports.
+pyinstaller --noconfirm --noconsole --onefile --clean --distpath "%REL_WIN%" --workpath "build" --specpath "build" ^
+    --add-data "%ABS_DOC_SRC%;%DOC_DIR%" ^
+    --add-data "%ABS_PKG_PATH%;log_analyzer" ^
+    --add-data "%ABS_ICON_PATH%;." ^
+    --icon="%ABS_ICON_PATH%" ^
+    --hidden-import log_engine_rs ^
+    --hidden-import flet ^
+    --name "LogAnalyzer_%BUILD_VER%" "%PYTHON_FILE%" > build/pyinstaller.log 2>&1
+
 if %errorlevel% neq 0 ( echo [Error] PyInstaller failed. Check build/pyinstaller.log && exit /b 1 )
 
 goto :eof

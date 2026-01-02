@@ -740,7 +740,7 @@ class LogAnalyzerApp:
 
 		x = rx + (rw - width) // 2
 		y = ry + (rh - height) // 2
-		
+
 		window.geometry(f"{width}x{height}+{x}+{y}")
 		window.deiconify() # Show after positioning
 
@@ -1678,10 +1678,10 @@ class LogAnalyzerApp:
 
 	def copy_selection(self, event=None):
 		if not self.selected_indices: return "break"
-		
+
 		lines_to_copy = []
 		sorted_raw = sorted(list(self.selected_indices))
-		
+
 		# Use active_raw_lines or merged view logic
 		if self.active_log_filepath == self.MERGED_VIEW_ID and hasattr(self, 'active_raw_lines'):
 			# For merged view, we can access by index assuming active_raw_lines supports it
@@ -1694,13 +1694,13 @@ class LogAnalyzerApp:
 				line = self.active_rust_engine.get_line(ridx)
 				if line is not None:
 					lines_to_copy.append(line)
-					
+
 		if lines_to_copy:
 			text = "\n".join(lines_to_copy)
 			self.root.clipboard_clear()
 			self.root.clipboard_append(text)
 			self.update_status(f"Copied {len(lines_to_copy)} lines to clipboard.")
-			
+
 		return "break"
 
 	def on_log_single_click(self, event):
@@ -1712,36 +1712,36 @@ class LogAnalyzerApp:
 			self.text_area.mark_set(tk.INSERT, index)
 			# self.text_area.tag_add("current_line", f"{ui_row}.0", f"{ui_row+1}.0") # Moved to render_viewport based on selection
 			# self.text_area.tag_raise("current_line")
-			
+
 			cache_index = self.view_start_index + (ui_row - 1)
 			total = self.get_total_count()
-			
+
 			if 0 <= cache_index < total:
 				_, _, raw_idx = self.get_view_item(cache_index)
-				
+
 				# Handle Multi-selection
 				# Check for modifier keys
 				# Standard Tkinter state masks: Shift=0x1, Control=0x4
 				ctrl_pressed = (event.state & 0x4) != 0
 				shift_pressed = (event.state & 0x1) != 0
-				
+
 				if shift_pressed and self.selected_raw_index != -1:
 					# Range selection
 					start_view_idx = self._get_view_index_from_raw(self.selected_raw_index)
 					end_view_idx = cache_index # Current view index
-					
+
 					if start_view_idx is not None:
 						low = min(start_view_idx, end_view_idx)
 						high = max(start_view_idx, end_view_idx)
-						
+
 						if not ctrl_pressed:
 							self.selected_indices.clear()
-						
+
 						# Add range
 						for i in range(low, high + 1):
 							_, _, r_idx = self.get_view_item(i)
 							self.selected_indices.add(r_idx)
-				
+
 				elif ctrl_pressed:
 					# Toggle selection
 					if raw_idx in self.selected_indices:
@@ -1749,15 +1749,15 @@ class LogAnalyzerApp:
 					else:
 						self.selected_indices.add(raw_idx)
 					self.selected_raw_index = raw_idx # Update anchor
-					
+
 				else:
 					# Single selection
 					self.selected_indices.clear()
 					self.selected_indices.add(raw_idx)
 					self.selected_raw_index = raw_idx # Update anchor
-				
+
 				self.selection_offset = ui_row - 1
-				
+
 			else:
 				# Clicked empty space - clear selection unless modifier held?
 				# Standard behavior: clicking empty space usually deselects
@@ -1793,7 +1793,7 @@ class LogAnalyzerApp:
 			ui_row = int(index.split('.')[0])
 			cache_index = self.view_start_index + (ui_row - 1)
 			total = self.get_total_count()
-			
+
 			clicked_raw_idx = -1
 			if 0 <= cache_index < total:
 				_, _, clicked_raw_idx = self.get_view_item(cache_index)
@@ -1801,7 +1801,7 @@ class LogAnalyzerApp:
 			# If clicked line is not in selection, select it (exclusive)
 			if clicked_raw_idx != -1 and clicked_raw_idx not in self.selected_indices:
 				self.on_log_single_click(event)
-			
+
 			# Enable/Disable menu items based on if note exists for the ANCHOR line
 			# Menu indices: 0=Copy, 1=Sep, 2=Add/Edit Note, 3=Remove Note
 			if self.selected_raw_index in self.notes:
@@ -3191,7 +3191,7 @@ class LogAnalyzerApp:
 		else:
 			if self.find_entry and self.find_entry.winfo_exists():
 				self.find_entry.config(foreground="black") # Reset color if wrapping around or starting new
-			
+
 			# If we didn't find anything in candidates, it means we hit the end/start and wrap is off
 			if self.find_entry and self.find_entry.winfo_exists():
 				self.find_entry.config(foreground="red")
@@ -3484,10 +3484,10 @@ class LogAnalyzerApp:
 
 		ttk.Button(button_frame, text="Save", command=save).pack(side=tk.RIGHT)
 		ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
-		
+
 		entry_text.bind("<Return>", lambda e: save())
 		dialog.bind("<Escape>", lambda e: dialog.destroy())
-		
+
 		entry_text.focus_set()
 		dialog.wait_window()
 
