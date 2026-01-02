@@ -111,7 +111,14 @@ else
 fi
 
 # 5. Check and Install Rust (Required for extension)
-if [ -f "$HOME/.cargo/bin/cargo" ] || command -v cargo &>/dev/null; then
+# Determine real user home if running as sudo
+if [ -n "$SUDO_USER" ]; then
+    REAL_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+else
+    REAL_HOME=$HOME
+fi
+
+if [ -f "$REAL_HOME/.cargo/bin/cargo" ] || command -v cargo &>/dev/null; then
     echo -e "${GREEN}[V] Rust (cargo) is already installed.${NC}"
 else
     echo -e "${YELLOW}[!] Rust not found. Attempting to install via rustup...${NC}"
@@ -122,7 +129,14 @@ else
         sudo apt-get install -y curl
     fi
 
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    if [ -n "$SUDO_USER" ]; then
+        echo -e "${YELLOW}Detected sudo. Installing Rust for user: $SUDO_USER${NC}"
+        # Download and install as the sudo user
+        sudo -u "$SUDO_USER" sh -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+    else
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    fi
+
     echo -e "${GREEN}[V] Rust installed. You may need to restart your shell or run 'source \$HOME/.cargo/env'.${NC}"
 fi
 
