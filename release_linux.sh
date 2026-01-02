@@ -54,6 +54,11 @@ if [ -f "$HOME/.cargo/env" ]; then
     source "$HOME/.cargo/env"
 fi
 
+# Add cargo bin to PATH explicitly if not present
+if [ -d "$HOME/.cargo/bin" ] && [[ ":$PATH:" != *":$HOME/.cargo/bin:"* ]]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
 if ! command -v cargo &> /dev/null; then
     echo "[Linux Build] Error: Rust compiler (cargo) not found. Rust is now a required dependency."
     echo "Please run './install_deps.sh' to install Rust."
