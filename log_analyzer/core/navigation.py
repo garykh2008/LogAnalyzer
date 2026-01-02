@@ -36,7 +36,7 @@ class NavigationController:
         self.app.target_start_index = target
 
         if immediate:
-            asyncio.create_task(self.app.immediate_render())
+            self.app.render_event.set()
 
     def scroll_by(self, delta):
         """Scrolls by a relative amount of lines."""
@@ -81,8 +81,7 @@ class NavigationController:
             # (though scroll_to does clamping too, which is fine)
             self.app.target_start_index = new_idx
 
-            if not self.app.is_updating:
-                asyncio.create_task(self.app.immediate_render())
+            self.app.render_event.set()
 
     def handle_scrollbar_tap(self, local_y):
         """Jumps to position based on click on track."""

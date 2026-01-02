@@ -79,6 +79,8 @@ class LogAnalyzerApp:
         self.current_start_index = 0
         self.needs_render = False
         self.is_updating = False
+        self.render_event = asyncio.Event()
+        self.is_dragging_scrollbar = False
 
         # 過濾器狀態
         self.filters = []
@@ -390,7 +392,9 @@ class LogAnalyzerApp:
         self.scrollbar_container = ft.Container(
             content=ft.GestureDetector(
                 content=self.scrollbar_stack,
+                on_pan_start=self.on_scrollbar_drag_start,
                 on_pan_update=self.on_scrollbar_drag,
+                on_pan_end=self.on_scrollbar_drag_end,
                 on_tap_down=self.on_scrollbar_tap
             ),
             width=self.scrollbar_width,
@@ -1007,25 +1011,28 @@ class LogAnalyzerApp:
     async def on_log_scroll(self, e: ft.ScrollEvent):
         self.navigator.handle_mouse_wheel(e.scroll_delta.y)
 
-    async def immediate_render(self):
+    async def immediate_render(self, force=False):
+        """
+        Updates the log view and scrollbar.
+        Optimized to skip scrollbar update if user is dragging it.
+        """
         if self.is_updating: return
         self.is_updating = True
         try:
-            # Phase 9: Scoped Update only
             self.current_start_index = self.target_start_index
             self.update_log_view()
-            self.sync_scrollbar_position()
 
-            # Update specific controls only - DO NOT use page.update()
+            # Optimized Scrollbar Sync:
+            # If the user is dragging the scrollbar, the thumb is already at the correct visual position (mouse).
+            # Updating it via logic might cause jitter/latency.
+            if not self.is_dragging_scrollbar:
+                self.sync_scrollbar_position()
+                self.scrollbar_stack.update()
+
+            # Update the heavy list
             self.log_list_column.update()
-            self.scrollbar_stack.update()
         finally:
             self.is_updating = False
-            # If target changed during the update, schedule next frame immediately
-            if self.current_start_index != self.target_start_index:
-                # Yield briefly to avoid event loop starvation
-                await asyncio.sleep(0.001)
-                asyncio.create_task(self.immediate_render())
 
     def update_log_view(self):
         """從 Engine 獲取當前視窗的數據並更新 UI"""
@@ -1361,6 +1368,15 @@ class LogAnalyzerApp:
 
         self.page.update()
 
+    async def on_scrollbar_drag_start(self, e: ft.DragStartEvent):
+        self.is_dragging_scrollbar = True
+
+    async def on_scrollbar_drag_end(self, e: ft.DragEndEvent):
+        self.is_dragging_scrollbar = False
+        # Sync final position
+        self.sync_scrollbar_position()
+        self.scrollbar_stack.update()
+
     async def on_scrollbar_drag(self, e: ft.DragUpdateEvent):
         delta = get_event_prop(e, 'delta_y', default=0)
         self.navigator.handle_scrollbar_drag(delta)
@@ -1373,15 +1389,34 @@ class LogAnalyzerApp:
         self.navigator.sync_scrollbar_position()
 
     async def render_loop(self):
-        """Background task that polls for index changes."""
+        """Optimized Render Loop using asyncio.Event for 60fps+ smooth scrolling."""
         while True:
             try:
-                # Still check for needs_render (for non-scroll updates like filters)
-                if self.needs_render:
-                    self.needs_render = False
-                    await self.immediate_render()
+                # Wait for a signal (scroll, filter change, etc.)
+                await self.render_event.wait()
+                self.render_event.clear()
 
-                await asyncio.sleep(0.1) # Much slower heartbeat, scroll is handled immediately
+                # Process updates
+                # We loop here to catch up with rapid changes (frame skipping)
+                # But we break if no new changes to let the event loop process network I/O
+                while True:
+                    if self.needs_render:
+                        self.needs_render = False
+                        # Force update even if indices match
+                        await self.immediate_render(force=True)
+                    elif self.current_start_index != self.target_start_index:
+                        await self.immediate_render()
+                    else:
+                        break
+
+                    # If target shifted while we were rendering, loop again immediately
+                    # otherwise break and wait for next event
+                    if self.current_start_index == self.target_start_index and not self.needs_render:
+                         break
+
+                    # Yield briefly to allow Flet to process the update message we just sent
+                    await asyncio.sleep(0.001)
+
             except Exception as e:
                 print(f"Render Loop Error: {e}")
                 await asyncio.sleep(1)
@@ -1471,6 +1506,7 @@ class LogAnalyzerApp:
 
         self.update_status_bar()
         self.needs_render = True
+        self.render_event.set()
 
     async def on_add_filter_click(self, e):
         # Instead of adding directly, open the dialog
@@ -1993,3 +2029,4 @@ class LogAnalyzerApp:
         self.show_toast(load_msg)
 
         self.needs_render = True
+        self.render_event.set()
