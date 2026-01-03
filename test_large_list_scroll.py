@@ -1,6 +1,5 @@
 import flet as ft
 import time
-import os
 
 def main(page: ft.Page):
     page.title = "Large File Scroll Test"
@@ -12,9 +11,6 @@ def main(page: ft.Page):
 
     # The list view that will hold the file content
     # spacing=0 helps compact the view like a log viewer
-    # item_extent helps with performance if rows have fixed height,
-    # but strictly speaking text wrap might vary height.
-    # For a log viewer test, usually lines are single height.
     log_list = ft.ListView(
         expand=True,
         spacing=0,
@@ -25,7 +21,7 @@ def main(page: ft.Page):
     # Loading indicator
     progress_bar = ft.ProgressBar(visible=False)
 
-    def on_file_picked(e: ft.FilePickerResultEvent):
+    def on_file_picked(e):
         if not e.files:
             return
 
@@ -38,15 +34,11 @@ def main(page: ft.Page):
 
         try:
             # Read all lines
-            # For extremely large files, one might want to use a generator
-            # or read in chunks, but to test ListView's capability to handle
-            # a large list of controls, we'll load them all.
             with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                 lines = f.readlines()
 
             # Create controls
             # We use ft.Text for each line.
-            # Using a list comprehension is faster than a loop with append.
             log_list.controls = [ft.Text(line.rstrip(), font_family="Consolas") for line in lines]
 
             end_time = time.time()
@@ -97,4 +89,4 @@ def main(page: ft.Page):
     )
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.run(main)
