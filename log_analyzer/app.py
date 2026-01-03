@@ -342,11 +342,11 @@ class LogAnalyzerApp:
             )
             self.text_pool.append(c)
 
-        self.log_list_column = ft.Column(
+        self.log_list_column = ft.ListView(
             controls=self.text_pool,
             spacing=0,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            tight=True,
+            item_extent=self.ROW_HEIGHT,
+            padding=0,
         )
 
         self.log_display_column = ft.Container(
@@ -1362,6 +1362,10 @@ class LogAnalyzerApp:
                 if new_lines_per_page != self.LINES_PER_PAGE:
                     self.LINES_PER_PAGE = new_lines_per_page
                     self.update_log_view()
+
+            # Resize the ListView to fit exactly the visible lines, preventing internal scrolling
+            # This ensures the parent GestureDetector receives the scroll events for our virtual scroll
+            self.log_list_column.height = self.LINES_PER_PAGE * self.ROW_HEIGHT
 
             # Re-sync thumb position
             self.sync_scrollbar_position()
