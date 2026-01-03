@@ -21,11 +21,21 @@ def main(page: ft.Page):
     # Loading indicator
     progress_bar = ft.ProgressBar(visible=False)
 
-    def on_file_picked(e):
-        if not e.files:
+    async def pick_file_click(e):
+        try:
+            results = await file_picker.pick_files(
+                allow_multiple=False,
+                dialog_title="Select a log file"
+            )
+        except Exception as ex:
+            status_text.value = f"Error picking file: {str(ex)}"
+            page.update()
             return
 
-        file_path = e.files[0].path
+        if not results:
+            return
+
+        file_path = results[0].path
         status_text.value = f"Loading: {file_path}..."
         progress_bar.visible = True
         page.update()
@@ -34,11 +44,12 @@ def main(page: ft.Page):
 
         try:
             # Read all lines
+            # Note: synchronous I/O might block the UI loop for very large files.
+            # In a real async app, one might use aiofiles or run in executor.
             with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                 lines = f.readlines()
 
             # Create controls
-            # We use ft.Text for each line.
             log_list.controls = [ft.Text(line.rstrip(), font_family="Consolas") for line in lines]
 
             end_time = time.time()
@@ -55,8 +66,8 @@ def main(page: ft.Page):
             progress_bar.visible = False
             page.update()
 
-    # File Picker setup
-    file_picker = ft.FilePicker(on_result=on_file_picked)
+    # File Picker setup - No on_result argument in recent Flet versions
+    file_picker = ft.FilePicker()
     page.overlay.append(file_picker)
 
     # Layout
@@ -67,10 +78,7 @@ def main(page: ft.Page):
                     ft.ElevatedButton(
                         "Pick File",
                         icon=ft.icons.FOLDER_OPEN,
-                        on_click=lambda _: file_picker.pick_files(
-                            allow_multiple=False,
-                            dialog_title="Select a log file"
-                        )
+                        on_click=pick_file_click
                     ),
                     status_text,
                 ],
