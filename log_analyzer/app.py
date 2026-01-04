@@ -1745,7 +1745,7 @@ class LogAnalyzerApp:
 
             # Map to real idx
             if self.show_only_filtered and self.filtered_indices is not None:
-                if view_idx < len(self.filtered_indices):
+                if self.filtered_indices and view_idx < len(self.filtered_indices):
                     real_idx = self.filtered_indices[view_idx]
                 else:
                     continue
