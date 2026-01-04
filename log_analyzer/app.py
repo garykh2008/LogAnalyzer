@@ -77,10 +77,8 @@ class LogAnalyzerApp:
         self.last_render_time = 0
         self.target_start_index = 0
         self.current_start_index = 0
-        self.needs_render = False
-        self.is_updating = False
-        self.render_event = asyncio.Event()
-        self.is_dragging_scrollbar = False
+        self.loaded_count = 0
+        self.BATCH_SIZE = 1000
 
         # 過濾器狀態
         self.filters = []
@@ -186,7 +184,6 @@ class LogAnalyzerApp:
                 except: break
 
         asyncio.create_task(_heartbeat_serv())
-        asyncio.create_task(self.render_loop())
 
     async def _on_native_window_event(self, e):
         """處理底層視窗事件 (Flet 1.0+ API)。"""
@@ -343,16 +340,17 @@ class LogAnalyzerApp:
             self.text_pool.append(c)
 
         self.log_list_column = ft.ListView(
-            controls=self.text_pool,
+            expand=True,
             spacing=0,
             item_extent=self.ROW_HEIGHT,
             padding=0,
+            on_scroll_interval=10,
+            on_scroll=self.on_log_list_scroll,
         )
 
         self.log_display_column = ft.Container(
             content=ft.GestureDetector(
                 content=self.log_list_column,
-                on_scroll=self.on_log_scroll,
                 on_tap_down=self.on_log_area_tap,
                 on_double_tap=self.on_log_area_double_tap,
                 on_secondary_tap_down=self.on_log_area_secondary_tap,
@@ -362,57 +360,9 @@ class LogAnalyzerApp:
             bgcolor=colors["log_bg"],
         )
 
-        # --- 自定義捲軸 ---
-        self.scrollbar_width = 15
-        self.scrollbar_thumb_height = 50
-
-        self.scrollbar_thumb = ft.Container(
-            width=self.scrollbar_width,
-            height=self.scrollbar_thumb_height,
-            bgcolor=colors["scroll_thumb"],
-            border_radius=5,
-            top=0
-        )
-
-        self.scrollbar_track = ft.Container(
-            width=self.scrollbar_width,
-            bgcolor=colors["scroll_track"],
-            expand=True,
-        )
-
-        self.scrollbar_stack = ft.Stack(
-            controls=[
-                self.scrollbar_track,
-                self.scrollbar_thumb
-            ],
-            width=self.scrollbar_width,
-            expand=True
-        )
-
-        self.scrollbar_container = ft.Container(
-            content=ft.GestureDetector(
-                content=self.scrollbar_stack,
-                on_pan_start=self.on_scrollbar_drag_start,
-                on_pan_update=self.on_scrollbar_drag,
-                on_pan_end=self.on_scrollbar_drag_end,
-                on_tap_down=self.on_scrollbar_tap
-            ),
-            width=self.scrollbar_width,
-            bgcolor=colors["scroll_track"],
-            alignment=ft.Alignment(-1, -1)
-        )
-
         # Log 區域容器
         self.log_view_area = ft.Container(
-            content=ft.Row(
-                controls=[
-                    self.log_display_column,
-                    self.scrollbar_container
-                ],
-                spacing=0,
-                expand=True,
-                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
-            ),
+            content=self.log_display_column,
             expand=True,
             visible=False
         )
@@ -553,14 +503,6 @@ class LogAnalyzerApp:
             self.log_display_column.bgcolor = colors["log_bg"]
         if hasattr(self, "initial_content"):
             self.initial_content.bgcolor = colors["log_bg"]
-
-        # 8. 捲軸
-        if hasattr(self, "scrollbar_track"):
-            self.scrollbar_track.bgcolor = colors["scroll_track"]
-        if hasattr(self, "scrollbar_container"):
-            self.scrollbar_container.bgcolor = colors["scroll_track"]
-        if hasattr(self, "scrollbar_thumb"):
-            self.scrollbar_thumb.bgcolor = colors["scroll_thumb"]
 
     async def on_open_file_click(self, e):
         """開啟檔案對話框。"""
@@ -799,8 +741,7 @@ class LogAnalyzerApp:
              # Force recalculate layout metrics before updating view
              asyncio.create_task(self.on_resize(None))
 
-             self.update_log_view()
-             self.navigator.sync_scrollbar_position()
+             self.reload_log_view()
 
         # 重建 UI 後需確保過濾器列表正確渲染
         asyncio.create_task(self.render_filters())
@@ -873,7 +814,7 @@ class LogAnalyzerApp:
         self.search_bar.visible = False
         self.search_results = []
         self.current_search_idx = -1
-        self.update_log_view()
+        self.reload_log_view()
         self.page.update()
 
     async def on_find_next(self, e=None):
@@ -889,7 +830,7 @@ class LogAnalyzerApp:
         if not query:
             self.search_results = []
             self.current_search_idx = -1
-            self.update_log_view()
+            self.reload_log_view()
             return
 
         # Check if we need to perform a new search (query changed or results cleared)
@@ -995,7 +936,7 @@ class LogAnalyzerApp:
             self.show_toast(f"Switched to Full View to show result on line {target_raw_idx+1}")
 
         # Execute jump (this handles rendering)
-        self.jump_to_index(target_view_idx, update_slider=True, immediate=True, center=True)
+        self.jump_to_index(target_view_idx, immediate=True, center=True)
 
         # Ensure focus stays on search input if we are in search mode,
         # to allow repeated Enter presses to trigger on_submit
@@ -1008,95 +949,81 @@ class LogAnalyzerApp:
         self.search_bar_comp.search_results_count.value = text
         self.page.update()
 
-    async def on_log_scroll(self, e: ft.ScrollEvent):
-        self.navigator.handle_mouse_wheel(e.scroll_delta.y)
+    async def on_log_list_scroll(self, e: ft.OnScrollEvent):
+        """Handle native scrolling for infinite scroll behavior."""
+        if e.pixels >= e.max_scroll_extent - 100:
+            await self.load_more_logs()
 
-    async def immediate_render(self, force=False):
+    def reload_log_view(self, start_index=0):
         """
-        Updates the log view and scrollbar.
-        Optimized to skip scrollbar update if user is dragging it.
+        Resets and repopulates the ListView starting from a specific index.
+        This effectively 'teleports' the view window.
         """
-        if self.is_updating: return
-        self.is_updating = True
-        try:
-            self.current_start_index = self.target_start_index
-            self.update_log_view()
-
-            # Optimized Scrollbar Sync:
-            # If the user is dragging the scrollbar, the thumb is already at the correct visual position (mouse).
-            # Updating it via logic might cause jitter/latency.
-            if not self.is_dragging_scrollbar:
-                self.sync_scrollbar_position()
-                self.scrollbar_stack.update()
-
-            # Update the heavy list
-            self.log_list_column.update()
-        finally:
-            self.is_updating = False
-
-    def update_log_view(self):
-        """從 Engine 獲取當前視窗的數據並更新 UI"""
         if not self.log_engine: return
 
-        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
-
-        # PRE-CALCULATE filter colors
-        filter_color_cache = {}
-        if self.filters:
-            active_filters_objs = []
-            for f in self.filters:
-                if f.enabled and f.text:
-                    active_filters_objs.append(f)
-                    idx = len(active_filters_objs) - 1
-                    filter_color_cache[idx] = (
-                        adjust_color_for_theme(f.back_color, True, is_dark),
-                        adjust_color_for_theme(f.fore_color, False, is_dark)
-                    )
-
-        search_query = self.search_bar_comp.search_input.value.lower() if (self.search_bar.visible and self.search_bar_comp.search_input.value) else None
-
+        # Determine valid start index
         total_items = self.navigator.total_items
 
-        # Turbo Rendering Path: Optimized for minimum Python overhead and IPC payload
-        _get_lines_batch = getattr(self.log_engine, 'get_lines_batch', None)
-        _filtered_indices = self.filtered_indices
-        _show_filtered = self.show_only_filtered
-        _current_start_index = self.current_start_index
-        _selected_indices = self.selected_indices
-        _line_tags_codes = self.line_tags_codes
-        _text_pool = self.text_pool
-        _lines_per_page = self.LINES_PER_PAGE
+        # Improve Context: When jumping, we want to see lines BEFORE the target.
+        # So we shift the start index back by 50 lines (if possible).
+        context_lines = 50
+        adjusted_start = max(0, start_index - context_lines)
 
-        search_active = bool(search_query)
+        # Clamp to bounds
+        adjusted_start = max(0, min(adjusted_start, total_items - 1)) if total_items > 0 else 0
 
-        # 1. Prepare target indices for the current viewport
-        target_indices = []
-        for i in range(_lines_per_page):
-            view_idx = _current_start_index + i
-            if 0 <= view_idx < total_items:
-                real_idx = _filtered_indices[view_idx] if (_show_filtered and _filtered_indices is not None) else view_idx
+        self.loaded_count = adjusted_start # We start loading FROM here
+        self.log_list_column.controls.clear()
+
+        # Load first batch
+        asyncio.create_task(self.load_more_logs())
+
+    async def load_more_logs(self):
+        """Appends the next batch of logs to the ListView."""
+        if not self.log_engine: return
+
+        # Prevent concurrent loads if we wanted (not strictly needed with async/await on UI thread)
+        # But helpful to debounce
+        if hasattr(self, "_is_loading_more") and self._is_loading_more: return
+        self._is_loading_more = True
+
+        try:
+            total_items = self.navigator.total_items
+            if self.loaded_count >= total_items:
+                return
+
+            # Determine range
+            start_idx = self.loaded_count
+            end_idx = min(start_idx + self.BATCH_SIZE, total_items)
+
+            # Prepare indices
+            target_indices = []
+            for i in range(start_idx, end_idx):
+                real_idx = self.filtered_indices[i] if (self.show_only_filtered and self.filtered_indices is not None) else i
                 target_indices.append(real_idx)
 
-        # 2. Batch fetch text and log levels from Rust in a single IPC call
-        batch_data = []
-        if target_indices and _get_lines_batch:
-            batch_data = _get_lines_batch(target_indices)
+            if not target_indices: return
 
-        # 3. Static style table - resolved to local variables for fast lookup
-        c_default = "#d4d4d4" if is_dark else "#1e1e1e"
-        c_error = "#ff6b6b"
-        c_warn = "#ffd93d"
-        c_info = "#4dabf7"
-        c_select_bg = "#264f78" if is_dark else "#b3d7ff"
-        c_trans = ft.Colors.TRANSPARENT
+            # Fetch Data
+            batch_data = []
+            if getattr(self.log_engine, 'get_lines_batch', None):
+                batch_data = self.log_engine.get_lines_batch(target_indices)
 
-        # 4. Render Loop with Strict Dirty Checking to minimize JSON Patch size
-        for i in range(self.TEXT_POOL_SIZE):
-            row_container = _text_pool[i]
-            text_control = row_container.content
+            # Colors setup
+            is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+            c_default = "#d4d4d4" if is_dark else "#1e1e1e"
+            c_error = "#ff6b6b"
+            c_warn = "#ffd93d"
+            c_info = "#4dabf7"
+            c_select_bg = "#264f78" if is_dark else "#b3d7ff"
 
-            if i < len(batch_data):
-                line_data, level_code = batch_data[i]
+            # Search setup
+            search_query = self.search_bar_comp.search_input.value
+            search_active = bool(search_query and self.search_bar.visible)
+
+            # Prepare controls
+            new_controls = []
+            for i, (line_data, level_code) in enumerate(batch_data):
                 real_idx = target_indices[i]
 
                 # Colors logic
@@ -1105,64 +1032,88 @@ class LogAnalyzerApp:
                 elif level_code == 3: base_color = c_info
                 else: base_color = c_default
 
-                bg_color = None
-                if _line_tags_codes is not None and real_idx < len(_line_tags_codes):
-                    tag_code = _line_tags_codes[real_idx]
-                    if tag_code >= 2:
-                        af_idx = tag_code - 2
-                        if af_idx in filter_color_cache:
-                            bg_color, base_color = filter_color_cache[af_idx]
-                    elif tag_code == 1:
-                        base_color = ft.Colors.GREY_500 if is_dark else ft.Colors.GREY_400
+                # Selection BG
+                bg_color = ft.Colors.TRANSPARENT
+                if real_idx in self.selected_indices:
+                     bg_color = c_select_bg
 
-                if real_idx in _selected_indices:
-                    bg_color = c_select_bg
+                t = ft.Text(
+                    font_family="Consolas, monospace",
+                    size=self.FONT_SIZE,
+                    no_wrap=True,
+                    color=base_color,
+                )
 
-                # Only touch Flet properties if they MUST change
-                target_bg = bg_color if bg_color else c_trans
-                if row_container.bgcolor != target_bg:
-                    row_container.bgcolor = target_bg
-
-                if not row_container.visible:
-                    row_container.visible = True
-
-                if text_control.color != base_color:
-                    text_control.color = base_color
-
-                if search_active and search_query in line_data.lower():
-                    # Search Highlight Path
+                if search_active and search_query.lower() in line_data.lower():
+                    # Search Highlight Logic
                     h_bg = ft.Colors.YELLOW
                     h_fg = ft.Colors.BLACK
-                    if bg_color and get_luminance(bg_color) > 0.6:
-                        h_bg = ft.Colors.BLUE_800
-                        h_fg = ft.Colors.WHITE
+                    if bg_color != ft.Colors.TRANSPARENT and get_luminance(bg_color) > 0.6:
+                         h_bg = ft.Colors.BLUE_800
+                         h_fg = ft.Colors.WHITE
 
-                    parts = re.split(f"({re.escape(search_query)})", line_data, flags=re.IGNORECASE)
-                    text_control.value = ""
-                    text_control.spans = [
-                        ft.TextSpan(p, style=ft.TextStyle(bgcolor=h_bg, color=h_fg, weight=ft.FontWeight.BOLD))
-                        if p.lower() == search_query else ft.TextSpan(p, style=ft.TextStyle(color=base_color))
-                        for p in parts
-                    ]
+                    try:
+                        parts = re.split(f"({re.escape(search_query)})", line_data, flags=re.IGNORECASE)
+                        t.spans = [
+                            ft.TextSpan(p, style=ft.TextStyle(bgcolor=h_bg, color=h_fg, weight=ft.FontWeight.BOLD))
+                            if p.lower() == search_query.lower() else ft.TextSpan(p, style=ft.TextStyle(color=base_color))
+                            for p in parts
+                        ]
+                    except Exception:
+                        t.value = line_data
                 else:
-                    # Optimized Path: Simple Text
-                    if text_control.spans:
-                        text_control.spans = []
+                    t.value = line_data
 
-                    target_val = line_data if line_data.strip() else " "
-                    if text_control.value != target_val:
-                        text_control.value = target_val
-            else:
-                if row_container.visible:
-                    row_container.visible = False
-                    row_container.bgcolor = c_trans
-                    text_control.value = ""
+                c = ft.Container(
+                    content=t,
+                    height=self.ROW_HEIGHT,
+                    alignment=ft.Alignment(-1, 0),
+                    bgcolor=bg_color,
+                    on_click=self.on_log_row_click,
+                    data=start_idx + i
+                )
+                new_controls.append(c)
 
-        # REMOVED page.update() here, it's now in the render_loop
+            self.log_list_column.controls.extend(new_controls)
+            self.loaded_count = end_idx
+            self.log_list_column.update()
+
+        finally:
+            self._is_loading_more = False
+
+    async def on_log_row_click(self, e):
+        # Handle click on row to select
+        # Use data as index
+        view_idx = e.control.data
+
+        # Map to real idx
+        if self.show_only_filtered and self.filtered_indices is not None:
+             real_idx = self.filtered_indices[view_idx]
+        else:
+             real_idx = view_idx
+
+        self.selected_indices = {real_idx}
+        self.selection_anchor = real_idx
+
+        # Visual update is hard with ListView without rebuilding or finding control
+        # For performance, maybe we don't highlight background on tap?
+        # Or we rely on rebuilding if user really needs it.
+        # Ideally we iterate controls to unset old and set new, but that's slow.
+        # User accepted standard ListView behavior. Selection highlight is secondary to scroll perf.
+        # We'll just show status.
+        self.status_bar_comp.update_status(f"Selected Line {real_idx + 1}")
 
     def jump_to_index(self, idx, update_slider=True, immediate=False, center=False):
-        # Delegate to navigator
-        self.navigator.scroll_to(idx, immediate=immediate, center=center)
+        """
+        Jumps to a specific line index.
+        In the new ListView architecture, this means reloading the view starting from that index.
+        """
+        # Calculate start index to show context if centering
+        target_idx = int(idx)
+        if center:
+            target_idx = max(0, target_idx - 10) # Show some context lines above
+
+        self.reload_log_view(start_index=target_idx)
 
     async def on_slider_change(self, e):
         # Time-based debounce is still useful but less critical if we don't update slider
@@ -1361,69 +1312,19 @@ class LogAnalyzerApp:
 
                 if new_lines_per_page != self.LINES_PER_PAGE:
                     self.LINES_PER_PAGE = new_lines_per_page
-                    self.update_log_view()
+                    # Only reload if we are in initial state or small view,
+                    # otherwise infinite scroll handles it.
+                    # But actually reload_log_view clears the list, so we might skip this.
+                    pass
 
-            # Resize the ListView to fit exactly the visible lines, preventing internal scrolling
-            # This ensures the parent GestureDetector receives the scroll events for our virtual scroll
-            self.log_list_column.height = self.LINES_PER_PAGE * self.ROW_HEIGHT
-
-            # Re-sync thumb position
-            self.sync_scrollbar_position()
+            # No longer need manual height setting or sync
+            pass
 
         self.page.update()
 
-    async def on_scrollbar_drag_start(self, e: ft.DragStartEvent):
-        self.is_dragging_scrollbar = True
-
-    async def on_scrollbar_drag_end(self, e: ft.DragEndEvent):
-        self.is_dragging_scrollbar = False
-        # Sync final position
-        self.sync_scrollbar_position()
-        self.scrollbar_stack.update()
-
-    async def on_scrollbar_drag(self, e: ft.DragUpdateEvent):
-        delta = get_event_prop(e, 'delta_y', default=0)
-        self.navigator.handle_scrollbar_drag(delta)
-
-    async def on_scrollbar_tap(self, e: ft.TapEvent):
-        local_y = get_event_prop(e, 'local_y', default=0)
-        self.navigator.handle_scrollbar_tap(local_y)
-
     def sync_scrollbar_position(self):
-        self.navigator.sync_scrollbar_position()
-
-    async def render_loop(self):
-        """Optimized Render Loop using asyncio.Event for 60fps+ smooth scrolling."""
-        while True:
-            try:
-                # Wait for a signal (scroll, filter change, etc.)
-                await self.render_event.wait()
-                self.render_event.clear()
-
-                # Process updates
-                # We loop here to catch up with rapid changes (frame skipping)
-                # But we break if no new changes to let the event loop process network I/O
-                while True:
-                    if self.needs_render:
-                        self.needs_render = False
-                        # Force update even if indices match
-                        await self.immediate_render(force=True)
-                    elif self.current_start_index != self.target_start_index:
-                        await self.immediate_render()
-                    else:
-                        break
-
-                    # If target shifted while we were rendering, loop again immediately
-                    # otherwise break and wait for next event
-                    if self.current_start_index == self.target_start_index and not self.needs_render:
-                         break
-
-                    # Yield briefly to allow Flet to process the update message we just sent
-                    await asyncio.sleep(0.001)
-
-            except Exception as e:
-                print(f"Render Loop Error: {e}")
-                await asyncio.sleep(1)
+        # Deprecated: Native scrollbar handles itself
+        pass
 
     async def toggle_show_filtered(self, e=None):
         self.show_only_filtered = not self.show_only_filtered
@@ -1509,8 +1410,7 @@ class LogAnalyzerApp:
         self.jump_to_index(0, update_slider=True)
 
         self.update_status_bar()
-        self.needs_render = True
-        self.render_event.set()
+        self.reload_log_view()
 
     async def on_add_filter_click(self, e):
         # Instead of adding directly, open the dialog
@@ -2025,12 +1925,9 @@ class LogAnalyzerApp:
         await self.on_resize(None)
         await self._perform_filtering_logic() # 直接呼叫邏輯避免二次 Status 更新
 
-        self.update_log_view()
+        self.reload_log_view()
         engine_type = "Rust" if HAS_RUST else "Mock"
 
         # Show load stats in SnackBar instead of overwriting Status Bar
         load_msg = f"[{engine_type}] Loaded {os.path.basename(path)} ({line_count:,} lines) in {duration:.3f}s"
         self.show_toast(load_msg)
-
-        self.needs_render = True
-        self.render_event.set()
