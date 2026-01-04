@@ -1133,12 +1133,8 @@ class LogAnalyzerApp:
         self.selected_indices = {real_idx}
         self.selection_anchor = real_idx
 
-        # Visual update is hard with ListView without rebuilding or finding control
-        # For performance, maybe we don't highlight background on tap?
-        # Or we rely on rebuilding if user really needs it.
-        # Ideally we iterate controls to unset old and set new, but that's slow.
-        # User accepted standard ListView behavior. Selection highlight is secondary to scroll perf.
-        # We'll just show status.
+        # Refresh visual styles to show selection
+        await self.refresh_visible_rows_style()
         self.status_bar_comp.update_status(f"Selected Line {real_idx + 1}")
 
     def jump_to_index(self, idx, update_slider=True, immediate=False, center=False):
@@ -1638,129 +1634,63 @@ class LogAnalyzerApp:
         return int(local_y / self.ROW_HEIGHT)
 
     async def on_log_area_double_tap(self, e):
-        # Double tap event in Flet doesn't provide coordinates,
-        # so we use the one captured by the last on_tap_down
-        local_y = getattr(self, "last_log_tap_y", 0)
-        row_idx = self._get_row_index_from_local_y(local_y)
-
-        class MockEvent:
-            def __init__(self, data):
-                self.control = type('obj', (object,), {'data': data})
-
-        mock_e = MockEvent(row_idx)
-        await self.on_log_double_click(mock_e)
-
-    async def on_log_double_click(self, e):
-        row_idx = e.control.data
-        view_idx = self.current_start_index + row_idx
-
-        # Determine total items
-        total_items = self.navigator.total_items
-
-        if view_idx >= total_items: return
-
-        # Map to real_idx
-        if self.show_only_filtered and self.filtered_indices is not None:
-            real_idx = self.filtered_indices[view_idx]
-        else:
-            real_idx = view_idx
-
-        # Get line text from engine
-        if self.log_engine:
-            line_text = self.log_engine.get_line(real_idx)
-            await self.open_filter_dialog(initial_text=line_text.strip())
+        # Native scrolling makes coordinates unreliable for row detection.
+        # Double tap logic should be handled by row items if possible.
+        pass
 
     async def on_log_area_tap(self, e: ft.TapEvent):
+        # Only focus the pane. Selection is handled by row items.
         await self.set_active_pane("log")
 
-        # Calculate which row was clicked based on local_y
-        local_y = get_event_prop(e, "local_y", 0)
-        self.last_log_tap_y = local_y # Store for double tap usage
-
-        row_idx = self._get_row_index_from_local_y(local_y)
-
-        # --- WINDOWS ULTIMATE FIX: Direct OS Query ---
-        ctrl = False
-        shift = False
-
-        if sys.platform == "win32":
-            import ctypes
-            # VK_CONTROL = 0x11, VK_SHIFT = 0x10
-            # If the high-order bit is 1, the key is down (0x8000)
-            ctrl = (ctypes.windll.user32.GetKeyState(0x11) & 0x8000) != 0
-            shift = (ctypes.windll.user32.GetKeyState(0x10) & 0x8000) != 0
-        else:
-            # Fallback for other platforms
-            ctrl = getattr(e, "ctrl", False)
-            shift = getattr(e, "shift", False)
-
-        # Call the existing click handler with mocked row_idx
-        class MockEvent:
-            def __init__(self, data, ctrl, shift):
-                self.control = type('obj', (object,), {'data': data})
-                self.ctrl = ctrl
-                self.shift = shift
-
-        mock_e = MockEvent(row_idx, ctrl, shift)
-        await self.on_log_click(mock_e)
-
     async def on_log_area_secondary_tap(self, e: ft.TapEvent):
-        local_y = get_event_prop(e, "local_y", 0)
-        row_idx = self._get_row_index_from_local_y(local_y)
+        pass
 
-        class MockEvent:
-            def __init__(self, data):
-                self.control = type('obj', (object,), {'data': data})
+    async def refresh_visible_rows_style(self):
+        """Re-applies background colors (selection/filters) to visible rows."""
+        if not self.log_list_column.controls: return
 
-        mock_e = MockEvent(row_idx)
-        await self.on_log_right_click(mock_e)
+        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+        c_select_bg = "#264f78" if is_dark else "#b3d7ff"
 
-    async def on_log_click(self, e):
-        row_idx = e.control.data
-        view_idx = self.current_start_index + row_idx
+        # Prepare filter cache
+        filter_cache = getattr(self, "_filter_color_cache", {})
+        _line_tags_codes = self.line_tags_codes
 
-        # Determine total items matching update_log_view logic
-        total_items = self.navigator.total_items
+        for control in self.log_list_column.controls:
+            # control is Container
+            # control.data is the view index (int)
+            view_idx = control.data
 
-        if view_idx >= total_items: return
-
-        # Map to real_idx matching reload_log_view logic
-        if self.show_only_filtered and self.filtered_indices is not None:
-            real_idx = self.filtered_indices[view_idx]
-        else:
-            real_idx = view_idx
-
-        # Determine modifiers passed from the tap handler
-        ctrl = getattr(e, "ctrl", False)
-        shift = getattr(e, "shift", False)
-
-        if shift and self.selection_anchor != -1:
-            # Range Selection
-            start_view = self._get_view_index_from_raw(self.selection_anchor)
-            if start_view is not None:
-                low, high = min(start_view, view_idx), max(start_view, view_idx)
-                if not ctrl: self.selected_indices.clear()
-                for i in range(low, high + 1):
-                    # 正確映射回真實索引
-                    if self.show_only_filtered and self.filtered_indices is not None:
-                        ridx = self.filtered_indices[i]
-                    else:
-                        ridx = i
-                    self.selected_indices.add(ridx)
-                # 注意：範圍選取後不更新 selection_anchor，保留原始起點以供連續選取
-        elif ctrl:
-            # Toggle Selection
-            if real_idx in self.selected_indices:
-                self.selected_indices.remove(real_idx)
+            # Map to real idx
+            if self.show_only_filtered and self.filtered_indices is not None:
+                if view_idx < len(self.filtered_indices):
+                    real_idx = self.filtered_indices[view_idx]
+                else:
+                    continue
             else:
-                self.selected_indices.add(real_idx)
-            self.selection_anchor = real_idx
-        else:
-            # Single Selection
-            self.selected_indices = {real_idx}
-            self.selection_anchor = real_idx
+                real_idx = view_idx
 
-        await self.immediate_render()
+            # Determine BG
+            bg_color = ft.Colors.TRANSPARENT
+
+            # Filter BG
+            if _line_tags_codes is not None and real_idx < len(_line_tags_codes):
+                tag_code = _line_tags_codes[real_idx]
+                if tag_code >= 2:
+                    af_idx = tag_code - 2
+                    if af_idx in filter_cache:
+                        f_bg, _ = filter_cache[af_idx]
+                        if f_bg: bg_color = f_bg
+
+            # Selection BG overrides
+            if real_idx in self.selected_indices:
+                bg_color = c_select_bg
+
+            # Apply if changed
+            if control.bgcolor != bg_color:
+                control.bgcolor = bg_color
+
+        self.log_list_column.update()
 
     def _get_view_index_from_raw(self, raw_idx):
         """根據目前的視圖模式，將原始索引映射為視圖索引。"""
