@@ -21,11 +21,22 @@ def main(page: ft.Page):
     # Loading indicator
     progress_bar = ft.ProgressBar(visible=False)
 
-    def on_file_picked(e):
-        if not e.files:
+    async def pick_file_click(e):
+        try:
+            # In Flet 0.80.1+, we instantiate FilePicker on demand and await pick_files
+            results = await ft.FilePicker().pick_files(
+                allow_multiple=False,
+                dialog_title="Select a log file"
+            )
+        except Exception as ex:
+            status_text.value = f"Error picking file: {str(ex)}"
+            page.update()
             return
 
-        file_path = e.files[0].path
+        if not results:
+            return
+
+        file_path = results[0].path
         status_text.value = f"Loading: {file_path}..."
         progress_bar.visible = True
         page.update()
@@ -38,7 +49,6 @@ def main(page: ft.Page):
                 lines = f.readlines()
 
             # Create controls
-            # We use ft.Text for each line.
             log_list.controls = [ft.Text(line.rstrip(), font_family="Consolas") for line in lines]
 
             end_time = time.time()
@@ -55,25 +65,15 @@ def main(page: ft.Page):
             progress_bar.visible = False
             page.update()
 
-    # File Picker setup
-    # Note: older versions or specific environments might issue TypeError if on_result is passed to __init__
-    # so we assign it after instantiation to be safe.
-    file_picker = ft.FilePicker()
-    file_picker.on_result = on_file_picked
-    page.overlay.append(file_picker)
-
     # Layout
     header = ft.Column(
         controls=[
             ft.Row(
                 controls=[
                     ft.ElevatedButton(
-                        "Pick File",
+                        content="Pick File",
                         icon=ft.Icons.FOLDER_OPEN,
-                        on_click=lambda _: file_picker.pick_files(
-                            allow_multiple=False,
-                            dialog_title="Select a log file"
-                        )
+                        on_click=pick_file_click
                     ),
                     status_text,
                 ],
