@@ -79,6 +79,7 @@ class LogAnalyzerApp:
         self.current_start_index = 0
         self.loaded_count = 0
         self.BATCH_SIZE = 200
+        self.last_scroll_time = 0
 
         # 過濾器狀態
         self.filters = []
@@ -955,6 +956,12 @@ class LogAnalyzerApp:
 
     async def on_log_list_scroll(self, e: ft.OnScrollEvent):
         """Handle native scrolling for infinite scroll behavior."""
+        # Debounce scroll events to prevent freeze
+        now = time.time()
+        if now - self.last_scroll_time < 0.05:
+            return
+        self.last_scroll_time = now
+
         if e.pixels >= e.max_scroll_extent - 100:
             await self.load_more_logs()
 
@@ -1398,6 +1405,13 @@ class LogAnalyzerApp:
         else:
             # Selection is within viewport, just redraw highlight
             await self.refresh_visible_rows_style()
+            self.status_bar_comp.update_status(f"Selected Line {new_raw_idx + 1}")
+
+            # Ensure selection is in view
+            try:
+                self.log_list_column.scroll_to(index=new_view_idx, duration=0)
+            except Exception: pass
+
             self.page.update()
 
     async def on_resize(self, e):
