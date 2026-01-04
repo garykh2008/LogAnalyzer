@@ -78,6 +78,7 @@ class LogAnalyzerApp:
         self.target_start_index = 0
         self.current_start_index = 0
         self.loaded_count = 0
+        self.list_view_offset = 0
         self.BATCH_SIZE = 200
         self.last_scroll_time = 0
 
@@ -956,6 +957,9 @@ class LogAnalyzerApp:
 
     async def on_log_list_scroll(self, e: ft.OnScrollEvent):
         """Handle native scrolling for infinite scroll behavior."""
+        # Debug Lag
+        # print(f"[DEBUG] Scroll: pixels={e.pixels}, max={e.max_scroll_extent}")
+
         # Debounce scroll events to prevent freeze
         now = time.time()
         if now - self.last_scroll_time < 0.05:
@@ -963,6 +967,7 @@ class LogAnalyzerApp:
         self.last_scroll_time = now
 
         if e.pixels >= e.max_scroll_extent - 100:
+            print("[DEBUG] Triggering load_more_logs from scroll")
             await self.load_more_logs()
 
     def reload_log_view(self, start_index=0):
@@ -999,7 +1004,10 @@ class LogAnalyzerApp:
         adjusted_start = max(0, min(adjusted_start, total_items - 1)) if total_items > 0 else 0
 
         self.loaded_count = adjusted_start # We start loading FROM here
+        self.list_view_offset = adjusted_start # Store offset for scroll calc
         self.log_list_column.controls.clear()
+
+        print(f"[DEBUG] reload_log_view: start={adjusted_start}")
 
         # Load first batch
         asyncio.create_task(self.load_more_logs())
@@ -1014,6 +1022,7 @@ class LogAnalyzerApp:
         self._is_loading_more = True
 
         try:
+            t0 = time.time()
             total_items = self.navigator.total_items
             if self.loaded_count >= total_items:
                 return
@@ -1123,6 +1132,9 @@ class LogAnalyzerApp:
             self.log_list_column.controls.extend(new_controls)
             self.loaded_count = end_idx
             self.log_list_column.update()
+
+            t1 = time.time()
+            print(f"[DEBUG] load_more_logs: loaded {len(new_controls)} items in {t1-t0:.4f}s. Total loaded: {self.loaded_count}")
 
             # Yield slightly to prevent UI freeze on rapid updates
             await asyncio.sleep(0.01)
@@ -1395,24 +1407,31 @@ class LogAnalyzerApp:
         self.selection_anchor = new_raw_idx
 
         # --- Sync Viewport (Scroll to follow selection) ---
-        # We use immediate=True for keyboard to make it feel snappy
-        if new_view_idx < self.target_start_index:
-            # Scroll up to show the new line at the top
-            self.jump_to_index(new_view_idx, immediate=True)
-        elif new_view_idx >= self.target_start_index + self.LINES_PER_PAGE:
-            # Scroll down to show the new line at the bottom
-            self.jump_to_index(new_view_idx - self.LINES_PER_PAGE + 1, immediate=True)
-        else:
-            # Selection is within viewport, just redraw highlight
+        # Note: self.target_start_index might be stale or not match list_view_offset logic
+        # We simplify: if selection is far from loaded window, jump.
+        # If it is inside, scroll to it.
+
+        # We check if new_view_idx is within the currently loaded items in ListView
+        # ListView contains items from self.list_view_offset to self.loaded_count
+
+        if self.list_view_offset <= new_view_idx < self.loaded_count:
+            # It is in the list, just scroll to it
             await self.refresh_visible_rows_style()
             self.status_bar_comp.update_status(f"Selected Line {new_raw_idx + 1}")
 
-            # Ensure selection is in view
             try:
-                self.log_list_column.scroll_to(index=new_view_idx, duration=0)
-            except Exception: pass
+                relative_idx = new_view_idx - self.list_view_offset
+                print(f"[DEBUG] Keyboard Scroll: view_idx={new_view_idx}, offset={self.list_view_offset}, rel={relative_idx}")
+                self.log_list_column.scroll_to(index=relative_idx, duration=0)
+            except Exception as ex:
+                print(f"[DEBUG] Scroll Error: {ex}")
 
             self.page.update()
+        else:
+            # Outside loaded range, jump (reload)
+            print(f"[DEBUG] Keyboard Jump: view_idx={new_view_idx}")
+            self.jump_to_index(new_view_idx, immediate=True)
+            self.status_bar_comp.update_status(f"Selected Line {new_raw_idx + 1}")
 
     async def on_resize(self, e):
         # Update scrollbar track height info
