@@ -78,7 +78,7 @@ class LogAnalyzerApp:
         self.target_start_index = 0
         self.current_start_index = 0
         self.loaded_count = 0
-        self.BATCH_SIZE = 1000
+        self.BATCH_SIZE = 200
 
         # 過濾器狀態
         self.filters = []
@@ -965,6 +965,21 @@ class LogAnalyzerApp:
         """
         if not self.log_engine: return
 
+        # PRE-CALCULATE filter colors logic
+        # We need this to ensure we have fresh colors when reloading view
+        self._filter_color_cache = {}
+        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+        if self.filters:
+            active_filters_objs = []
+            for f in self.filters:
+                if f.enabled and f.text:
+                    active_filters_objs.append(f)
+                    idx = len(active_filters_objs) - 1
+                    self._filter_color_cache[idx] = (
+                        adjust_color_for_theme(f.back_color, True, is_dark),
+                        adjust_color_for_theme(f.fore_color, False, is_dark)
+                    )
+
         # Determine valid start index
         total_items = self.navigator.total_items
 
@@ -1021,6 +1036,10 @@ class LogAnalyzerApp:
             c_info = "#4dabf7"
             c_select_bg = "#264f78" if is_dark else "#b3d7ff"
 
+            # Use cached filter colors if available
+            filter_cache = getattr(self, "_filter_color_cache", {})
+            _line_tags_codes = self.line_tags_codes
+
             # Search setup
             search_query = self.search_bar_comp.search_input.value
             search_active = bool(search_query and self.search_bar.visible)
@@ -1036,8 +1055,20 @@ class LogAnalyzerApp:
                 elif level_code == 3: base_color = c_info
                 else: base_color = c_default
 
-                # Selection BG
+                # Apply Filter Colors
                 bg_color = ft.Colors.TRANSPARENT
+                if _line_tags_codes is not None and real_idx < len(_line_tags_codes):
+                    tag_code = _line_tags_codes[real_idx]
+                    if tag_code >= 2:
+                        af_idx = tag_code - 2
+                        if af_idx in filter_cache:
+                            f_bg, f_fg = filter_cache[af_idx]
+                            if f_bg: bg_color = f_bg
+                            if f_fg: base_color = f_fg
+                    elif tag_code == 1:
+                        base_color = ft.Colors.GREY_500 if is_dark else ft.Colors.GREY_400
+
+                # Selection BG overrides filter BG
                 if real_idx in self.selected_indices:
                      bg_color = c_select_bg
 
@@ -1081,6 +1112,9 @@ class LogAnalyzerApp:
             self.log_list_column.controls.extend(new_controls)
             self.loaded_count = end_idx
             self.log_list_column.update()
+
+            # Yield slightly to prevent UI freeze on rapid updates
+            await asyncio.sleep(0.01)
 
         finally:
             self._is_loading_more = False
