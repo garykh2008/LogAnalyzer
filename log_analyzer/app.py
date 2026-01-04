@@ -789,7 +789,7 @@ class LogAnalyzerApp:
 
         if self.log_engine:
             # 更新 Log 每一行的顏色
-            self.update_log_view()
+            self.reload_log_view()
             # 更新時間軸已移除 (Timeline removed)
 
         # 5. 保存設定並更新
@@ -1319,6 +1319,8 @@ class LogAnalyzerApp:
                     # Only reload if we are in initial state or small view,
                     # otherwise infinite scroll handles it.
                     # But actually reload_log_view clears the list, so we might skip this.
+                    # If we really want to force update on resize, we can call:
+                    # self.reload_log_view(self.current_start_index)
                     pass
 
             # No longer need manual height setting or sync
