@@ -1099,12 +1099,16 @@ class LogAnalyzerApp:
                 else:
                     t.value = line_data
 
-                c = ft.Container(
-                    content=t,
-                    height=self.ROW_HEIGHT,
-                    alignment=ft.Alignment(-1, 0),
-                    bgcolor=bg_color,
-                    on_click=self.on_log_row_click,
+                c = ft.GestureDetector(
+                    content=ft.Container(
+                        content=t,
+                        height=self.ROW_HEIGHT,
+                        alignment=ft.Alignment(-1, 0),
+                        bgcolor=bg_color,
+                    ),
+                    on_tap=self.on_log_row_tap,
+                    on_double_tap=self.on_log_row_double_tap,
+                    on_secondary_tap=self.on_log_row_right_click,
                     data=start_idx + i
                 )
                 new_controls.append(c)
@@ -1119,9 +1123,8 @@ class LogAnalyzerApp:
         finally:
             self._is_loading_more = False
 
-    async def on_log_row_click(self, e):
-        # Handle click on row to select
-        # Use data as index
+    async def on_log_row_tap(self, e):
+        # view_idx is in e.control.data because GestureDetector stores user data
         view_idx = e.control.data
 
         # Map to real idx
@@ -1130,12 +1133,90 @@ class LogAnalyzerApp:
         else:
              real_idx = view_idx
 
-        self.selected_indices = {real_idx}
-        self.selection_anchor = real_idx
+        # Check modifiers
+        ctrl = False
+        shift = False
+
+        # Try to get modifiers from event if available (Flet > 0.21?)
+        # Or fall back to ctypes/state
+        if sys.platform == "win32":
+            import ctypes
+            ctrl = (ctypes.windll.user32.GetKeyState(0x11) & 0x8000) != 0
+            shift = (ctypes.windll.user32.GetKeyState(0x10) & 0x8000) != 0
+        else:
+            # Fallback, or check if event has modifiers
+            pass
+
+        if shift and self.selection_anchor != -1:
+            # Range select
+            start_view = self._get_view_index_from_raw(self.selection_anchor)
+            # start_view might be None if filtered out, handle gracefully
+            if start_view is not None:
+                low, high = min(start_view, view_idx), max(start_view, view_idx)
+                if not ctrl: self.selected_indices.clear()
+
+                # We need to map view range back to real indices
+                for i in range(low, high + 1):
+                    if self.show_only_filtered and self.filtered_indices is not None:
+                        ridx = self.filtered_indices[i]
+                    else:
+                        ridx = i
+                    self.selected_indices.add(ridx)
+        elif ctrl:
+            # Toggle select
+            if real_idx in self.selected_indices:
+                self.selected_indices.remove(real_idx)
+            else:
+                self.selected_indices.add(real_idx)
+            self.selection_anchor = real_idx
+        else:
+            # Single select
+            self.selected_indices = {real_idx}
+            self.selection_anchor = real_idx
 
         # Refresh visual styles to show selection
         await self.refresh_visible_rows_style()
-        self.status_bar_comp.update_status(f"Selected Line {real_idx + 1}")
+
+        count = len(self.selected_indices)
+        if count > 1:
+            self.status_bar_comp.update_status(f"Selected {count} lines")
+        else:
+            self.status_bar_comp.update_status(f"Selected Line {real_idx + 1}")
+
+    async def on_log_row_double_tap(self, e):
+        view_idx = e.control.data
+        if self.show_only_filtered and self.filtered_indices is not None:
+             real_idx = self.filtered_indices[view_idx]
+        else:
+             real_idx = view_idx
+
+        if self.log_engine:
+            line_text = self.log_engine.get_line(real_idx)
+            await self.open_filter_dialog(initial_text=line_text.strip())
+
+    async def on_log_row_right_click(self, e):
+        view_idx = e.control.data
+        if self.show_only_filtered and self.filtered_indices is not None:
+             real_idx = self.filtered_indices[view_idx]
+        else:
+             real_idx = view_idx
+
+        # Select row if not already selected
+        if real_idx not in self.selected_indices:
+            self.selected_indices = {real_idx}
+            self.selection_anchor = real_idx
+            await self.refresh_visible_rows_style()
+
+        def on_copy():
+            asyncio.create_task(self.copy_selected_lines())
+
+        def on_add_filter():
+            # Trigger double tap logic
+            if self.log_engine:
+                line_text = self.log_engine.get_line(real_idx)
+                asyncio.create_task(self.open_filter_dialog(initial_text=line_text.strip()))
+
+        self.dialogs.show_log_context_menu(real_idx, on_copy, on_add_filter)
 
     def jump_to_index(self, idx, update_slider=True, immediate=False, center=False):
         """
