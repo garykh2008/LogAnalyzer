@@ -1397,8 +1397,7 @@ class LogAnalyzerApp:
             self.jump_to_index(new_view_idx - self.LINES_PER_PAGE + 1, immediate=True)
         else:
             # Selection is within viewport, just redraw highlight
-            self.needs_render = True
-            self.update_log_view()
+            await self.refresh_visible_rows_style()
             self.page.update()
 
     async def on_resize(self, e):
