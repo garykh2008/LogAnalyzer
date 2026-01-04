@@ -344,9 +344,13 @@ class LogAnalyzerApp:
             spacing=0,
             item_extent=self.ROW_HEIGHT,
             padding=0,
-            on_scroll_interval=10,
             on_scroll=self.on_log_list_scroll,
         )
+        # Handle API difference for scroll interval
+        if hasattr(self.log_list_column, "on_scroll_interval"):
+             self.log_list_column.on_scroll_interval = 10
+        elif hasattr(self.log_list_column, "scroll_interval"):
+             self.log_list_column.scroll_interval = 10
 
         self.log_display_column = ft.Container(
             content=ft.GestureDetector(
