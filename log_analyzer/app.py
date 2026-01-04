@@ -1335,7 +1335,7 @@ class LogAnalyzerApp:
         self.show_toast(f"Mode: {'Filtered Only' if self.show_only_filtered else 'Full View'}")
         self.current_start_index = 0 # Reset to top
         self.update_status_bar() # Update line counts in status bar
-        self.update_log_view()
+        self.reload_log_view()
         self.sync_scrollbar_position()
         self.page.update()
 
@@ -1688,7 +1688,7 @@ class LogAnalyzerApp:
 
         if view_idx >= total_items: return
 
-        # Map to real_idx matching update_log_view logic
+        # Map to real_idx matching reload_log_view logic
         if self.show_only_filtered and self.filtered_indices is not None:
             real_idx = self.filtered_indices[view_idx]
         else:
