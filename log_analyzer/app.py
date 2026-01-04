@@ -1738,9 +1738,10 @@ class LogAnalyzerApp:
         _line_tags_codes = self.line_tags_codes
 
         for control in self.log_list_column.controls:
-            # control is Container
+            # control is GestureDetector wrapping Container
             # control.data is the view index (int)
             view_idx = control.data
+            container = control.content
 
             # Map to real idx
             if self.show_only_filtered and self.filtered_indices is not None:
@@ -1768,8 +1769,8 @@ class LogAnalyzerApp:
                 bg_color = c_select_bg
 
             # Apply if changed
-            if control.bgcolor != bg_color:
-                control.bgcolor = bg_color
+            if container.bgcolor != bg_color:
+                container.bgcolor = bg_color
 
         self.log_list_column.update()
 
