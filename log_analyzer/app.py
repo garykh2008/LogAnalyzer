@@ -79,7 +79,7 @@ class LogAnalyzerApp:
         self.current_start_index = 0
         self.loaded_count = 0
         self.list_view_offset = 0
-        self.BATCH_SIZE = 200
+        self.BATCH_SIZE = 100
         self.last_scroll_time = 0
 
         # 過濾器狀態
@@ -967,7 +967,6 @@ class LogAnalyzerApp:
         self.last_scroll_time = now
 
         if e.pixels >= e.max_scroll_extent - 100:
-            print("[DEBUG] Triggering load_more_logs from scroll")
             await self.load_more_logs()
 
     def reload_log_view(self, start_index=0):
@@ -1006,8 +1005,6 @@ class LogAnalyzerApp:
         self.loaded_count = adjusted_start # We start loading FROM here
         self.list_view_offset = adjusted_start # Store offset for scroll calc
         self.log_list_column.controls.clear()
-
-        print(f"[DEBUG] reload_log_view: start={adjusted_start}")
 
         # Load first batch
         asyncio.create_task(self.load_more_logs())
@@ -1132,9 +1129,6 @@ class LogAnalyzerApp:
             self.log_list_column.controls.extend(new_controls)
             self.loaded_count = end_idx
             self.log_list_column.update()
-
-            t1 = time.time()
-            print(f"[DEBUG] load_more_logs: loaded {len(new_controls)} items in {t1-t0:.4f}s. Total loaded: {self.loaded_count}")
 
             # Yield slightly to prevent UI freeze on rapid updates
             await asyncio.sleep(0.01)
@@ -1421,15 +1415,15 @@ class LogAnalyzerApp:
 
             try:
                 relative_idx = new_view_idx - self.list_view_offset
-                print(f"[DEBUG] Keyboard Scroll: view_idx={new_view_idx}, offset={self.list_view_offset}, rel={relative_idx}")
-                self.log_list_column.scroll_to(index=relative_idx, duration=0)
-            except Exception as ex:
-                print(f"[DEBUG] Scroll Error: {ex}")
+                # Use offset for scrolling in ListView with fixed item_extent
+                scroll_offset = relative_idx * self.ROW_HEIGHT
+                self.log_list_column.scroll_to(offset=scroll_offset, duration=0)
+            except Exception:
+                pass
 
             self.page.update()
         else:
             # Outside loaded range, jump (reload)
-            print(f"[DEBUG] Keyboard Jump: view_idx={new_view_idx}")
             self.jump_to_index(new_view_idx, immediate=True)
             self.status_bar_comp.update_status(f"Selected Line {new_raw_idx + 1}")
 
