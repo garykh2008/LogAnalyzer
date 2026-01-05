@@ -941,8 +941,6 @@ class LogAnalyzerApp:
         # pixels: current scroll position
         # max_scroll_extent: max scroll position
 
-        print(f"[DEBUG] Scroll: pixels={e.pixels:.1f}, max={e.max_scroll_extent:.1f}, start_idx={self.current_start_index}")
-
         # HIT BOTTOM -> Load Next Batch
         if e.pixels >= e.max_scroll_extent - threshold:
             total_items = self.navigator.total_items
@@ -955,7 +953,6 @@ class LogAnalyzerApp:
                     new_start = total_items - self.TEXT_POOL_SIZE
 
                 if new_start != self.current_start_index:
-                    print(f"[DEBUG] HIT BOTTOM: Loading next batch. New start: {new_start}")
                     self.current_start_index = new_start
                     self.update_log_view()
                     self.sync_scrollbar_position()
@@ -968,7 +965,6 @@ class LogAnalyzerApp:
                     # So we should scroll to `pixels - shift*height`.
 
                     new_scroll_pos = e.pixels - (shift * self.ROW_HEIGHT)
-                    print(f"[DEBUG] Adjusting scroll to: {new_scroll_pos}")
                     try:
                         await self.log_list_view.scroll_to(offset=new_scroll_pos, duration=0)
                     except Exception as ex:
@@ -984,7 +980,6 @@ class LogAnalyzerApp:
 
                 if new_start != self.current_start_index:
                     real_shift = self.current_start_index - new_start
-                    print(f"[DEBUG] HIT TOP: Loading prev batch. New start: {new_start}")
                     self.current_start_index = new_start
                     self.update_log_view()
                     self.sync_scrollbar_position()
@@ -992,7 +987,6 @@ class LogAnalyzerApp:
                     # We added items to top. Content pushed down.
                     # Scroll position needs to increase to keep user at same visual spot.
                     new_scroll_pos = e.pixels + (real_shift * self.ROW_HEIGHT)
-                    print(f"[DEBUG] Adjusting scroll to: {new_scroll_pos}")
                     try:
                         await self.log_list_view.scroll_to(offset=new_scroll_pos, duration=0)
                     except Exception as ex:
@@ -1025,7 +1019,6 @@ class LogAnalyzerApp:
 
     def update_log_view(self):
         """從 Engine 獲取當前視窗的數據並更新 UI"""
-        start_time = time.time()
         if not self.log_engine: return
 
         is_dark = self.page.theme_mode == ft.ThemeMode.DARK
@@ -1153,8 +1146,6 @@ class LogAnalyzerApp:
                     row_container.visible = False
                     row_container.bgcolor = c_trans
                     text_control.value = ""
-
-        print(f"[DEBUG] update_log_view took {time.time() - start_time:.4f}s")
 
         # REMOVED page.update() here, it's now in the render_loop
 
