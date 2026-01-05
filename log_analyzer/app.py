@@ -313,7 +313,7 @@ class LogAnalyzerApp:
         self.FONT_SIZE = 12
         self.LINE_HEIGHT_MULT = self.ROW_HEIGHT / self.FONT_SIZE
         self.LINES_PER_PAGE = 20
-        self.TEXT_POOL_SIZE = 200 # Increased buffer size for native scrolling
+        self.TEXT_POOL_SIZE = 600 # Further increased buffer size for smoother native scrolling
 
         self.text_pool = []
         for _ in range(self.TEXT_POOL_SIZE):
@@ -340,6 +340,7 @@ class LogAnalyzerApp:
             item_extent=self.ROW_HEIGHT,
             expand=True,
             on_scroll=self.on_list_view_scroll,
+            on_scroll_interval=50, # Throttle scroll events (50ms)
         )
 
         self.log_display_column = ft.Container(
@@ -951,7 +952,7 @@ class LogAnalyzerApp:
             total_items = self.navigator.total_items
             # Check if we have more data to load
             if self.current_start_index + self.TEXT_POOL_SIZE < total_items:
-                shift = 50 # Shift amount
+                shift = int(self.TEXT_POOL_SIZE / 4) # Dynamic shift relative to pool size
                 new_start = self.current_start_index + shift
                 # Clamp
                 if new_start + self.TEXT_POOL_SIZE > total_items:
@@ -959,18 +960,19 @@ class LogAnalyzerApp:
 
                 if new_start != self.current_start_index:
                     self.last_batch_load_time = time.time()
+                    real_shift = new_start - self.current_start_index
                     self.current_start_index = new_start
                     self.update_log_view()
                     self.sync_scrollbar_position()
 
                     # Adjust scroll position to maintain visual continuity
-                    # We removed 'shift' items from top, so scroll position effectively decreases
+                    # We removed 'real_shift' items from top, so scroll position effectively decreases
                     # But since we want the user to stay 'relative' to the content they were looking at...
                     # Wait, if we shift window DOWN (index increases), we remove top items.
                     # The content that was at `pixels` is now at `pixels - shift*height`.
                     # So we should scroll to `pixels - shift*height`.
 
-                    new_scroll_pos = e.pixels - (shift * self.ROW_HEIGHT)
+                    new_scroll_pos = e.pixels - (real_shift * self.ROW_HEIGHT)
                     try:
                         await self.log_list_view.scroll_to(offset=new_scroll_pos, duration=0)
                     except Exception as ex:
@@ -985,7 +987,7 @@ class LogAnalyzerApp:
                 return
 
             if self.current_start_index > 0:
-                shift = 50
+                shift = int(self.TEXT_POOL_SIZE / 4)
                 new_start = max(0, self.current_start_index - shift)
 
                 if new_start != self.current_start_index:
