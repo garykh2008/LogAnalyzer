@@ -79,8 +79,9 @@ class LogAnalyzerApp:
         self.current_start_index = 0
         self.loaded_count = 0
         self.list_view_offset = 0
-        self.BATCH_SIZE = 100
+        self.BATCH_SIZE = 50
         self.last_scroll_time = 0
+        self.last_load_time = 0
 
         # 過濾器狀態
         self.filters = []
@@ -161,20 +162,7 @@ class LogAnalyzerApp:
 
     def _init_background_services(self):
         """啟動與管理所有背景服務。"""
-        # A. 啟動執行緒級別的物理喚醒 (解決 Windows asyncio 睡眠問題)
-        try:
-            loop = asyncio.get_running_loop()
-            def _wakeup_serv():
-                while not self.is_closing:
-                    try:
-                        # 強制喚醒事件迴圈處理掛起的 Pipe/Socket 信號
-                        loop.call_soon_threadsafe(lambda: None)
-                        time.sleep(0.1)
-                    except: break
-
-            threading.Thread(target=_wakeup_serv, daemon=True).start()
-        except Exception:
-            pass
+        # A. Removed deprecated _wakeup_serv thread which caused Signal 2 race conditions on Python 3.13
 
         # B. 啟動協程級別心跳 (主動通訊確保視窗信號 flush)
         async def _heartbeat_serv():
@@ -1013,13 +1001,17 @@ class LogAnalyzerApp:
         """Appends the next batch of logs to the ListView."""
         if not self.log_engine: return
 
+        # Throttling to prevent UI freeze (allow other events to process)
+        now = time.time()
+        if now - self.last_load_time < 0.2:
+            return
+
         # Prevent concurrent loads if we wanted (not strictly needed with async/await on UI thread)
         # But helpful to debounce
         if hasattr(self, "_is_loading_more") and self._is_loading_more: return
         self._is_loading_more = True
 
         try:
-            t0 = time.time()
             total_items = self.navigator.total_items
             if self.loaded_count >= total_items:
                 return
