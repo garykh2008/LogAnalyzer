@@ -340,16 +340,16 @@ class LogAnalyzerApp:
             )
             self.text_pool.append(c)
 
-        self.log_list_column = ft.Column(
+        self.log_list_view = ft.ListView(
             controls=self.text_pool,
             spacing=0,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            tight=True,
+            item_extent=self.ROW_HEIGHT,
+            expand=True,
         )
 
         self.log_display_column = ft.Container(
             content=ft.GestureDetector(
-                content=self.log_list_column,
+                content=self.log_list_view,
                 on_scroll=self.on_log_scroll,
                 on_tap_down=self.on_log_area_tap,
                 on_double_tap=self.on_log_area_double_tap,
@@ -1017,7 +1017,7 @@ class LogAnalyzerApp:
             self.sync_scrollbar_position()
 
             # Update specific controls only - DO NOT use page.update()
-            self.log_list_column.update()
+            self.log_list_view.update()
             self.scrollbar_stack.update()
         finally:
             self.is_updating = False
