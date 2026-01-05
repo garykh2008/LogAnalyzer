@@ -312,7 +312,7 @@ class LogAnalyzerApp:
         self.FONT_SIZE = 12
         self.LINE_HEIGHT_MULT = self.ROW_HEIGHT / self.FONT_SIZE
         self.LINES_PER_PAGE = 20
-        self.TEXT_POOL_SIZE = 50
+        self.TEXT_POOL_SIZE = 200 # Increased buffer size for native scrolling
 
         self.text_pool = []
         for _ in range(self.TEXT_POOL_SIZE):
@@ -338,12 +338,13 @@ class LogAnalyzerApp:
             spacing=0,
             item_extent=self.ROW_HEIGHT,
             expand=True,
+            on_scroll=self.on_list_view_scroll,
         )
 
         self.log_display_column = ft.Container(
             content=ft.GestureDetector(
                 content=self.log_list_view,
-                on_scroll=self.on_log_scroll,
+                # on_scroll=self.on_log_scroll, # Removed manual scroll intercept
                 on_tap_down=self.on_log_area_tap,
                 on_double_tap=self.on_log_area_double_tap,
                 on_secondary_tap_down=self.on_log_area_secondary_tap,
@@ -923,8 +924,79 @@ class LogAnalyzerApp:
         self.search_bar_comp.search_results_count.value = text
         self.page.update()
 
-    async def on_log_scroll(self, e: ft.ScrollEvent):
-        self.navigator.handle_mouse_wheel(e.scroll_delta.y)
+    async def on_list_view_scroll(self, e):
+        # Handle infinite scroll / sliding window
+        if not self.log_engine: return
+
+        # Throttle to prevent rapid firing
+        now = time.time()
+        if now - self.last_render_time < 0.1:
+            return
+        self.last_render_time = now
+
+        # Threshold in pixels to trigger load (e.g. 1 screen height)
+        threshold = self.available_log_height if hasattr(self, "available_log_height") else 500
+
+        # Calculate scroll metrics
+        # pixels: current scroll position
+        # max_scroll_extent: max scroll position
+
+        # HIT BOTTOM -> Load Next Batch
+        if e.pixels >= e.max_scroll_extent - threshold:
+            total_items = self.navigator.total_items
+            # Check if we have more data to load
+            if self.current_start_index + self.TEXT_POOL_SIZE < total_items:
+                shift = 50 # Shift amount
+                new_start = self.current_start_index + shift
+                # Clamp
+                if new_start + self.TEXT_POOL_SIZE > total_items:
+                    new_start = total_items - self.TEXT_POOL_SIZE
+
+                if new_start != self.current_start_index:
+                    self.current_start_index = new_start
+                    self.update_log_view()
+                    self.sync_scrollbar_position()
+
+                    # Adjust scroll position to maintain visual continuity
+                    # We removed 'shift' items from top, so scroll position effectively decreases
+                    # But since we want the user to stay 'relative' to the content they were looking at...
+                    # Wait, if we shift window DOWN (index increases), we remove top items.
+                    # The content that was at `pixels` is now at `pixels - shift*height`.
+                    # So we should scroll to `pixels - shift*height`.
+
+                    new_scroll_pos = e.pixels - (shift * self.ROW_HEIGHT)
+                    try:
+                        await self.log_list_view.scroll_to(offset=new_scroll_pos, duration=0)
+                    except Exception as ex:
+                        print(f"Scroll adjust error: {ex}")
+
+                    self.page.update()
+
+        # HIT TOP -> Load Prev Batch
+        elif e.pixels <= threshold:
+            if self.current_start_index > 0:
+                shift = 50
+                new_start = max(0, self.current_start_index - shift)
+
+                if new_start != self.current_start_index:
+                    real_shift = self.current_start_index - new_start
+                    self.current_start_index = new_start
+                    self.update_log_view()
+                    self.sync_scrollbar_position()
+
+                    # We added items to top. Content pushed down.
+                    # Scroll position needs to increase to keep user at same visual spot.
+                    new_scroll_pos = e.pixels + (real_shift * self.ROW_HEIGHT)
+                    try:
+                        await self.log_list_view.scroll_to(offset=new_scroll_pos, duration=0)
+                    except Exception as ex:
+                        print(f"Scroll adjust error: {ex}")
+
+                    self.page.update()
+
+    # Deprecated: Manual scroll handler removed in favor of native ListView scroll
+    # async def on_log_scroll(self, e: ft.ScrollEvent):
+    #    self.navigator.handle_mouse_wheel(e.scroll_delta.y)
 
     async def immediate_render(self):
         if self.is_updating: return
@@ -1264,16 +1336,10 @@ class LogAnalyzerApp:
             self.available_log_height = available_log_height
 
             # Dynamic LINES_PER_PAGE
-            line_height = self.ROW_HEIGHT
+            # In native scroll mode, we render the full buffer, not just visible lines
             if available_log_height > 0:
-                # Calculate exactly how many rows fit in the area
-                new_lines_per_page = int((available_log_height - 10) / line_height)
-                # Clamp to pool size
-                new_lines_per_page = max(10, min(new_lines_per_page, self.TEXT_POOL_SIZE))
-
-                if new_lines_per_page != self.LINES_PER_PAGE:
-                    self.LINES_PER_PAGE = new_lines_per_page
-                    self.update_log_view()
+                 self.LINES_PER_PAGE = self.TEXT_POOL_SIZE
+                 self.update_log_view()
 
             # Re-sync thumb position (navigator uses available_log_height for calc)
             self.sync_scrollbar_position()
