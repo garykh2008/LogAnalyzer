@@ -360,55 +360,9 @@ class LogAnalyzerApp:
             bgcolor=colors["log_bg"],
         )
 
-        # --- 自定義捲軸 ---
-        self.scrollbar_width = 15
-        self.scrollbar_thumb_height = 50
-
-        self.scrollbar_thumb = ft.Container(
-            width=self.scrollbar_width,
-            height=self.scrollbar_thumb_height,
-            bgcolor=colors["scroll_thumb"],
-            border_radius=5,
-            top=0
-        )
-
-        self.scrollbar_track = ft.Container(
-            width=self.scrollbar_width,
-            bgcolor=colors["scroll_track"],
-            expand=True,
-        )
-
-        self.scrollbar_stack = ft.Stack(
-            controls=[
-                self.scrollbar_track,
-                self.scrollbar_thumb
-            ],
-            width=self.scrollbar_width,
-            expand=True
-        )
-
-        self.scrollbar_container = ft.Container(
-            content=ft.GestureDetector(
-                content=self.scrollbar_stack,
-                on_pan_update=self.on_scrollbar_drag,
-                on_tap_down=self.on_scrollbar_tap
-            ),
-            width=self.scrollbar_width,
-            bgcolor=colors["scroll_track"],
-            alignment=ft.Alignment(-1, -1)
-        )
-
         # Log 區域容器
         self.log_view_area = ft.Container(
-            content=ft.Row(
-                controls=[
-                    self.log_display_column,
-                    self.scrollbar_container
-                ],
-                spacing=0,
-                expand=True,
-                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
-            ),
+            content=self.log_display_column,
             expand=True,
             visible=False
         )
@@ -549,14 +503,6 @@ class LogAnalyzerApp:
             self.log_display_column.bgcolor = colors["log_bg"]
         if hasattr(self, "initial_content"):
             self.initial_content.bgcolor = colors["log_bg"]
-
-        # 8. 捲軸
-        if hasattr(self, "scrollbar_track"):
-            self.scrollbar_track.bgcolor = colors["scroll_track"]
-        if hasattr(self, "scrollbar_container"):
-            self.scrollbar_container.bgcolor = colors["scroll_track"]
-        if hasattr(self, "scrollbar_thumb"):
-            self.scrollbar_thumb.bgcolor = colors["scroll_thumb"]
 
     async def on_open_file_click(self, e):
         """開啟檔案對話框。"""
@@ -1018,7 +964,6 @@ class LogAnalyzerApp:
 
             # Update specific controls only - DO NOT use page.update()
             self.log_list_view.update()
-            self.scrollbar_stack.update()
         finally:
             self.is_updating = False
             # If target changed during the update, schedule next frame immediately
@@ -1329,7 +1274,7 @@ class LogAnalyzerApp:
             self.page.update()
 
     async def on_resize(self, e):
-        # Update scrollbar track height info
+        # Update available height info
         if self.page.height:
             # Check if initial content is hidden
             is_initial = self.initial_content.visible
@@ -1342,13 +1287,14 @@ class LogAnalyzerApp:
                 sidebar_h = 200 # Fixed height from sidebar.py
 
             # Safe margin calculation
-            self.scrollbar_track_height = self.page.height - status_h - menu_h - sidebar_h
+            available_log_height = self.page.height - status_h - menu_h - sidebar_h
+            self.available_log_height = available_log_height
 
             # Dynamic LINES_PER_PAGE
             line_height = self.ROW_HEIGHT
-            if self.scrollbar_track_height > 0:
-                # Calculate exactly how many rows fit in the track
-                new_lines_per_page = int((self.scrollbar_track_height - 10) / line_height)
+            if available_log_height > 0:
+                # Calculate exactly how many rows fit in the area
+                new_lines_per_page = int((available_log_height - 10) / line_height)
                 # Clamp to pool size
                 new_lines_per_page = max(10, min(new_lines_per_page, self.TEXT_POOL_SIZE))
 
@@ -1356,18 +1302,10 @@ class LogAnalyzerApp:
                     self.LINES_PER_PAGE = new_lines_per_page
                     self.update_log_view()
 
-            # Re-sync thumb position
+            # Re-sync thumb position (navigator uses available_log_height for calc)
             self.sync_scrollbar_position()
 
         self.page.update()
-
-    async def on_scrollbar_drag(self, e: ft.DragUpdateEvent):
-        delta = get_event_prop(e, 'delta_y', default=0)
-        self.navigator.handle_scrollbar_drag(delta)
-
-    async def on_scrollbar_tap(self, e: ft.TapEvent):
-        local_y = get_event_prop(e, 'local_y', default=0)
-        self.navigator.handle_scrollbar_tap(local_y)
 
     def sync_scrollbar_position(self):
         self.navigator.sync_scrollbar_position()
