@@ -311,104 +311,35 @@ class LogAnalyzerApp:
         return ThemeColors.get(self.page.theme_mode)
 
     def _build_log_view(self):
-        """建立 Log 顯示區域與自定義捲軸。"""
+        """建立 Log 顯示區域。"""
         colors = self._get_colors()
 
-        # --- Log View (Virtual Scroll) 設定 ---
+        # --- Log View 設定 ---
         self.ROW_HEIGHT = 20
         self.FONT_SIZE = 12
-        self.LINE_HEIGHT_MULT = self.ROW_HEIGHT / self.FONT_SIZE
-        self.LINES_PER_PAGE = 20
-        self.TEXT_POOL_SIZE = 50
+        self.TEXT_POOL_SIZE = 100 # Batch size for appending
+        self.LINES_PER_PAGE = 20 # Will be updated on resize
 
-        self.text_pool = []
-        for _ in range(self.TEXT_POOL_SIZE):
-            t = ft.Text(
-                value="",
-                font_family="Consolas, monospace",
-                size=self.FONT_SIZE,
-                no_wrap=True,
-                color=colors["text"],
-                visible=True,
-            )
-            c = ft.Container(
-                content=t,
-                height=self.ROW_HEIGHT,
-                alignment=ft.Alignment(-1, 0),
-                bgcolor=ft.Colors.TRANSPARENT,
-                visible=True
-            )
-            self.text_pool.append(c)
-
-        self.log_list_column = ft.Column(
-            controls=self.text_pool,
+        # 使用 ft.ListView 實現無限滾動
+        self.log_list_view = ft.ListView(
+            expand=True,
             spacing=0,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            tight=True,
+            item_extent=self.ROW_HEIGHT,
+            on_scroll_interval=0, # Report scroll events immediately
+            on_scroll=self.on_log_scroll,
+            auto_scroll=False,
         )
 
+        # Wrap in Container for background color
         self.log_display_column = ft.Container(
-            content=ft.GestureDetector(
-                content=self.log_list_column,
-                on_scroll=self.on_log_scroll,
-                on_tap_down=self.on_log_area_tap,
-                on_double_tap=self.on_log_area_double_tap,
-                on_secondary_tap_down=self.on_log_area_secondary_tap,
-                expand=True
-            ),
+            content=self.log_list_view,
             expand=True,
             bgcolor=colors["log_bg"],
         )
 
-        # --- 自定義捲軸 ---
-        self.scrollbar_width = 15
-        self.scrollbar_thumb_height = 50
-
-        self.scrollbar_thumb = ft.Container(
-            width=self.scrollbar_width,
-            height=self.scrollbar_thumb_height,
-            bgcolor=colors["scroll_thumb"],
-            border_radius=5,
-            top=0
-        )
-
-        self.scrollbar_track = ft.Container(
-            width=self.scrollbar_width,
-            bgcolor=colors["scroll_track"],
-            expand=True,
-        )
-
-        self.scrollbar_stack = ft.Stack(
-            controls=[
-                self.scrollbar_track,
-                self.scrollbar_thumb
-            ],
-            width=self.scrollbar_width,
-            expand=True
-        )
-
-        self.scrollbar_container = ft.Container(
-            content=ft.GestureDetector(
-                content=self.scrollbar_stack,
-                on_pan_update=self.on_scrollbar_drag,
-                on_tap_down=self.on_scrollbar_tap
-            ),
-            width=self.scrollbar_width,
-            bgcolor=colors["scroll_track"],
-            alignment=ft.Alignment(-1, -1)
-        )
-
         # Log 區域容器
         self.log_view_area = ft.Container(
-            content=ft.Row(
-                controls=[
-                    self.log_display_column,
-                    self.scrollbar_container
-                ],
-                spacing=0,
-                expand=True,
-                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
-            ),
+            content=self.log_display_column,
             expand=True,
             visible=False
         )
@@ -1008,32 +939,81 @@ class LogAnalyzerApp:
         self.navigator.handle_mouse_wheel(e.scroll_delta.y)
 
     async def immediate_render(self):
+        # With ListView, we might not need this complex render loop logic for scrolling,
+        # but we keep it for now if needed.
         if self.is_updating: return
         self.is_updating = True
         try:
-            # Phase 9: Scoped Update only
-            self.current_start_index = self.target_start_index
-            self.update_log_view()
-            self.sync_scrollbar_position()
+             # Sync target to current to honor navigation requests
+             if self.target_start_index != self.current_start_index:
+                  self.current_start_index = self.target_start_index
+                  self.needs_render = True
 
-            # Update specific controls only - DO NOT use page.update()
-            self.log_list_column.update()
-            self.scrollbar_stack.update()
+             # Just update the whole view if requested
+             self.update_log_view()
         finally:
-            self.is_updating = False
-            # If target changed during the update, schedule next frame immediately
-            if self.current_start_index != self.target_start_index:
-                # Yield briefly to avoid event loop starvation
-                await asyncio.sleep(0.001)
-                asyncio.create_task(self.immediate_render())
+             self.is_updating = False
 
-    def update_log_view(self):
-        """從 Engine 獲取當前視窗的數據並更新 UI"""
+    def reload_log_view(self, start_index=0):
+        """完全重置 Log View，從 start_index 開始載入。"""
+        self.is_programmatic_scroll = True
+        self.current_start_index = start_index
+        self.list_view_offset = start_index # 用於追蹤 ListView 內部 item 0 對應的真實 index
+
+        # Clear existing
+        self.log_list_view.controls.clear()
+
+        # Load initial batch
+        self.load_more_logs()
+
+        self.is_programmatic_scroll = False
+
+        try:
+             self.log_list_view.update()
+        except Exception:
+             pass
+
+    def load_more_logs(self):
+        """Append more logs to the list view."""
         if not self.log_engine: return
 
-        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+        # Throttling
+        if hasattr(self, 'last_load_time') and time.time() - self.last_load_time < 0.2:
+            return
+        self.last_load_time = time.time()
 
-        # PRE-CALCULATE filter colors
+        start_idx = self.list_view_offset + len(self.log_list_view.controls)
+        total_items = self.navigator.total_items
+
+        if start_idx >= total_items:
+            return
+
+        batch_size = self.TEXT_POOL_SIZE # Use 100
+        end_idx = min(start_idx + batch_size, total_items)
+
+        target_indices = []
+        for i in range(start_idx, end_idx):
+             # Map view index to real index
+             if self.show_only_filtered and self.filtered_indices is not None:
+                 target_indices.append(self.filtered_indices[i])
+             else:
+                 target_indices.append(i)
+
+        if not target_indices: return
+
+        # Fetch data
+        batch_data = []
+        if hasattr(self.log_engine, 'get_lines_batch'):
+            batch_data = self.log_engine.get_lines_batch(target_indices)
+
+        # Pre-calc colors
+        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
+        c_default = "#d4d4d4" if is_dark else "#1e1e1e"
+        c_error = "#ff6b6b"
+        c_warn = "#ffd93d"
+        c_info = "#4dabf7"
+        c_select_bg = "#264f78" if is_dark else "#b3d7ff"
+
         filter_color_cache = {}
         if self.filters:
             active_filters_objs = []
@@ -1048,110 +1028,185 @@ class LogAnalyzerApp:
 
         search_query = self.search_bar_comp.search_input.value.lower() if (self.search_bar.visible and self.search_bar_comp.search_input.value) else None
 
-        total_items = self.navigator.total_items
+        new_controls = []
+        for i, (line_data, level_code) in enumerate(batch_data):
+            real_idx = target_indices[i]
+            view_idx = start_idx + i
 
-        # Turbo Rendering Path: Optimized for minimum Python overhead and IPC payload
-        _get_lines_batch = getattr(self.log_engine, 'get_lines_batch', None)
-        _filtered_indices = self.filtered_indices
-        _show_filtered = self.show_only_filtered
-        _current_start_index = self.current_start_index
-        _selected_indices = self.selected_indices
-        _line_tags_codes = self.line_tags_codes
-        _text_pool = self.text_pool
-        _lines_per_page = self.LINES_PER_PAGE
+            # Determine colors
+            if level_code == 1: base_color = c_error
+            elif level_code == 2: base_color = c_warn
+            elif level_code == 3: base_color = c_info
+            else: base_color = c_default
 
-        search_active = bool(search_query)
+            bg_color = ft.Colors.TRANSPARENT
+            if self.line_tags_codes is not None and real_idx < len(self.line_tags_codes):
+                 tag_code = self.line_tags_codes[real_idx]
+                 if tag_code >= 2:
+                     af_idx = tag_code - 2
+                     if af_idx in filter_color_cache:
+                         bg_color, base_color = filter_color_cache[af_idx]
+                 elif tag_code == 1:
+                     base_color = ft.Colors.GREY_500 if is_dark else ft.Colors.GREY_400
 
-        # 1. Prepare target indices for the current viewport
-        target_indices = []
-        for i in range(_lines_per_page):
-            view_idx = _current_start_index + i
-            if 0 <= view_idx < total_items:
-                real_idx = _filtered_indices[view_idx] if (_show_filtered and _filtered_indices is not None) else view_idx
-                target_indices.append(real_idx)
+            if real_idx in self.selected_indices:
+                bg_color = c_select_bg
 
-        # 2. Batch fetch text and log levels from Rust in a single IPC call
-        batch_data = []
-        if target_indices and _get_lines_batch:
-            batch_data = _get_lines_batch(target_indices)
+            # Create Text Control
+            t = ft.Text(
+                value=line_data if not search_query else "",
+                font_family="Consolas, monospace",
+                size=self.FONT_SIZE,
+                no_wrap=True,
+                color=base_color,
+                selectable=True,
+            )
 
-        # 3. Static style table - resolved to local variables for fast lookup
-        c_default = "#d4d4d4" if is_dark else "#1e1e1e"
-        c_error = "#ff6b6b"
-        c_warn = "#ffd93d"
-        c_info = "#4dabf7"
+            # Search Highlight
+            if search_query and search_query in line_data.lower():
+                 h_bg = ft.Colors.YELLOW
+                 h_fg = ft.Colors.BLACK
+                 if bg_color != ft.Colors.TRANSPARENT and get_luminance(bg_color) > 0.6:
+                     h_bg = ft.Colors.BLUE_800
+                     h_fg = ft.Colors.WHITE
+
+                 parts = re.split(f"({re.escape(search_query)})", line_data, flags=re.IGNORECASE)
+                 t.spans = [
+                     ft.TextSpan(p, style=ft.TextStyle(bgcolor=h_bg, color=h_fg, weight=ft.FontWeight.BOLD))
+                     if p.lower() == search_query else ft.TextSpan(p, style=ft.TextStyle(color=base_color))
+                     for p in parts
+                 ]
+
+            # Using a simplified GestureDetector for each row
+            row_gd = ft.GestureDetector(
+                content=ft.Container(
+                    content=t,
+                    height=self.ROW_HEIGHT,
+                    alignment=ft.Alignment(-1, 0),
+                    bgcolor=bg_color,
+                    padding=ft.padding.only(left=5),
+                ),
+                on_tap_down=self.on_row_tap_down,
+                on_double_tap=self.on_row_double_tap,
+                on_secondary_tap_down=self.on_row_right_click,
+            )
+            # Store the RELATIVE index (which maps to absolute view index via list_view_offset)
+            row_gd.data = view_idx
+
+            new_controls.append(row_gd)
+
+        self.log_list_view.controls.extend(new_controls)
+        try:
+            self.log_list_view.update()
+        except: pass
+
+    async def on_log_scroll(self, e: ft.OnScrollEvent):
+        # Native scroll event
+        if e.pixels >= e.max_scroll_extent - 500:
+             self.load_more_logs()
+
+    def update_log_view(self):
+        """Compatibility Shim: Reloads current view."""
+        if self.needs_render:
+            self.reload_log_view(self.current_start_index)
+            self.needs_render = False
+        else:
+            # Just refresh styles
+            self.refresh_visible_rows_style()
+
+    def refresh_visible_rows_style(self):
+        """Update styles of existing rows without recreating controls."""
+        is_dark = self.page.theme_mode == ft.ThemeMode.DARK
         c_select_bg = "#264f78" if is_dark else "#b3d7ff"
-        c_trans = ft.Colors.TRANSPARENT
 
-        # 4. Render Loop with Strict Dirty Checking to minimize JSON Patch size
-        for i in range(self.TEXT_POOL_SIZE):
-            row_container = _text_pool[i]
-            text_control = row_container.content
+        for control in self.log_list_view.controls:
+             view_idx = control.data # stored in GestureDetector
 
-            if i < len(batch_data):
-                line_data, level_code = batch_data[i]
-                real_idx = target_indices[i]
+             # Map view_idx to real_idx
+             real_idx = view_idx # Default
+             if self.show_only_filtered and self.filtered_indices is not None:
+                 if view_idx < len(self.filtered_indices):
+                     real_idx = self.filtered_indices[view_idx]
 
-                # Colors logic
-                if level_code == 1: base_color = c_error
-                elif level_code == 2: base_color = c_warn
-                elif level_code == 3: base_color = c_info
-                else: base_color = c_default
+             container = control.content
 
-                bg_color = None
-                if _line_tags_codes is not None and real_idx < len(_line_tags_codes):
-                    tag_code = _line_tags_codes[real_idx]
-                    if tag_code >= 2:
-                        af_idx = tag_code - 2
-                        if af_idx in filter_color_cache:
-                            bg_color, base_color = filter_color_cache[af_idx]
-                    elif tag_code == 1:
-                        base_color = ft.Colors.GREY_500 if is_dark else ft.Colors.GREY_400
+             if real_idx in self.selected_indices:
+                 if container.bgcolor != c_select_bg:
+                     container.bgcolor = c_select_bg
+                     container.update()
+             else:
+                 # TODO: Correctly restore original color.
+                 # For now, we accept that deselection might make it transparent until reload.
+                 if container.bgcolor == c_select_bg:
+                     container.bgcolor = ft.Colors.TRANSPARENT
+                     container.update()
 
-                if real_idx in _selected_indices:
-                    bg_color = c_select_bg
+    async def on_row_tap_down(self, e):
+        view_idx = e.control.data
+        self.current_start_index = view_idx
 
-                # Only touch Flet properties if they MUST change
-                target_bg = bg_color if bg_color else c_trans
-                if row_container.bgcolor != target_bg:
-                    row_container.bgcolor = target_bg
+        real_idx = view_idx
+        if self.show_only_filtered and self.filtered_indices is not None:
+             real_idx = self.filtered_indices[view_idx]
 
-                if not row_container.visible:
-                    row_container.visible = True
+        # Modifiers
+        ctrl = False
+        shift = False
+        if sys.platform == "win32":
+            import ctypes
+            ctrl = (ctypes.windll.user32.GetKeyState(0x11) & 0x8000) != 0
+            shift = (ctypes.windll.user32.GetKeyState(0x10) & 0x8000) != 0
+        else:
+             ctrl = e.ctrl
+             shift = e.shift
 
-                if text_control.color != base_color:
-                    text_control.color = base_color
+        if shift and self.selection_anchor != -1:
+             start_view = self._get_view_index_from_raw(self.selection_anchor)
+             if start_view is not None:
+                 low, high = min(start_view, view_idx), max(start_view, view_idx)
+                 if not ctrl: self.selected_indices.clear()
+                 for i in range(low, high+1):
+                      ridx = self.filtered_indices[i] if self.show_only_filtered and self.filtered_indices is not None else i
+                      self.selected_indices.add(ridx)
+        elif ctrl:
+             if real_idx in self.selected_indices:
+                 self.selected_indices.remove(real_idx)
+             else:
+                 self.selected_indices.add(real_idx)
+             self.selection_anchor = real_idx
+        else:
+             self.selected_indices = {real_idx}
+             self.selection_anchor = real_idx
 
-                if search_active and search_query in line_data.lower():
-                    # Search Highlight Path
-                    h_bg = ft.Colors.YELLOW
-                    h_fg = ft.Colors.BLACK
-                    if bg_color and get_luminance(bg_color) > 0.6:
-                        h_bg = ft.Colors.BLUE_800
-                        h_fg = ft.Colors.WHITE
+        self.refresh_visible_rows_style()
 
-                    parts = re.split(f"({re.escape(search_query)})", line_data, flags=re.IGNORECASE)
-                    text_control.value = ""
-                    text_control.spans = [
-                        ft.TextSpan(p, style=ft.TextStyle(bgcolor=h_bg, color=h_fg, weight=ft.FontWeight.BOLD))
-                        if p.lower() == search_query else ft.TextSpan(p, style=ft.TextStyle(color=base_color))
-                        for p in parts
-                    ]
-                else:
-                    # Optimized Path: Simple Text
-                    if text_control.spans:
-                        text_control.spans = []
+    async def on_row_double_tap(self, e):
+        view_idx = e.control.data
+        real_idx = view_idx
+        if self.show_only_filtered and self.filtered_indices is not None:
+             real_idx = self.filtered_indices[view_idx]
 
-                    target_val = line_data if line_data.strip() else " "
-                    if text_control.value != target_val:
-                        text_control.value = target_val
-            else:
-                if row_container.visible:
-                    row_container.visible = False
-                    row_container.bgcolor = c_trans
-                    text_control.value = ""
+        if self.log_engine:
+            line_text = self.log_engine.get_line(real_idx)
+            await self.open_filter_dialog(initial_text=line_text.strip())
 
-        # REMOVED page.update() here, it's now in the render_loop
+    async def on_row_right_click(self, e):
+        view_idx = e.control.data
+        real_idx = view_idx
+        if self.show_only_filtered and self.filtered_indices is not None:
+             real_idx = self.filtered_indices[view_idx]
+
+        def on_copy():
+            asyncio.create_task(self.copy_selected_lines())
+        def on_add_filter():
+            # Mock event for double click handler
+            class MockObj: pass
+            m = MockObj()
+            m.control = MockObj()
+            m.control.data = view_idx
+            asyncio.create_task(self.on_log_double_click(m))
+
+        self.dialogs.show_log_context_menu(real_idx, on_copy, on_add_filter)
 
     def jump_to_index(self, idx, update_slider=True, immediate=False, center=False):
         # Delegate to navigator
