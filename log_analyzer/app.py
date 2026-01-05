@@ -1417,7 +1417,7 @@ class LogAnalyzerApp:
                 relative_idx = new_view_idx - self.list_view_offset
                 # Use offset for scrolling in ListView with fixed item_extent
                 scroll_offset = relative_idx * self.ROW_HEIGHT
-                self.log_list_column.scroll_to(offset=scroll_offset, duration=0)
+                await self.log_list_column.scroll_to(offset=scroll_offset, duration=0)
             except Exception:
                 pass
 
