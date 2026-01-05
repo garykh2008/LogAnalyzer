@@ -73,6 +73,7 @@ class LogAnalyzerApp:
         self.is_programmatic_scroll = False
         self.last_slider_update = 0
         self.last_render_time = 0
+        self.last_batch_load_time = 0 # Throttling for batch loads
         self.target_start_index = 0
         self.current_start_index = 0
         self.needs_render = False
@@ -943,6 +944,10 @@ class LogAnalyzerApp:
 
         # HIT BOTTOM -> Load Next Batch
         if e.pixels >= e.max_scroll_extent - threshold:
+            # Batch Load Cooldown
+            if time.time() - self.last_batch_load_time < 0.2:
+                return
+
             total_items = self.navigator.total_items
             # Check if we have more data to load
             if self.current_start_index + self.TEXT_POOL_SIZE < total_items:
@@ -953,6 +958,7 @@ class LogAnalyzerApp:
                     new_start = total_items - self.TEXT_POOL_SIZE
 
                 if new_start != self.current_start_index:
+                    self.last_batch_load_time = time.time()
                     self.current_start_index = new_start
                     self.update_log_view()
                     self.sync_scrollbar_position()
@@ -974,11 +980,16 @@ class LogAnalyzerApp:
 
         # HIT TOP -> Load Prev Batch
         elif e.pixels <= threshold:
+            # Batch Load Cooldown
+            if time.time() - self.last_batch_load_time < 0.2:
+                return
+
             if self.current_start_index > 0:
                 shift = 50
                 new_start = max(0, self.current_start_index - shift)
 
                 if new_start != self.current_start_index:
+                    self.last_batch_load_time = time.time()
                     real_shift = self.current_start_index - new_start
                     self.current_start_index = new_start
                     self.update_log_view()
