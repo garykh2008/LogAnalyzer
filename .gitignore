@@ -1,1 +1,3 @@
 app_config.jsonrelease/
+rust_extention/target/
+**/__pycache__/
