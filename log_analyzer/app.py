@@ -74,6 +74,8 @@ class LogAnalyzerApp:
         self.last_slider_update = 0
         self.last_render_time = 0
         self.last_batch_load_time = 0 # Throttling for batch loads
+        self.current_scroll_pixels = 0 # Track native scroll position
+        self.target_scroll_pixels = 0 # Target for immediate_render
         self.target_start_index = 0
         self.current_start_index = 0
         self.needs_render = False
@@ -313,7 +315,7 @@ class LogAnalyzerApp:
         self.FONT_SIZE = 12
         self.LINE_HEIGHT_MULT = self.ROW_HEIGHT / self.FONT_SIZE
         self.LINES_PER_PAGE = 20
-        self.TEXT_POOL_SIZE = 200 # Further increased buffer size for smoother native scrolling
+        self.TEXT_POOL_SIZE = 600 # Further increased buffer size for smoother native scrolling
 
         self.text_pool = []
         for _ in range(self.TEXT_POOL_SIZE):
@@ -340,7 +342,7 @@ class LogAnalyzerApp:
             item_extent=self.ROW_HEIGHT,
             expand=True,
             on_scroll=self.on_list_view_scroll,
-            scroll_interval=300, # Throttle scroll events (50ms)
+            scroll_interval=50, # Throttle scroll events (50ms)
         )
 
         self.log_display_column = ft.Container(
@@ -387,6 +389,26 @@ class LogAnalyzerApp:
             visible=True
         )
 
+        # Global Scrollbar (Custom)
+        self.scrollbar_thumb = ft.Container(
+            bgcolor=ft.Colors.GREY_500,
+            width=10,
+            height=30, # Dynamic
+            border_radius=5,
+            top=0,
+        )
+
+        self.scrollbar_track = ft.GestureDetector(
+            content=ft.Container(
+                content=ft.Stack([self.scrollbar_thumb]),
+                width=12,
+                bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.GREY),
+                alignment=ft.alignment.top_center,
+            ),
+            on_pan_update=self.on_scrollbar_drag,
+            on_tap_down=self.on_scrollbar_drag,
+        )
+
         # Dummy focus target for Log View
         # Use a transparent button to accept focus but not obstruct view
         self.log_focus_target = ft.TextField(
@@ -395,16 +417,19 @@ class LogAnalyzerApp:
 
         return ft.Stack(
             controls=[
-                ft.Column(
-                    controls=[
-                        self.initial_content,
-                        self.log_view_area
-                    ],
-                    spacing=0,
-                    expand=True,
-                    alignment=ft.MainAxisAlignment.START,
-                    horizontal_alignment=ft.CrossAxisAlignment.STRETCH
-                ),
+                ft.Row([
+                    ft.Column(
+                        controls=[
+                            self.initial_content,
+                            self.log_view_area
+                        ],
+                        spacing=0,
+                        expand=True,
+                        alignment=ft.MainAxisAlignment.START,
+                        horizontal_alignment=ft.CrossAxisAlignment.STRETCH
+                    ),
+                    self.scrollbar_track
+                ], spacing=0, expand=True),
                 self.log_focus_target
             ],
             expand=True
@@ -926,10 +951,53 @@ class LogAnalyzerApp:
         self.search_bar_comp.search_results_count.value = text
         self.page.update()
 
+    async def on_scrollbar_drag(self, e):
+        if not self.log_engine: return
+
+        # Calculate percentage
+        track_height = self.scrollbar_track.content.height if self.scrollbar_track.content.height else self.available_log_height
+        if not track_height or track_height <= 0:
+            track_height = self.page.height - 100 # Fallback
+
+        local_y = e.local_y
+        percentage = max(0.0, min(1.0, local_y / track_height))
+
+        total_items = self.navigator.total_items
+        target_idx = int(percentage * total_items)
+
+        # Jump
+        self.jump_to_index(target_idx, update_slider=False, immediate=True, center=True)
+
+    def sync_scrollbar_position(self):
+        # Update custom scrollbar thumb
+        if not self.log_engine or not hasattr(self, 'scrollbar_thumb'): return
+
+        total = self.navigator.total_items
+        if total <= 0: return
+
+        # Calculate thumb height and position
+        track_h = self.available_log_height if hasattr(self, 'available_log_height') else 500
+        viewport_h = track_h # Approximate
+
+        ratio = min(1.0, viewport_h / (total * self.ROW_HEIGHT)) if total * self.ROW_HEIGHT > 0 else 1.0
+        thumb_h = max(20, ratio * track_h)
+
+        # Position based on current_start_index
+        pos_ratio = self.current_start_index / total
+        thumb_top = pos_ratio * (track_h - thumb_h)
+
+        # Ensure track fills height
+        self.scrollbar_track.content.height = track_h
+        self.scrollbar_track.content.update()
+
+        self.scrollbar_thumb.height = thumb_h
+        self.scrollbar_thumb.top = thumb_top
+        self.scrollbar_thumb.update()
+
     async def on_list_view_scroll(self, e):
         # Handle infinite scroll / sliding window
         if not self.log_engine: return
-        if e.event_type.value != "update": return
+
         # Threshold in pixels to trigger load (e.g. 1 screen height)
         threshold = self.available_log_height if hasattr(self, "available_log_height") else 500
 
@@ -937,10 +1005,12 @@ class LogAnalyzerApp:
         # pixels: current scroll position
         # max_scroll_extent: max scroll position
 
+        self.current_scroll_pixels = e.pixels
+
         # HIT BOTTOM -> Load Next Batch
         if e.pixels >= e.max_scroll_extent - threshold:
             # Batch Load Cooldown
-            if time.time() - self.last_batch_load_time < 0.35:
+            if time.time() - self.last_batch_load_time < 0.05:
                 return
 
             total_items = self.navigator.total_items
@@ -967,6 +1037,7 @@ class LogAnalyzerApp:
                     # So we should scroll to `pixels - shift*height`.
 
                     new_scroll_pos = e.pixels - (real_shift * self.ROW_HEIGHT)
+                    self.current_scroll_pixels = new_scroll_pos
                     try:
                         await self.log_list_view.scroll_to(offset=new_scroll_pos, duration=0)
                     except Exception as ex:
@@ -977,7 +1048,7 @@ class LogAnalyzerApp:
         # HIT TOP -> Load Prev Batch
         elif e.pixels <= threshold:
             # Batch Load Cooldown
-            if time.time() - self.last_batch_load_time < 0.35:
+            if time.time() - self.last_batch_load_time < 0.05:
                 return
 
             if self.current_start_index > 0:
@@ -994,6 +1065,7 @@ class LogAnalyzerApp:
                     # We added items to top. Content pushed down.
                     # Scroll position needs to increase to keep user at same visual spot.
                     new_scroll_pos = e.pixels + (real_shift * self.ROW_HEIGHT)
+                    self.current_scroll_pixels = new_scroll_pos
                     try:
                         await self.log_list_view.scroll_to(offset=new_scroll_pos, duration=0)
                     except Exception as ex:
@@ -1013,6 +1085,13 @@ class LogAnalyzerApp:
             self.current_start_index = self.target_start_index
             self.update_log_view()
             self.sync_scrollbar_position()
+
+            # Apply target scroll position (for jumps/centering)
+            try:
+                target = getattr(self, 'target_scroll_pixels', 0)
+                await self.log_list_view.scroll_to(offset=target, duration=0)
+                self.current_scroll_pixels = target
+            except Exception: pass
 
             # Update specific controls only - DO NOT use page.update()
             self.log_list_view.update()
@@ -1157,8 +1236,35 @@ class LogAnalyzerApp:
         # REMOVED page.update() here, it's now in the render_loop
 
     def jump_to_index(self, idx, update_slider=True, immediate=False, center=False):
-        # Delegate to navigator
-        self.navigator.scroll_to(idx, immediate=immediate, center=center)
+        if not self.log_engine: return
+
+        target_idx = int(idx)
+        total = self.navigator.total_items
+
+        # Calculate new buffer window
+        if center:
+            # Center the buffer around the target for max context
+            half_buffer = self.TEXT_POOL_SIZE // 2
+            target_start = max(0, target_idx - half_buffer)
+
+            # Calculate pixel offset to center the line visually
+            # Index in buffer = target_idx - target_start
+            idx_in_buffer = target_idx - target_start
+            pixel_offset = idx_in_buffer * self.ROW_HEIGHT
+
+            # Visual centering
+            visual_height = self.available_log_height if hasattr(self, 'available_log_height') else 500
+            target_pixels = max(0, pixel_offset - (visual_height / 2) + (self.ROW_HEIGHT / 2))
+        else:
+            # Top align
+            target_start = max(0, min(target_idx, total - self.LINES_PER_PAGE))
+            target_pixels = 0
+
+        self.target_start_index = target_start
+        self.target_scroll_pixels = target_pixels
+
+        if immediate:
+            asyncio.create_task(self.immediate_render())
 
     async def on_slider_change(self, e):
         # Time-based debounce is still useful but less critical if we don't update slider
@@ -1318,18 +1424,38 @@ class LogAnalyzerApp:
         self.selection_anchor = new_raw_idx
 
         # --- Sync Viewport (Scroll to follow selection) ---
-        # We use immediate=True for keyboard to make it feel snappy
-        if new_view_idx < self.target_start_index:
-            # Scroll up to show the new line at the top
-            self.jump_to_index(new_view_idx, immediate=True)
-        elif new_view_idx >= self.target_start_index + self.LINES_PER_PAGE:
-            # Scroll down to show the new line at the bottom
-            self.jump_to_index(new_view_idx - self.LINES_PER_PAGE + 1, immediate=True)
-        else:
-            # Selection is within viewport, just redraw highlight
-            self.needs_render = True
-            self.update_log_view()
-            self.page.update()
+        # With infinite scroll, we must ensure the new selection is within the buffer AND visible
+
+        # 1. Check if we need to reload data (outside buffer)
+        buffer_idx = new_view_idx - self.current_start_index
+        if buffer_idx < 0 or buffer_idx >= self.TEXT_POOL_SIZE:
+            # Jump to the new location (reloads buffer centered)
+            self.jump_to_index(new_view_idx, immediate=True, center=True)
+            return
+
+        # 2. Check visibility in current native viewport
+        item_top = buffer_idx * self.ROW_HEIGHT
+        item_bottom = item_top + self.ROW_HEIGHT
+
+        viewport_top = self.current_scroll_pixels
+        viewport_bottom = viewport_top + (self.available_log_height if hasattr(self, "available_log_height") else 500)
+
+        # 3. Native Scroll if needed
+        if item_top < viewport_top:
+            try:
+                await self.log_list_view.scroll_to(offset=item_top, duration=0)
+                self.current_scroll_pixels = item_top
+            except: pass
+        elif item_bottom > viewport_bottom:
+            target = item_bottom - (self.available_log_height if hasattr(self, "available_log_height") else 500)
+            try:
+                await self.log_list_view.scroll_to(offset=target, duration=0)
+                self.current_scroll_pixels = target
+            except: pass
+
+        self.needs_render = True
+        self.update_log_view()
+        self.page.update()
 
     async def on_resize(self, e):
         # Update available height info
