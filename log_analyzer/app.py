@@ -313,7 +313,7 @@ class LogAnalyzerApp:
         self.FONT_SIZE = 12
         self.LINE_HEIGHT_MULT = self.ROW_HEIGHT / self.FONT_SIZE
         self.LINES_PER_PAGE = 20
-        self.TEXT_POOL_SIZE = 600 # Further increased buffer size for smoother native scrolling
+        self.TEXT_POOL_SIZE = 200 # Further increased buffer size for smoother native scrolling
 
         self.text_pool = []
         for _ in range(self.TEXT_POOL_SIZE):
@@ -340,7 +340,7 @@ class LogAnalyzerApp:
             item_extent=self.ROW_HEIGHT,
             expand=True,
             on_scroll=self.on_list_view_scroll,
-            scroll_interval=50, # Throttle scroll events (50ms)
+            scroll_interval=300, # Throttle scroll events (50ms)
         )
 
         self.log_display_column = ft.Container(
@@ -929,7 +929,7 @@ class LogAnalyzerApp:
     async def on_list_view_scroll(self, e):
         # Handle infinite scroll / sliding window
         if not self.log_engine: return
-
+        if e.event_type.value != "update": return
         # Threshold in pixels to trigger load (e.g. 1 screen height)
         threshold = self.available_log_height if hasattr(self, "available_log_height") else 500
 
@@ -940,7 +940,7 @@ class LogAnalyzerApp:
         # HIT BOTTOM -> Load Next Batch
         if e.pixels >= e.max_scroll_extent - threshold:
             # Batch Load Cooldown
-            if time.time() - self.last_batch_load_time < 0.05:
+            if time.time() - self.last_batch_load_time < 0.35:
                 return
 
             total_items = self.navigator.total_items
@@ -977,7 +977,7 @@ class LogAnalyzerApp:
         # HIT TOP -> Load Prev Batch
         elif e.pixels <= threshold:
             # Batch Load Cooldown
-            if time.time() - self.last_batch_load_time < 0.05:
+            if time.time() - self.last_batch_load_time < 0.35:
                 return
 
             if self.current_start_index > 0:
