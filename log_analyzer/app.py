@@ -8,8 +8,6 @@ import re
 import threading
 import bisect
 import webbrowser
-import tkinter as tk
-from tkinter import filedialog
 
 from log_analyzer.core.engine import LogEngine, MockLogEngine, HAS_RUST
 from log_analyzer.core.filter import Filter
@@ -106,7 +104,6 @@ class LogAnalyzerApp:
 
         # 系統標記
         self.is_closing = False
-        self.is_picking_file = False
 
         # UI Components
         self.top_bar_comp = TopBar(self)
@@ -199,11 +196,7 @@ class LogAnalyzerApp:
         處理視窗關閉請求。
         檢查是否有未儲存的 Filters，若有則彈出 Flet 對話框詢問。
         """
-        # 1. 忽略檔案選擇期間的訊號 (防止遞迴或誤判)
-        if self.is_picking_file:
-            return
 
-        # 2. 檢查是否需要儲存
         if self.filters_dirty:
             await self.show_unsaved_changes_dialog()
         else:
@@ -509,39 +502,17 @@ class LogAnalyzerApp:
         await self._run_safe_async(self._perform_open_file_dialog(), "Opening File")
 
     async def _perform_open_file_dialog(self):
-        import tkinter as tk
-        from tkinter import filedialog
+        file_picker = ft.FilePicker() # Create instance directly
+        # No need to add to overlay or call page.update() explicitly for this pattern
 
-        def pick_file_sync():
-            # 使用更穩定的方式啟動對話框
-            # 某些環境下，不要頻繁建立與銷毀 root 更有助於穩定
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes('-topmost', True)
-
-            try:
-                path = filedialog.askopenfilename(
-                    title="Select Log File",
-                    initialdir=self.config.get("last_log_dir", os.path.expanduser("~")),
-                    filetypes=[("Log Files", "*.log;*.txt;*.tat"), ("All Files", "*.*")]
-                )
-            finally:
-                # 關鍵：先取消 topmost 屬性，再延遲銷毀，
-                # 讓 Windows 有時間平穩地切換焦點回 Flet 視窗
-                root.attributes("-topmost", False)
-                root.update()
-                root.destroy()
-            return path
-
-        self.is_picking_file = True
-        # 在開啟對話框前，先讓 Flet 處理完當前所有 UI 變更
-        self.page.update()
-
-        file_path = await asyncio.to_thread(pick_file_sync)
-
-        # 對話框關閉後，給予一小段緩衝時間，過濾掉隨之而來的錯誤 on_close 訊號
-        await asyncio.sleep(0.5)
-        self.is_picking_file = False
+        # 直接從 pick_files 的返回值獲取結果
+        files = await file_picker.pick_files(
+            allow_multiple=False,
+            allowed_extensions=["log", "txt", "tat", "csv", "xml", "json", "md", "text"], # 增加常用副檔名
+            dialog_title="Select Log File",
+            initial_directory=self.config.get("last_log_dir", os.path.expanduser("~"))
+        )
+        file_path = files[0].path if files and len(files) > 0 else None # Safely get path
 
         if file_path:
             self.config["last_log_dir"] = os.path.dirname(file_path)
@@ -592,43 +563,48 @@ class LogAnalyzerApp:
     async def _perform_import_filters_logic(self, filepath=None):
         path = filepath
         if not path:
-            def ask_file():
-                root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
-                path = filedialog.askopenfilename(
-                    title="Import TAT Filters",
-                    initialdir=self.config.get("last_filter_dir", "."),
-                    filetypes=[("TextAnalysisTool", "*.tat"), ("All Files", "*.*")])
-                root.destroy(); return path
-            self.is_picking_file = True
-            path = await asyncio.to_thread(ask_file)
-            self.is_picking_file = False
+            file_picker = ft.FilePicker() # Create instance directly
+            # No need to add to overlay or call page.update() explicitly for this pattern
+
+            files = await file_picker.pick_files(
+                allow_multiple=False,
+                allowed_extensions=["tat", "xml"],
+                dialog_title="Import TAT Filters",
+                initial_directory=self.config.get("last_filter_dir", "."),
+            )
+            # 安全處理 files 可能為 None 或空列表的情況
+            path = files[0].path if files and len(files) > 0 else None
 
         if not path: return
         import xml.etree.ElementTree as ET
-        tree = ET.parse(path)
-        root = tree.getroot()
-        new_filters = []
-        for f_node in root.iter('filter'): # Explicitly iterate 'filter' tags
-            en = f_node.get('enabled', 'y').lower() == 'y'
-            # Compatible with both 'exclude' and 'excluding'
-            exc_attr = f_node.get('exclude', f_node.get('excluding', 'n')).lower()
-            exc = exc_attr == 'y'
+        try:
+            tree = ET.parse(path)
+            root = tree.getroot()
+            new_filters = []
+            for f_node in root.iter('filter'): # Explicitly iterate 'filter' tags
+                en = f_node.get('enabled', 'y').lower() == 'y'
+                # Compatible with both 'exclude' and 'excluding'
+                exc_attr = f_node.get('exclude', f_node.get('excluding', 'n')).lower()
+                exc = exc_attr == 'y'
 
-            # Compatible with both 'regex' and 'case_sensitive' for determining regex
-            reg_attr = f_node.get('regex', f_node.get('case_sensitive', 'n')).lower()
-            reg = reg_attr == 'y'
+                # Compatible with both 'regex' and 'case_sensitive' for determining regex
+                reg_attr = f_node.get('regex', f_node.get('case_sensitive', 'n')).lower()
+                reg = reg_attr == 'y'
 
-            fg = f_node.get('foreColor', '000000')
-            bg = f_node.get('backColor', 'ffffff')
-            if not fg.startswith("#"): fg = "#" + fg
-            if not bg.startswith("#"): bg = "#" + bg
+                fg = f_node.get('foreColor', '000000')
+                bg = f_node.get('backColor', 'ffffff')
+                if not fg.startswith("#"): fg = "#" + fg
+                if not bg.startswith("#"): bg = "#" + bg
 
-            # For btm.tat, text is an attribute
-            text = f_node.get('text')
-            if text is None: # For older format, text might be directly inside tag
-                text = f_node.text if f_node.text else ""
+                # For btm.tat, text is an attribute
+                text = f_node.get('text')
+                if text is None: # For older format, text might be directly inside tag
+                    text = f_node.text if f_node.text else ""
 
-            new_filters.append(Filter(text, fg, bg, en, reg, exc))
+                new_filters.append(Filter(text, fg, bg, en, reg, exc))
+        except Exception as e:
+            self.show_toast(f"Error parsing filter file: {e}", is_error=True)
+            return "Failed to import filters"
         if new_filters:
             self.filters.extend(new_filters)
             await self.render_filters()
@@ -660,17 +636,14 @@ class LogAnalyzerApp:
         await self._run_safe_async(self._perform_save_as_logic(), "Saving Filters")
 
     async def _perform_save_as_logic(self):
-        def ask_save():
-            root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
-            path = filedialog.asksaveasfilename(
-                title="Save Filters As",
-                defaultextension=".tat",
-                initialdir=self.config.get("last_filter_dir", "."),
-                filetypes=[("TextAnalysisTool", "*.tat")])
-            root.destroy(); return path
-        self.is_picking_file = True
-        path = await asyncio.to_thread(ask_save)
-        self.is_picking_file = False
+        file_picker = ft.FilePicker() # Create instance directly
+
+        path = await file_picker.save_file( # Directly get path from save_file return value
+            allowed_extensions=["tat"],
+            dialog_title="Save Filters As",
+            initial_directory=self.config.get("last_filter_dir", os.path.expanduser("~")),
+            file_name=os.path.basename(self.current_tat_path) if self.current_tat_path else "filters.tat"
+        )
         if path:
             await self._write_filters_to_file(path)
 
