@@ -325,10 +325,14 @@ class LogAnalyzerApp:
             expand=True,
             spacing=0,
             item_extent=self.ROW_HEIGHT,
-            on_scroll_interval=0, # Report scroll events immediately
             on_scroll=self.on_log_scroll,
             auto_scroll=False,
         )
+        # Set scroll_interval dynamically to be safe with different versions/defaults
+        try:
+            self.log_list_view.on_scroll_interval = 0
+        except Exception:
+            pass
 
         # Wrap in Container for background color
         self.log_display_column = ft.Container(
@@ -1157,8 +1161,8 @@ class LogAnalyzerApp:
             ctrl = (ctypes.windll.user32.GetKeyState(0x11) & 0x8000) != 0
             shift = (ctypes.windll.user32.GetKeyState(0x10) & 0x8000) != 0
         else:
-             ctrl = e.ctrl
-             shift = e.shift
+             ctrl = getattr(e, "ctrl", False)
+             shift = getattr(e, "shift", False)
 
         if shift and self.selection_anchor != -1:
              start_view = self._get_view_index_from_raw(self.selection_anchor)
