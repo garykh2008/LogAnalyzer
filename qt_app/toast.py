@@ -48,37 +48,43 @@ class Toast(QWidget):
         self.hide()
 
     def show_message(self, message, duration=3000):
-        # 1. Stop any existing animations or timers
-        self.timer.stop()
-        self.opacity_anim.stop()
-        self.is_fading_out = False
-
-        # 2. Update Content
+        # 1. Update Content
         self.label.setText(message)
         self.label.adjustSize()
         self.adjustSize()
 
-        # 3. Position
+        # 2. Position
         if self.parent():
             parent_rect = self.parent().rect()
             x = (parent_rect.width() - self.width()) // 2
             y = parent_rect.height() - self.height() - 50
             self.move(x, y)
 
-        # 4. Show & Animate In
-        # If we were already visible/fading out, snapping to 0 might look jerky,
-        # but for a "new message" it's better to restart the cycle clearly.
-        self.opacity_effect.setOpacity(0.0)
+        # 3. Check if already visible
+        is_visible_and_opaque = self.isVisible() and self.opacity_effect.opacity() > 0.9
+
+        # Stop everything first
+        self.timer.stop()
+        self.opacity_anim.stop()
+        self.is_fading_out = False
+
         self.show()
         self.raise_()
 
-        self.opacity_anim.setStartValue(0.0)
-        self.opacity_anim.setEndValue(1.0)
-        self.opacity_anim.start()
+        if is_visible_and_opaque:
+            # If already visible, just stay visible (reset opacity to 1.0 just in case)
+            self.opacity_effect.setOpacity(1.0)
+            # Just restart the fade-out timer
+            self.timer.start(duration)
+        else:
+            # Full Fade In
+            self.opacity_effect.setOpacity(0.0)
+            self.opacity_anim.setStartValue(0.0)
+            self.opacity_anim.setEndValue(1.0)
+            self.opacity_anim.start()
 
-        # 5. Schedule Fade Out
-        # Wait for fade in (300ms) + duration
-        self.timer.start(duration + 300)
+            # Schedule Fade Out
+            self.timer.start(duration + 300)
 
     def fade_out(self):
         self.is_fading_out = True
