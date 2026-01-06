@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineE
                                QCheckBox, QPushButton, QColorDialog, QDialogButtonBox)
 from PySide6.QtGui import QColor
 from PySide6.QtCore import Qt
-from .utils import set_windows_title_bar_color
+from .utils import set_windows_title_bar_color, adjust_color_for_theme
 
 class FilterDialog(QDialog):
     def __init__(self, parent=None, filter_data=None):
@@ -78,9 +78,17 @@ class FilterDialog(QDialog):
             lum = 0.2126 * c.red() + 0.7152 * c.green() + 0.0722 * c.blue()
             return "#000000" if lum > 128 else "#FFFFFF"
 
+        # Smart Color Adjustment
+        is_dark = False
+        if self.parent() and hasattr(self.parent(), 'is_dark_mode'):
+            is_dark = self.parent().is_dark_mode
+
+        display_fg = adjust_color_for_theme(self.fg_color, False, is_dark)
+        display_bg = adjust_color_for_theme(self.bg_color, True, is_dark)
+
         # Explicitly setting border to ensure visibility in both themes
-        self.btn_fg.setStyleSheet(f"background-color: {self.fg_color}; color: {contrast(self.fg_color)}; border: 1px solid #888; padding: 5px;")
-        self.btn_bg.setStyleSheet(f"background-color: {self.bg_color}; color: {contrast(self.bg_color)}; border: 1px solid #888; padding: 5px;")
+        self.btn_fg.setStyleSheet(f"background-color: {display_fg}; color: {contrast(display_fg)}; border: 1px solid #888; padding: 5px;")
+        self.btn_bg.setStyleSheet(f"background-color: {display_bg}; color: {contrast(display_bg)}; border: 1px solid #888; padding: 5px;")
 
     def get_data(self):
         return {

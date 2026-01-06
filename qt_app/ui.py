@@ -79,7 +79,7 @@ class MainWindow(QMainWindow):
         self.filter_tree.header().resizeSection(1, 40)  # Minimized Type
         self.filter_tree.header().setSectionResizeMode(2, QHeaderView.Stretch)
         self.filter_tree.header().setSectionResizeMode(3, QHeaderView.Fixed)
-        self.filter_tree.header().resizeSection(3, 70)  # Fits 7 digits
+        self.filter_tree.header().resizeSection(3, 80)  # Fits 7 digits comfortably
 
         self.filter_tree.setDragDropMode(QAbstractItemView.InternalMove)
         self.filter_tree.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -269,6 +269,9 @@ class MainWindow(QMainWindow):
         self.is_dark_mode = not self.is_dark_mode
         self.settings.setValue("dark_mode", self.is_dark_mode)
         self.apply_theme()
+        # Refresh colors for filters
+        if self.filters:
+            self.recalc_filters()
 
     def update_status_bar(self, message):
         self.last_status_message = message
@@ -496,10 +499,10 @@ class MainWindow(QMainWindow):
             item.setText(2, flt["text"])
             item.setText(3, hits_str)
             item.setData(0, Qt.UserRole, i)
-            fg = QColor(flt["fg_color"])
-            bg = QColor(flt["bg_color"])
-            item.setForeground(2, fg)
-            item.setBackground(2, bg)
+            fg = adjust_color_for_theme(flt["fg_color"], False, self.is_dark_mode)
+            bg = adjust_color_for_theme(flt["bg_color"], True, self.is_dark_mode)
+            item.setForeground(2, QColor(fg))
+            item.setBackground(2, QColor(bg))
 
     def on_filter_item_clicked(self, item, column):
         if column == 0:
