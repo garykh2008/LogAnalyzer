@@ -159,9 +159,6 @@ class MainWindow(QMainWindow):
         # Menu
         self._create_menu()
 
-        # Load History
-        self._load_search_history()
-
         # Styling
         self.apply_theme()
 
@@ -225,7 +222,13 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(copy_action)
 
     def eventFilter(self, obj, event):
-        # Detect Focus In/Out on search widgets
+        # 1. Handle Enter Key in Search Input manually to ensure reliability
+        if (obj == self.search_input or obj == self.search_input.lineEdit()) and event.type() == QEvent.KeyPress:
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                self.find_next()
+                return True # Consume event
+
+        # 2. Detect Focus In/Out on search widgets
         if event.type() == QEvent.FocusIn:
             self._animate_search_opacity(0.95)
         elif event.type() == QEvent.FocusOut:
@@ -445,14 +448,7 @@ class MainWindow(QMainWindow):
         self.search_input.addItems(self.search_history)
         self.search_input.setCurrentText(query)
         self.search_input.blockSignals(False)
-        self.settings.setValue("search_history", self.search_history)
-
-    def _load_search_history(self):
-        hist = self.settings.value("search_history", [])
-        if hist:
-            self.search_history = [str(x) for x in hist]
-            self.search_input.addItems(self.search_history)
-            self.search_input.setCurrentIndex(-1)
+        # Not saving to settings as per request
 
     def _perform_search(self, query):
         if not query or not self.current_engine: return
@@ -463,7 +459,6 @@ class MainWindow(QMainWindow):
 
         # Read Toggle States
         is_case = self.chk_case.isChecked()
-        is_wrap = self.chk_wrap.isChecked() # Used in navigation, logic stored locally
 
         # Perform Search (Rust Backend)
         results = self.current_engine.search(query, False, is_case)
@@ -477,8 +472,6 @@ class MainWindow(QMainWindow):
         self.update_status_bar(f"Found {len(results):,} matches")
 
         if results:
-            # We don't necessarily jump to 0 anymore; find_next logic will determine.
-            # But initial search usually jumps to first match.
             self._jump_to_match(0)
         else:
             self.search_info_label.setText("No results")
