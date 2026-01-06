@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication,
                                QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
-                               QGraphicsOpacityEffect, QCheckBox)
+                               QGraphicsOpacityEffect, QCheckBox, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView)
 from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation
 from .models import LogModel
@@ -32,16 +32,10 @@ class MainWindow(QMainWindow):
         self.current_match_index = -1
         self.search_history = []
 
-        # Central Widget
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        # -- Docking Setup --
+        self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
 
-        # Layout
-        layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Log List View
+        # Log List View (Central Widget)
         self.list_view = QListView()
         self.model = LogModel()
         self.list_view.setModel(self.model)
@@ -50,7 +44,7 @@ class MainWindow(QMainWindow):
         self.delegate = LogDelegate(self.list_view)
         self.list_view.setItemDelegate(self.delegate)
 
-        # 1. Multi-selection
+        # Multi-selection
         self.list_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_view.customContextMenuRequested.connect(self.show_context_menu)
@@ -65,7 +59,32 @@ class MainWindow(QMainWindow):
         font.setStyleHint(QFont.Monospace)
         self.list_view.setFont(font)
 
-        layout.addWidget(self.list_view)
+        # Central Widget Wrapper
+        central_widget = QWidget()
+        central_layout = QVBoxLayout(central_widget)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.addWidget(self.list_view)
+        self.setCentralWidget(central_widget)
+
+        # --- Filter Panel (Dock) ---
+        self.filter_dock = QDockWidget("Filters", self)
+        self.filter_dock.setObjectName("FilterDock") # Required for saveState
+        self.filter_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
+
+        # Filter Content (Placeholder TreeWidget for now)
+        self.filter_tree = QTreeWidget()
+        self.filter_tree.setHeaderLabels(["Enabled", "Filter", "Count"])
+        self.filter_tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.filter_tree.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+
+        # Sample Data
+        item = QTreeWidgetItem(self.filter_tree)
+        item.setText(0, "☑")
+        item.setText(1, "Error")
+        item.setText(2, "0")
+
+        self.filter_dock.setWidget(self.filter_tree)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.filter_dock) # Default to bottom
 
         # --- Search Bar (Floating) ---
         self.search_widget = QWidget(central_widget)
@@ -99,12 +118,11 @@ class MainWindow(QMainWindow):
         self.btn_next.setToolTip("Next (F3)")
         self.btn_next.clicked.connect(self.find_next)
 
-        # Options
         self.chk_case = QCheckBox("Aa")
         self.chk_case.setToolTip("Case Sensitive")
         self.chk_wrap = QCheckBox("Wrap")
         self.chk_wrap.setToolTip("Wrap Search")
-        self.chk_wrap.setChecked(True) # Default on
+        self.chk_wrap.setChecked(True)
 
         self.btn_close_search = QToolButton()
         self.btn_close_search.setText("X")
@@ -139,7 +157,7 @@ class MainWindow(QMainWindow):
         self.search_anim = QPropertyAnimation(self.search_opacity_effect, b"opacity")
         self.search_anim.setDuration(200)
 
-        self.search_widget.setFixedWidth(550) # Increased width for options
+        self.search_widget.setFixedWidth(550)
         self.search_widget.hide()
 
         # Install Event Filter to track focus
@@ -190,6 +208,10 @@ class MainWindow(QMainWindow):
 
         # View Menu
         view_menu = menu_bar.addMenu("&View")
+
+        # Panels Actions
+        view_menu.addAction(self.filter_dock.toggleViewAction())
+        view_menu.addSeparator()
 
         # Theme Toggle
         toggle_theme_action = QAction("Toggle Dark/Light Mode", self)
@@ -248,7 +270,7 @@ class MainWindow(QMainWindow):
         if self.search_widget.isAncestorOf(fw) or fw == self.search_widget or fw == self.search_input.lineEdit():
             self._animate_search_opacity(0.95)
         else:
-            self._animate_search_opacity(0.5) # Medium transparency
+            self._animate_search_opacity(0.5)
 
     def _animate_search_opacity(self, target):
         if self.search_opacity_effect.opacity() == target: return
@@ -297,6 +319,8 @@ class MainWindow(QMainWindow):
             input_fg = "#cccccc"
             float_bg = "#252526" # Using solid color, opacity handled by Effect
             float_border = "#454545"
+            dock_title_bg = "#252526"
+            tree_bg = "#252526"
         else:
             # VS Code Light Theme Colors
             bg_color = "#ffffff"
@@ -316,6 +340,8 @@ class MainWindow(QMainWindow):
             input_fg = "#000000"
             float_bg = "#f3f3f3"
             float_border = "#cecece"
+            dock_title_bg = "#f3f3f3"
+            tree_bg = "#f3f3f3"
 
         self.delegate.set_hover_color(hover_bg)
         self.list_view.viewport().update()
@@ -342,6 +368,12 @@ class MainWindow(QMainWindow):
         QScrollBar::handle:vertical:hover {{ background: {scrollbar_hover}; }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
+
+        /* Dock Styling */
+        QDockWidget {{ color: {fg_color}; titlebar-close-icon: url(close.png); titlebar-normal-icon: url(float.png); }}
+        QDockWidget::title {{ background: {dock_title_bg}; padding-left: 5px; }}
+        QTreeWidget {{ background-color: {tree_bg}; border: none; }}
+        QHeaderView::section {{ background-color: {menu_bg}; color: {fg_color}; border: none; padding: 2px; }}
 
         /* Search Bar Styling */
         #search_widget {{
@@ -465,10 +497,7 @@ class MainWindow(QMainWindow):
         self.update_status_bar("Searching...")
         QApplication.processEvents()
 
-        # Read Toggle States
         is_case = self.chk_case.isChecked()
-
-        # Perform Search (Rust Backend)
         results = self.current_engine.search(query, False, is_case)
 
         self.search_results = results
@@ -504,7 +533,6 @@ class MainWindow(QMainWindow):
         query = self.search_input.currentText()
         if not query: return
 
-        # New Search Check
         if self.delegate.search_query != query or not self.search_results:
             self._update_search_history(query)
             self._perform_search(query)
@@ -512,9 +540,7 @@ class MainWindow(QMainWindow):
 
         if not self.search_results: return
 
-        # Calculate next index relative to current selection
         current_row = self.list_view.currentIndex().row()
-
         next_match_list_idx = bisect.bisect_right(self.search_results, current_row)
 
         is_wrap = self.chk_wrap.isChecked()
@@ -541,7 +567,6 @@ class MainWindow(QMainWindow):
         if not self.search_results: return
 
         current_row = self.list_view.currentIndex().row()
-
         insertion_point = bisect.bisect_left(self.search_results, current_row)
         prev_match_list_idx = insertion_point - 1
 
