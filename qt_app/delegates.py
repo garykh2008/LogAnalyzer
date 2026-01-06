@@ -5,6 +5,10 @@ from PySide6.QtCore import QSize, QRectF, Qt
 class LogDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.hover_color = QColor("#2a2d2e") # Default Dark Mode Hover
+
+    def set_hover_color(self, color):
+        self.hover_color = QColor(color)
 
     def paint(self, painter, option, index):
         painter.save()
@@ -18,7 +22,7 @@ class LogDelegate(QStyledItemDelegate):
                 bg_color = option.palette.highlight()
             elif state & QStyle.State_MouseOver:
                  # Match the hover color from QSS
-                 bg_color = QColor("#2a2d2e")
+                 bg_color = self.hover_color
 
             if bg_color:
                 painter.fillRect(option.rect, bg_color)

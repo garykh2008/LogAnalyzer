@@ -17,6 +17,8 @@ class MainWindow(QMainWindow):
 
         # Settings
         self.settings = QSettings("LogAnalyzer", "QtApp")
+        # Load theme preference (default to True/Dark)
+        self.is_dark_mode = self.settings.value("dark_mode", True, type=bool)
 
         # Central Widget
         central_widget = QWidget()
@@ -65,7 +67,7 @@ class MainWindow(QMainWindow):
         self._create_menu()
 
         # Styling
-        self._apply_theme()
+        self.apply_theme()
 
     def _create_menu(self):
         menu_bar = self.menuBar()
@@ -86,6 +88,11 @@ class MainWindow(QMainWindow):
         # View Menu
         view_menu = menu_bar.addMenu("&View")
 
+        # Theme Toggle
+        toggle_theme_action = QAction("Toggle Dark/Light Mode", self)
+        toggle_theme_action.triggered.connect(self.toggle_theme)
+        view_menu.addAction(toggle_theme_action)
+
         # Copy Action (Global shortcut)
         copy_action = QAction("&Copy", self)
         copy_action.setShortcut(QKeySequence.Copy) # Ctrl+C
@@ -98,36 +105,71 @@ class MainWindow(QMainWindow):
         edit_menu = menu_bar.addMenu("&Edit")
         edit_menu.addAction(copy_action)
 
-    def _apply_theme(self):
-        # VS Code Dark Theme Colors
-        bg_color = "#1e1e1e"
-        fg_color = "#d4d4d4"
-        selection_bg = "#264f78"
-        scrollbar_bg = "#1e1e1e"
-        scrollbar_handle = "#424242"
+    def toggle_theme(self):
+        self.is_dark_mode = not self.is_dark_mode
+        self.settings.setValue("dark_mode", self.is_dark_mode)
+        self.apply_theme()
 
-        # 2. Reduced Line Height (via reduced padding and potential CSS adjustments)
-        # Note: QListView with setUniformItemSizes relies heavily on the first item's size.
-        # Reducing padding helps.
+    def apply_theme(self):
+        if self.is_dark_mode:
+            # VS Code Dark Theme Colors
+            bg_color = "#1e1e1e"
+            fg_color = "#d4d4d4"
+            selection_bg = "#264f78"
+            selection_fg = "#ffffff"
+            hover_bg = "#2a2d2e"
+            scrollbar_bg = "#1e1e1e"
+            scrollbar_handle = "#424242"
+            scrollbar_hover = "#4f4f4f"
+            menu_bg = "#252526"
+            menu_sel = "#094771"
+            bar_bg = "#007acc"
+            bar_fg = "#ffffff"
+        else:
+            # VS Code Light Theme Colors (Approximate)
+            bg_color = "#ffffff"
+            fg_color = "#000000"
+            selection_bg = "#add6ff"
+            selection_fg = "#000000"
+            hover_bg = "#e8e8e8"
+            scrollbar_bg = "#f3f3f3"
+            scrollbar_handle = "#c1c1c1"
+            scrollbar_hover = "#a8a8a8"
+            menu_bg = "#f3f3f3"
+            menu_sel = "#0060c0" # Native-ish highlight
+            bar_bg = "#007acc" # VS Code usually keeps blue status bar, or purple
+            bar_fg = "#ffffff"
+
+        # Update Delegate Hover Color
+        self.delegate.set_hover_color(hover_bg)
+
+        # We need to manually trigger a repaint of the list view to apply delegate changes immediately
+        self.list_view.viewport().update()
 
         style = f"""
         QMainWindow {{
             background-color: {bg_color};
+            color: {fg_color};
+        }}
+        QWidget {{
+            color: {fg_color};
         }}
         QMenuBar {{
-            background-color: #333333;
-            color: #cccccc;
+            background-color: {menu_bg};
+            color: {fg_color};
         }}
         QMenuBar::item:selected {{
-            background-color: #505050;
+            background-color: {selection_bg};
+            color: {selection_fg};
         }}
         QMenu {{
-            background-color: #252526;
-            color: #cccccc;
+            background-color: {menu_bg};
+            color: {fg_color};
             border: 1px solid #454545;
         }}
         QMenu::item:selected {{
-            background-color: #094771;
+            background-color: {menu_sel};
+            color: #ffffff;
         }}
         QListView {{
             background-color: {bg_color};
@@ -138,15 +180,14 @@ class MainWindow(QMainWindow):
         QListView::item {{
             padding: 0px 4px;
             border-bottom: 0px solid transparent;
-            /* height: 22px; -- Delegate sizeHint overrides this now, removed to prevent conflict */
         }}
         QListView::item:selected {{
             background-color: {selection_bg};
-            color: #ffffff;
+            color: {selection_fg};
         }}
         QStatusBar {{
-            background-color: #007acc;
-            color: #ffffff;
+            background-color: {bar_bg};
+            color: {bar_fg};
         }}
         /* Scrollbar Styling */
         QScrollBar:vertical {{
@@ -160,7 +201,7 @@ class MainWindow(QMainWindow):
             min-height: 20px;
         }}
         QScrollBar::handle:vertical:hover {{
-            background: #4f4f4f;
+            background: {scrollbar_hover};
         }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             height: 0px;
@@ -236,11 +277,6 @@ class MainWindow(QMainWindow):
         # Ensure toast stays positioned on resize
         if not self.toast.isHidden():
              # Re-trigger show logic to update position
-             # Since show_message calculates pos based on parent size,
-             # calling adjustSize/move logic again would be ideal but show_message resets text.
-             # Ideally Toast would handle its own resize events or we move it here.
-             # For now, let's just re-center it if we can access the label text.
-             # A simple hack is to re-show the current text.
              txt = self.toast.label.text()
              self.toast.show_message(txt, duration=self.toast.timer.remainingTime())
         super().resizeEvent(event)
