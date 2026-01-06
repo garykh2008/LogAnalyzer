@@ -136,9 +136,9 @@ class MainWindow(QMainWindow):
             outline: 0;
         }}
         QListView::item {{
-            padding: 0px 4px;  /* Reduced vertical padding from 2px to 0px */
-            border-bottom: 0px solid transparent; /* Ensure no border adds height */
-            height: 18px; /* Force a tighter height (Consolas 11 is roughly 15-16px high) */
+            padding: 0px 4px;
+            border-bottom: 0px solid transparent;
+            /* height: 22px; -- Delegate sizeHint overrides this now, removed to prevent conflict */
         }}
         QListView::item:selected {{
             background-color: {selection_bg};
