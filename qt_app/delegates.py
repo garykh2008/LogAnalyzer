@@ -32,23 +32,21 @@ class LogDelegate(QStyledItemDelegate):
                 else:
                     painter.setPen(option.palette.text().color())
 
-                # Calculate vertically centered rect
-                # Ensure we have some padding
+                # Simple drawText is fastest.
+                # QRect adjustment for padding
                 rect = option.rect.adjusted(4, 0, -4, 0)
-
-                # Use font metrics to vertically align if needed, but Qt.AlignVCenter usually handles it well
-                # provided the rect height is sufficient.
 
                 font_metrics = option.fontMetrics
                 elided_text = font_metrics.elidedText(text, Qt.ElideNone, rect.width())
 
+                # Vertically center
                 painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, elided_text)
 
         finally:
             painter.restore()
 
     def sizeHint(self, option, index):
-        # Increased height to prevent overlap.
-        # Standard Consolas 11pt line height is approx 17-19px depending on DPI.
-        # 26px gives plenty of breathing room.
-        return QSize(option.rect.width(), 26)
+        # Calculate height based on the current font metrics + padding
+        # This automatically adapts to font size changes and different DPIs
+        height = option.fontMetrics.height() + 4
+        return QSize(option.rect.width(), height)
