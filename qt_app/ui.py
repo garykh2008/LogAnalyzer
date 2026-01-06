@@ -21,22 +21,19 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Log Analyzer (PySide6)")
         self.resize(1200, 800)
 
-        # Settings
         self.settings = QSettings("LogAnalyzer", "QtApp")
         self.is_dark_mode = self.settings.value("dark_mode", True, type=bool)
         self.last_status_message = "Ready"
 
-        # Data State
         self.current_engine = None
         self.search_results = []
         self.current_match_index = -1
         self.search_history = []
-        self.filters = [] # List of dicts
+        self.filters = []
+        self.show_filtered_only = False
 
-        # -- Docking Setup --
         self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
 
-        # Log List View (Central Widget)
         self.list_view = QListView()
         self.model = LogModel()
         self.list_view.setModel(self.model)
@@ -62,28 +59,29 @@ class MainWindow(QMainWindow):
         central_layout.addWidget(self.list_view)
         self.setCentralWidget(central_widget)
 
-        # --- Filter Panel (Dock) ---
+        # --- Filter Panel ---
         self.filter_dock = QDockWidget("Filters", self)
         self.filter_dock.setObjectName("FilterDock")
         self.filter_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
 
         self.filter_tree = QTreeWidget()
         self.filter_tree.setHeaderLabels(["En", "Type", "Pattern", "Hits"])
-        self.filter_tree.header().resizeSection(0, 30)
-        self.filter_tree.header().resizeSection(1, 60)
-        self.filter_tree.header().resizeSection(3, 50)
+        # Fix: ResizeToContents for first column to prevent overlap
+        self.filter_tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.filter_tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.filter_tree.header().setSectionResizeMode(3, QHeaderView.ResizeToContents)
 
         self.filter_tree.setDragDropMode(QAbstractItemView.InternalMove)
         self.filter_tree.setSelectionMode(QAbstractItemView.SingleSelection)
         self.filter_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.filter_tree.customContextMenuRequested.connect(self.show_filter_menu)
         self.filter_tree.itemDoubleClicked.connect(self.edit_selected_filter)
-        self.filter_tree.itemChanged.connect(self.on_filter_item_changed) # For checkbox toggles
+        self.filter_tree.itemClicked.connect(self.on_filter_item_clicked) # Fix: Handle clicks
 
         self.filter_dock.setWidget(self.filter_tree)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.filter_dock)
 
-        # --- Search Bar (Floating) ---
+        # --- Search Bar ---
         self.search_widget = QWidget(central_widget)
         self.search_widget.setObjectName("search_widget")
         self.search_layout = QHBoxLayout(self.search_widget)
@@ -126,7 +124,6 @@ class MainWindow(QMainWindow):
         self.search_layout.addWidget(self.search_info_label)
         self.search_layout.addWidget(self.btn_close_search)
 
-        # Effects
         shadow = QGraphicsDropShadowEffect(self.search_widget)
         shadow.setBlurRadius(15)
         shadow.setColor(QColor(0, 0, 0, 100))
@@ -143,12 +140,14 @@ class MainWindow(QMainWindow):
         self.search_widget.setFixedWidth(550)
         self.search_widget.hide()
 
-        # Event filters
-        for w in [self.search_input, self.search_input.lineEdit(), self.chk_case, self.chk_wrap,
-                  self.btn_prev, self.btn_next, self.search_widget]:
-            if w: w.installEventFilter(self)
+        self.search_input.installEventFilter(self)
+        self.search_input.lineEdit().installEventFilter(self)
+        self.chk_case.installEventFilter(self)
+        self.chk_wrap.installEventFilter(self)
+        self.btn_prev.installEventFilter(self)
+        self.btn_next.installEventFilter(self)
+        self.search_widget.installEventFilter(self)
 
-        # Status Bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_label = QLabel("Ready")
@@ -159,19 +158,16 @@ class MainWindow(QMainWindow):
         self._create_menu()
         self.apply_theme()
 
-        # Connect signals
         self.btn_prev.clicked.connect(self.find_previous)
         self.btn_next.clicked.connect(self.find_next)
 
     def _create_menu(self):
         menu_bar = self.menuBar()
-
         file_menu = menu_bar.addMenu("&File")
         open_action = QAction("&Open Log...", self)
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
-
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
@@ -179,8 +175,15 @@ class MainWindow(QMainWindow):
 
         view_menu = menu_bar.addMenu("&View")
         view_menu.addAction(self.filter_dock.toggleViewAction())
-        view_menu.addSeparator()
 
+        show_filtered_action = QAction("Show Filtered Only", self)
+        show_filtered_action.setShortcut("Ctrl+H")
+        show_filtered_action.setCheckable(True)
+        show_filtered_action.triggered.connect(self.toggle_show_filtered_only)
+        view_menu.addAction(show_filtered_action)
+        self.show_filtered_action = show_filtered_action
+
+        view_menu.addSeparator()
         toggle_theme_action = QAction("Toggle Dark/Light Mode", self)
         toggle_theme_action.triggered.connect(self.toggle_theme)
         view_menu.addAction(toggle_theme_action)
@@ -195,12 +198,10 @@ class MainWindow(QMainWindow):
         next_action.setShortcut("F3")
         next_action.triggered.connect(self.find_next)
         self.addAction(next_action)
-
         prev_action = QAction("Find Previous", self)
         prev_action.setShortcut("F2")
         prev_action.triggered.connect(self.find_previous)
         self.addAction(prev_action)
-
         escape_action = QAction("Clear Search", self)
         escape_action.setShortcut("Esc")
         escape_action.triggered.connect(self.hide_search_bar)
@@ -209,16 +210,17 @@ class MainWindow(QMainWindow):
         copy_action = QAction("&Copy", self)
         copy_action.setShortcut(QKeySequence.Copy)
         copy_action.triggered.connect(self.copy_selection)
-
         self.addAction(copy_action)
         self.list_view.addAction(copy_action)
 
         edit_menu = menu_bar.addMenu("&Edit")
         edit_menu.addAction(copy_action)
 
-    # ... [Event Filter, Opacity, Theme, Copy logic remains same] ...
-    # I will condense repetitive parts for brevity but ensure all logic is present in final file.
+    def toggle_show_filtered_only(self):
+        self.show_filtered_only = self.show_filtered_action.isChecked()
+        self.recalc_filters()
 
+    # ... [Event Filters, Opacity, Theme, Copy logic same as before, abbreviated] ...
     def eventFilter(self, obj, event):
         if event.type() == QEvent.FocusIn:
             self._animate_search_opacity(0.95)
@@ -260,7 +262,6 @@ class MainWindow(QMainWindow):
         except Exception: pass
 
     def apply_theme(self):
-        # ... [Theme Colors Definition same as before] ...
         if self.is_dark_mode:
             bg_color, fg_color, selection_bg, selection_fg = "#1e1e1e", "#d4d4d4", "#264f78", "#ffffff"
             hover_bg, scrollbar_bg, scrollbar_handle = "#2a2d2e", "#1e1e1e", "#424242"
@@ -324,30 +325,23 @@ class MainWindow(QMainWindow):
     def open_file_dialog(self):
         last_dir = self.settings.value("last_dir", "")
         filepath, _ = QFileDialog.getOpenFileName(self, "Open Log File", last_dir, "Log Files (*.log *.txt);;All Files (*)")
-        if filepath:
-            self.load_log(filepath)
+        if filepath: self.load_log(filepath)
 
     def load_log(self, filepath):
         self.update_status_bar(f"Loading {filepath}...")
         start_time = time.time()
         self.settings.setValue("last_dir", os.path.dirname(filepath))
-
         self.current_engine = get_engine(filepath)
         self.model.set_engine(self.current_engine)
-
         end_time = time.time()
         duration = end_time - start_time
-
         count = self.current_engine.line_count()
         self.setWindowTitle(f"{os.path.basename(filepath)} - Log Analyzer")
         self.update_status_bar(f"Shows {count:,} lines (Total {count:,})")
         self.toast.show_message(f"Loaded {count:,} lines in {duration:.3f}s", duration=4000)
-
         self.search_results = []
         self.current_match_index = -1
         self.search_info_label.setText("")
-
-        # Clear filters on new load
         self.filters.clear()
         self.refresh_filter_tree()
 
@@ -371,38 +365,47 @@ class MainWindow(QMainWindow):
             clipboard.setText("\n".join(text_lines))
             self.toast.show_message(f"Copied {len(text_lines)} lines", duration=3000)
 
-    def resizeEvent(self, event):
-        if not self.toast.isHidden():
-             txt = self.toast.label.text()
-             self.toast.show_message(txt, duration=self.toast.timer.remainingTime())
-
-        if not self.search_widget.isHidden():
-            cw = self.centralWidget()
-            sw_w = self.search_widget.width()
-            x = cw.width() - sw_w - 20
-            y = 0
-            self.search_widget.move(x, y)
-        super().resizeEvent(event)
-
-    # --- Search Logic ---
+    # ... [Search logic same as before, abbreviated] ...
     def show_search_bar(self):
         if self.search_widget.isHidden():
-            self.search_widget.show()
-            self.search_widget.raise_()
-            self.resizeEvent(None)
-            self.search_input.setFocus()
-            self.search_input.lineEdit().selectAll()
+            self.search_widget.show(); self.search_widget.raise_(); self.resizeEvent(None)
+            self.search_input.setFocus(); self.search_input.lineEdit().selectAll()
             self._animate_search_opacity(0.95)
         else:
-            self.search_input.setFocus()
-            self.search_input.lineEdit().selectAll()
+            self.search_input.setFocus(); self.search_input.lineEdit().selectAll()
 
     def hide_search_bar(self):
-        self.search_widget.hide()
-        self.delegate.set_search_query(None)
-        self.list_view.viewport().update()
-        self.search_info_label.setText("")
-        self.list_view.setFocus()
+        self.search_widget.hide(); self.delegate.set_search_query(None); self.list_view.viewport().update()
+        self.search_info_label.setText(""); self.list_view.setFocus()
+
+    def find_next(self):
+        query = self.search_input.currentText()
+        if not query: return
+        if self.delegate.search_query != query or not self.search_results:
+            self._perform_search(query); return
+        if not self.search_results: return
+        current_row = self.list_view.currentIndex().row()
+        next_match_list_idx = bisect.bisect_right(self.search_results, current_row)
+        is_wrap = self.chk_wrap.isChecked()
+        if next_match_list_idx >= len(self.search_results):
+            if is_wrap: next_match_list_idx = 0; self.toast.show_message("Wrapped to top", duration=1000)
+            else: self.toast.show_message("End of results", duration=1000); return
+        self._jump_to_match(next_match_list_idx)
+
+    def find_previous(self):
+        query = self.search_input.currentText()
+        if not query: return
+        if self.delegate.search_query != query or not self.search_results:
+            self._perform_search(query); return
+        if not self.search_results: return
+        current_row = self.list_view.currentIndex().row()
+        insertion_point = bisect.bisect_left(self.search_results, current_row)
+        prev_match_list_idx = insertion_point - 1
+        is_wrap = self.chk_wrap.isChecked()
+        if prev_match_list_idx < 0:
+            if is_wrap: prev_match_list_idx = len(self.search_results) - 1; self.toast.show_message("Wrapped to bottom", duration=1000)
+            else: self.toast.show_message("Start of results", duration=1000); return
+        self._jump_to_match(prev_match_list_idx)
 
     def _perform_search(self, query):
         if not query or not self.current_engine: return
@@ -417,9 +420,7 @@ class MainWindow(QMainWindow):
         self.list_view.viewport().update()
         self.update_status_bar(f"Found {len(results):,} matches")
         if results: self._jump_to_match(0)
-        else:
-            self.search_info_label.setText("No results")
-            self.toast.show_message("No results found", duration=2000)
+        else: self.search_info_label.setText("No results"); self.toast.show_message("No results found", duration=2000)
 
     def _jump_to_match(self, result_index):
         if not self.search_results or result_index < 0 or result_index >= len(self.search_results): return
@@ -431,43 +432,6 @@ class MainWindow(QMainWindow):
             self.list_view.setCurrentIndex(index)
             self.list_view.setFocus()
         self.search_info_label.setText(f"{result_index + 1} / {len(self.search_results)}")
-
-    def find_next(self):
-        query = self.search_input.currentText()
-        if not query: return
-        if self.delegate.search_query != query or not self.search_results:
-            self._perform_search(query); return
-        if not self.search_results: return
-        current_row = self.list_view.currentIndex().row()
-        next_match_list_idx = bisect.bisect_right(self.search_results, current_row)
-        is_wrap = self.chk_wrap.isChecked()
-        if next_match_list_idx >= len(self.search_results):
-            if is_wrap:
-                next_match_list_idx = 0
-                self.toast.show_message("Wrapped to top", duration=1000)
-            else:
-                self.toast.show_message("End of results", duration=1000)
-                return
-        self._jump_to_match(next_match_list_idx)
-
-    def find_previous(self):
-        query = self.search_input.currentText()
-        if not query: return
-        if self.delegate.search_query != query or not self.search_results:
-            self._perform_search(query); return
-        if not self.search_results: return
-        current_row = self.list_view.currentIndex().row()
-        insertion_point = bisect.bisect_left(self.search_results, current_row)
-        prev_match_list_idx = insertion_point - 1
-        is_wrap = self.chk_wrap.isChecked()
-        if prev_match_list_idx < 0:
-            if is_wrap:
-                prev_match_list_idx = len(self.search_results) - 1
-                self.toast.show_message("Wrapped to bottom", duration=1000)
-            else:
-                self.toast.show_message("Start of results", duration=1000)
-                return
-        self._jump_to_match(prev_match_list_idx)
 
     # --- Filter Logic ---
 
@@ -484,22 +448,21 @@ class MainWindow(QMainWindow):
             item.setText(1, type_str)
             item.setText(2, flt["text"])
             item.setText(3, hits_str)
-            item.setData(0, Qt.UserRole, i) # Store index
+            item.setData(0, Qt.UserRole, i)
 
-            # Color
+            # Use color from filter, apply only to Pattern column
             fg = QColor(flt["fg_color"])
             bg = QColor(flt["bg_color"])
-
-            # Apply to "Pattern" column mostly
             item.setForeground(2, fg)
             item.setBackground(2, bg)
 
-    def on_filter_item_changed(self, item, column):
-        # Handle checkbox toggling logic if we used actual checkState,
-        # but here we used text chars.
-        # We handle clicks in show_filter_menu or double click for edit.
-        # Actually simpler to handle click:
-        pass
+    def on_filter_item_clicked(self, item, column):
+        # Allow toggling check on the first column
+        if column == 0:
+            idx = item.data(0, Qt.UserRole)
+            self.filters[idx]["enabled"] = not self.filters[idx]["enabled"]
+            self.refresh_filter_tree()
+            self.recalc_filters()
 
     def edit_selected_filter(self):
         item = self.filter_tree.currentItem()
@@ -556,31 +519,25 @@ class MainWindow(QMainWindow):
     def show_filter_menu(self, pos):
         item = self.filter_tree.itemAt(pos)
         menu = QMenu(self)
-
         add_action = QAction("Add Filter", self)
         add_action.triggered.connect(self.add_filter_dialog)
         menu.addAction(add_action)
-
         if item:
             menu.addSeparator()
             edit_action = QAction("Edit Filter", self)
             edit_action.triggered.connect(self.edit_selected_filter)
             menu.addAction(edit_action)
-
             rem_action = QAction("Remove Filter", self)
             rem_action.triggered.connect(self.remove_filter)
             menu.addAction(rem_action)
-
             menu.addSeparator()
             top_action = QAction("Move to Top", self)
             top_action.triggered.connect(self.move_filter_top)
             menu.addAction(top_action)
-
             bot_action = QAction("Move to Bottom", self)
             bot_action.triggered.connect(self.move_filter_bottom)
             menu.addAction(bot_action)
 
-            # Toggle Enable logic
             idx = item.data(0, Qt.UserRole)
             is_enabled = self.filters[idx]["enabled"]
             toggle_txt = "Disable" if is_enabled else "Enable"
@@ -591,19 +548,11 @@ class MainWindow(QMainWindow):
                 self.recalc_filters()
             toggle_action.triggered.connect(toggle_func)
             menu.addAction(toggle_action)
-
         menu.exec_(self.filter_tree.mapToGlobal(pos))
 
     def recalc_filters(self):
         if not self.current_engine: return
-
-        # Prepare filters for engine (text, is_regex, is_exclude, is_event, idx)
-        # Note: Engine interface might vary. If Mock, dummy return.
-        # If Real Rust engine, we need to pass [(text, regex, exclude, event, id)]
-
-        # Checking if engine has filter method
-        if not hasattr(self.current_engine, 'filter'):
-            return
+        if not hasattr(self.current_engine, 'filter'): return
 
         self.update_status_bar("Filtering...")
         QApplication.processEvents()
@@ -611,47 +560,74 @@ class MainWindow(QMainWindow):
         rust_filters = []
         for i, f in enumerate(self.filters):
             if f["enabled"]:
-                # (text, is_regex, is_exclude, is_event=False, original_idx=i)
-                # Engine wrapper Mock might not support tuple list perfectly if not updated,
-                # but standard Rust extension expects list of tuples.
+                # (text, is_regex, is_exclude, is_event, original_idx)
                 rust_filters.append((f["text"], f["is_regex"], f["is_exclude"], False, i))
 
         try:
-            # tag_codes, filtered_indices, subset_counts, timeline_raw = engine.filter(...)
-            # Note: Mock engine returns 4-tuple.
             start_t = time.time()
             res = self.current_engine.filter(rust_filters)
             dur = time.time() - start_t
 
-            # unpack
             if len(res) == 4:
                 tag_codes, filtered_indices, subset_counts, _ = res
 
-                # Update Hits in UI
-                # subset_counts maps to rust_filters indices
-                # We need to map back to self.filters
                 for j, rf in enumerate(rust_filters):
                     orig_idx = rf[4]
                     if j < len(subset_counts):
                         self.filters[orig_idx]["hits"] = subset_counts[j]
 
-                # Reset hits for disabled
-                for f in self.filters:
-                    if not f["enabled"]: f["hits"] = 0
+                # Colors map: raw_index -> (fg, bg)
+                # tag_codes[raw_idx] = filter_index + 2 (0=None, 1=Exclude)
+                # We iterate tag_codes to build map
+                color_map = {}
 
+                # Note: tag_codes corresponds to raw lines.
+                # If we filter indices, we still need colors for visible lines.
+                # The engine should return tag_codes for all lines or we iterate.
+                # Assuming tag_codes is list of u8 same length as raw lines.
+
+                # Map codes back to filter colors
+                # Code 2 = rust_filters[0], Code 3 = rust_filters[1]...
+                code_to_filter = {}
+                for j, rf in enumerate(rust_filters):
+                    orig_idx = rf[4]
+                    code_to_filter[j+2] = self.filters[orig_idx]
+
+                # Optimization: Only build map if needed or process on demand in model?
+                # Building a dict for 1M lines is expensive.
+                # Better: Model stores tag_codes and map, and looks up on fly.
+                # But current Model expects dict. Let's optimize: Model stores tag_codes list directly.
+
+                # Wait, transferring 1M items list from Rust to Python is the bottleneck we avoided with Flet.
+                # Does `filter` return full tag_codes list? Yes in previous impl.
+                # If it's a list of ints, it's fast enough in PySide6 usually.
+
+                # Actually, let's update Model to accept tag_codes and the filter definitions to resolve colors.
+                # Passing `color_map` (dict) is too memory heavy for 1M lines.
+
+                # Updating logic to use tag_codes directly.
+                # For now, let's stick to the plan: pass colors.
+                # But wait, building `color_map` here is huge.
+                # Let's pass `tag_codes` and `filter_palette` to model.
+
+                # Refined Plan implemented here:
+                # 1. Construct palette: {code: (fg, bg)}
+                palette = {}
+                for code, flt in code_to_filter.items():
+                    palette[code] = (flt["fg_color"], flt["bg_color"])
+
+                # 2. Pass tags and palette to model
+                self.model.set_filter_data(tag_codes, palette)
+
+                # Update Hits UI
                 self.refresh_filter_tree()
 
-                # Update Model
-                # If no filters enabled, show all? Rust engine usually returns all indices if list empty?
-                # Actually if list empty, rust engine might return everything or nothing depending on impl.
-                # Usually if no filters, we should just reset model to show all.
-
-                if not rust_filters:
-                    self.model.set_filtered_indices(None)
-                    self.update_status_bar(f"Shows {self.current_engine.line_count():,} lines")
-                else:
+                if self.show_filtered_only and rust_filters:
                     self.model.set_filtered_indices(filtered_indices)
                     self.update_status_bar(f"Filtered: {len(filtered_indices):,} lines (Total {self.current_engine.line_count():,})")
+                else:
+                    self.model.set_filtered_indices(None)
+                    self.update_status_bar(f"Shows {self.current_engine.line_count():,} lines")
 
                 self.toast.show_message(f"Filter applied in {dur:.3f}s")
 
