@@ -1,7 +1,8 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication,
                                QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
-                               QGraphicsOpacityEffect, QCheckBox, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView)
+                               QGraphicsOpacityEffect, QCheckBox, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView,
+                               QDialog)
 from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation
 from .models import LogModel
@@ -9,6 +10,7 @@ from .engine_wrapper import get_engine
 from .toast import Toast
 from .delegates import LogDelegate
 from .filter_dialog import FilterDialog
+from .utils import adjust_color_for_theme, load_tat_filters, save_tat_filters
 import os
 import time
 import sys
@@ -24,6 +26,7 @@ class MainWindow(QMainWindow):
         self.settings = QSettings("LogAnalyzer", "QtApp")
         self.is_dark_mode = self.settings.value("dark_mode", True, type=bool)
         self.last_status_message = "Ready"
+        self.current_filter_file = None
 
         self.current_engine = None
         self.search_results = []
@@ -44,6 +47,7 @@ class MainWindow(QMainWindow):
         self.list_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_view.customContextMenuRequested.connect(self.show_context_menu)
+        self.list_view.doubleClicked.connect(self.on_log_double_clicked)
 
         self.list_view.setUniformItemSizes(True)
         self.list_view.setLayoutMode(QListView.Batched)
@@ -66,17 +70,22 @@ class MainWindow(QMainWindow):
 
         self.filter_tree = QTreeWidget()
         self.filter_tree.setHeaderLabels(["En", "Type", "Pattern", "Hits"])
-        # Fix: ResizeToContents for first column to prevent overlap
-        self.filter_tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.filter_tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.filter_tree.header().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+
+        # Fixed Widths for metadata columns, Stretch for Pattern
+        self.filter_tree.header().setSectionResizeMode(0, QHeaderView.Fixed)
+        self.filter_tree.header().resizeSection(0, 30)
+        self.filter_tree.header().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.filter_tree.header().resizeSection(1, 60)
+        self.filter_tree.header().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.filter_tree.header().setSectionResizeMode(3, QHeaderView.Fixed)
+        self.filter_tree.header().resizeSection(3, 50)
 
         self.filter_tree.setDragDropMode(QAbstractItemView.InternalMove)
         self.filter_tree.setSelectionMode(QAbstractItemView.SingleSelection)
         self.filter_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.filter_tree.customContextMenuRequested.connect(self.show_filter_menu)
         self.filter_tree.itemDoubleClicked.connect(self.edit_selected_filter)
-        self.filter_tree.itemClicked.connect(self.on_filter_item_clicked) # Fix: Handle clicks
+        self.filter_tree.itemClicked.connect(self.on_filter_item_clicked)
 
         self.filter_dock.setWidget(self.filter_tree)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.filter_dock)
@@ -168,6 +177,21 @@ class MainWindow(QMainWindow):
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
+
+        file_menu.addSeparator()
+        load_filters_action = QAction("Load Filters...", self)
+        load_filters_action.triggered.connect(self.import_filters)
+        file_menu.addAction(load_filters_action)
+
+        save_filters_action = QAction("Save Filters", self)
+        save_filters_action.triggered.connect(self.quick_save_filters)
+        file_menu.addAction(save_filters_action)
+
+        save_filters_as_action = QAction("Save Filters As...", self)
+        save_filters_as_action.triggered.connect(self.save_filters_as)
+        file_menu.addAction(save_filters_as_action)
+
+        file_menu.addSeparator()
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
@@ -220,12 +244,10 @@ class MainWindow(QMainWindow):
         self.show_filtered_only = self.show_filtered_action.isChecked()
         self.recalc_filters()
 
-    # ... [Event Filters, Opacity, Theme, Copy logic same as before, abbreviated] ...
+    # ... [Search & Event Filters Logic kept as is, abbreviated for update] ...
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.FocusIn:
-            self._animate_search_opacity(0.95)
-        elif event.type() == QEvent.FocusOut:
-            QTimer.singleShot(10, self._check_search_focus)
+        if event.type() == QEvent.FocusIn: self._animate_search_opacity(0.95)
+        elif event.type() == QEvent.FocusOut: QTimer.singleShot(10, self._check_search_focus)
         return super().eventFilter(obj, event)
 
     def _check_search_focus(self):
@@ -233,8 +255,7 @@ class MainWindow(QMainWindow):
         if not fw: return
         if self.search_widget.isAncestorOf(fw) or fw == self.search_widget or fw == self.search_input.lineEdit():
             self._animate_search_opacity(0.95)
-        else:
-            self._animate_search_opacity(0.5)
+        else: self._animate_search_opacity(0.5)
 
     def _animate_search_opacity(self, target):
         if self.search_opacity_effect.opacity() == target: return
@@ -262,18 +283,24 @@ class MainWindow(QMainWindow):
         except Exception: pass
 
     def apply_theme(self):
+        # Set Global Style to affect Dialogs
+        app = QApplication.instance()
+
         if self.is_dark_mode:
             bg_color, fg_color, selection_bg, selection_fg = "#1e1e1e", "#d4d4d4", "#264f78", "#ffffff"
             hover_bg, scrollbar_bg, scrollbar_handle = "#2a2d2e", "#1e1e1e", "#424242"
             scrollbar_hover, menu_bg, menu_fg, menu_sel = "#4f4f4f", "#252526", "#cccccc", "#094771"
             bar_bg, bar_fg, input_bg, input_fg = "#007acc", "#ffffff", "#3c3c3c", "#cccccc"
             float_bg, float_border, dock_title_bg, tree_bg = "#252526", "#454545", "#252526", "#252526"
+            # Dialog colors
+            dialog_bg, dialog_fg = "#252526", "#cccccc"
         else:
             bg_color, fg_color, selection_bg, selection_fg = "#ffffff", "#000000", "#add6ff", "#000000"
             hover_bg, scrollbar_bg, scrollbar_handle = "#e8e8e8", "#f3f3f3", "#c1c1c1"
             scrollbar_hover, menu_bg, menu_fg, menu_sel = "#a8a8a8", "#f3f3f3", "#333333", "#0060c0"
             bar_bg, bar_fg, input_bg, input_fg = "#007acc", "#ffffff", "#ffffff", "#000000"
             float_bg, float_border, dock_title_bg, tree_bg = "#f3f3f3", "#cecece", "#f3f3f3", "#f3f3f3"
+            dialog_bg, dialog_fg = "#f3f3f3", "#000000"
 
         self.delegate.set_hover_color(hover_bg)
         self.list_view.viewport().update()
@@ -281,7 +308,7 @@ class MainWindow(QMainWindow):
         self.update_status_bar(self.last_status_message)
 
         style = f"""
-        QMainWindow {{ background-color: {bg_color}; color: {fg_color}; }}
+        QMainWindow, QDialog {{ background-color: {bg_color}; color: {fg_color}; }}
         QWidget {{ color: {fg_color}; }}
         QMenuBar {{ background-color: {menu_bg}; color: {menu_fg}; }}
         QMenuBar::item {{ background-color: transparent; padding: 4px 8px; }}
@@ -306,6 +333,11 @@ class MainWindow(QMainWindow):
         QTreeWidget {{ background-color: {tree_bg}; border: none; color: {fg_color}; }}
         QHeaderView::section {{ background-color: {menu_bg}; color: {fg_color}; border: none; padding: 2px; }}
 
+        /* Dialog specific */
+        QDialog {{ background-color: {dialog_bg}; color: {dialog_fg}; }}
+        QLabel, QCheckBox {{ color: {dialog_fg}; }}
+        QLineEdit {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid #555; }}
+
         #search_widget {{
             background-color: {float_bg};
             border: 1px solid {float_border};
@@ -320,8 +352,9 @@ class MainWindow(QMainWindow):
         QCheckBox {{ spacing: 5px; }}
         QCheckBox::indicator {{ width: 13px; height: 13px; }}
         """
-        self.setStyleSheet(style)
+        app.setStyleSheet(style)
 
+    # ... [Open/Load Log, Copy Selection, Resize Event, Search Logic - Same as before] ...
     def open_file_dialog(self):
         last_dir = self.settings.value("last_dir", "")
         filepath, _ = QFileDialog.getOpenFileName(self, "Open Log File", last_dir, "Log Files (*.log *.txt);;All Files (*)")
@@ -365,14 +398,24 @@ class MainWindow(QMainWindow):
             clipboard.setText("\n".join(text_lines))
             self.toast.show_message(f"Copied {len(text_lines)} lines", duration=3000)
 
-    # ... [Search logic same as before, abbreviated] ...
+    def resizeEvent(self, event):
+        if not self.toast.isHidden():
+             txt = self.toast.label.text()
+             self.toast.show_message(txt, duration=self.toast.timer.remainingTime())
+        if not self.search_widget.isHidden():
+            cw = self.centralWidget()
+            sw_w = self.search_widget.width()
+            x = cw.width() - sw_w - 20
+            y = 0
+            self.search_widget.move(x, y)
+        super().resizeEvent(event)
+
     def show_search_bar(self):
         if self.search_widget.isHidden():
             self.search_widget.show(); self.search_widget.raise_(); self.resizeEvent(None)
             self.search_input.setFocus(); self.search_input.lineEdit().selectAll()
             self._animate_search_opacity(0.95)
-        else:
-            self.search_input.setFocus(); self.search_input.lineEdit().selectAll()
+        else: self.search_input.setFocus(); self.search_input.lineEdit().selectAll()
 
     def hide_search_bar(self):
         self.search_widget.hide(); self.delegate.set_search_query(None); self.list_view.viewport().update()
@@ -381,8 +424,7 @@ class MainWindow(QMainWindow):
     def find_next(self):
         query = self.search_input.currentText()
         if not query: return
-        if self.delegate.search_query != query or not self.search_results:
-            self._perform_search(query); return
+        if self.delegate.search_query != query or not self.search_results: self._perform_search(query); return
         if not self.search_results: return
         current_row = self.list_view.currentIndex().row()
         next_match_list_idx = bisect.bisect_right(self.search_results, current_row)
@@ -395,8 +437,7 @@ class MainWindow(QMainWindow):
     def find_previous(self):
         query = self.search_input.currentText()
         if not query: return
-        if self.delegate.search_query != query or not self.search_results:
-            self._perform_search(query); return
+        if self.delegate.search_query != query or not self.search_results: self._perform_search(query); return
         if not self.search_results: return
         current_row = self.list_view.currentIndex().row()
         insertion_point = bisect.bisect_left(self.search_results, current_row)
@@ -434,42 +475,45 @@ class MainWindow(QMainWindow):
         self.search_info_label.setText(f"{result_index + 1} / {len(self.search_results)}")
 
     # --- Filter Logic ---
-
     def refresh_filter_tree(self):
         self.filter_tree.clear()
         for i, flt in enumerate(self.filters):
-            # flt is dict: {text, is_regex, is_exclude, fg_color, bg_color, enabled}
             en_char = "☑" if flt["enabled"] else "☐"
             type_str = "Excl" if flt["is_exclude"] else ("Regex" if flt["is_regex"] else "Text")
             hits_str = str(flt.get("hits", 0))
-
             item = QTreeWidgetItem(self.filter_tree)
             item.setText(0, en_char)
             item.setText(1, type_str)
             item.setText(2, flt["text"])
             item.setText(3, hits_str)
             item.setData(0, Qt.UserRole, i)
-
-            # Use color from filter, apply only to Pattern column
             fg = QColor(flt["fg_color"])
             bg = QColor(flt["bg_color"])
             item.setForeground(2, fg)
             item.setBackground(2, bg)
 
     def on_filter_item_clicked(self, item, column):
-        # Allow toggling check on the first column
         if column == 0:
             idx = item.data(0, Qt.UserRole)
             self.filters[idx]["enabled"] = not self.filters[idx]["enabled"]
             self.refresh_filter_tree()
             self.recalc_filters()
 
+    def on_log_double_clicked(self, index):
+        text = self.model.data(index, Qt.DisplayRole)
+        if text:
+            # Maybe strip timestamp? For now just use full text or selected text?
+            # Standard is selected text if any, else line.
+            # But double click usually selects word.
+            # If QListView selection mode is extended, double click might select row.
+            # Let's assume we pass the line content.
+            self.add_filter_dialog(initial_text=text.strip())
+
     def edit_selected_filter(self):
         item = self.filter_tree.currentItem()
         if not item: return
         idx = item.data(0, Qt.UserRole)
         flt = self.filters[idx]
-
         dialog = FilterDialog(self, flt)
         if dialog.exec():
             new_data = dialog.get_data()
@@ -477,8 +521,10 @@ class MainWindow(QMainWindow):
             self.refresh_filter_tree()
             self.recalc_filters()
 
-    def add_filter_dialog(self):
+    def add_filter_dialog(self, initial_text=""):
         dialog = FilterDialog(self)
+        if initial_text:
+            dialog.pattern_edit.setText(initial_text)
         if dialog.exec():
             flt = dialog.get_data()
             flt["hits"] = 0
@@ -537,7 +583,6 @@ class MainWindow(QMainWindow):
             bot_action = QAction("Move to Bottom", self)
             bot_action.triggered.connect(self.move_filter_bottom)
             menu.addAction(bot_action)
-
             idx = item.data(0, Qt.UserRole)
             is_enabled = self.filters[idx]["enabled"]
             toggle_txt = "Disable" if is_enabled else "Enable"
@@ -550,6 +595,36 @@ class MainWindow(QMainWindow):
             menu.addAction(toggle_action)
         menu.exec_(self.filter_tree.mapToGlobal(pos))
 
+    # --- TAT I/O ---
+    def import_filters(self):
+        last_dir = self.settings.value("last_filter_dir", "")
+        filepath, _ = QFileDialog.getOpenFileName(self, "Import Filters", last_dir, "TextAnalysisTool (*.tat);;All Files (*)")
+        if filepath:
+            self.settings.setValue("last_filter_dir", os.path.dirname(filepath))
+            loaded = load_tat_filters(filepath)
+            if loaded is not None:
+                self.filters = loaded
+                self.current_filter_file = filepath
+                self.refresh_filter_tree()
+                self.recalc_filters()
+                self.toast.show_message(f"Imported {len(loaded)} filters")
+
+    def quick_save_filters(self):
+        if self.current_filter_file:
+            if save_tat_filters(self.current_filter_file, self.filters):
+                self.toast.show_message("Filters saved")
+        else:
+            self.save_filters_as()
+
+    def save_filters_as(self):
+        last_dir = self.settings.value("last_filter_dir", "")
+        filepath, _ = QFileDialog.getSaveFileName(self, "Save Filters As", last_dir, "TextAnalysisTool (*.tat);;All Files (*)")
+        if filepath:
+            self.settings.setValue("last_filter_dir", os.path.dirname(filepath))
+            if save_tat_filters(filepath, self.filters):
+                self.current_filter_file = filepath
+                self.toast.show_message("Filters saved")
+
     def recalc_filters(self):
         if not self.current_engine: return
         if not hasattr(self.current_engine, 'filter'): return
@@ -560,7 +635,6 @@ class MainWindow(QMainWindow):
         rust_filters = []
         for i, f in enumerate(self.filters):
             if f["enabled"]:
-                # (text, is_regex, is_exclude, is_event, original_idx)
                 rust_filters.append((f["text"], f["is_regex"], f["is_exclude"], False, i))
 
         try:
@@ -576,50 +650,20 @@ class MainWindow(QMainWindow):
                     if j < len(subset_counts):
                         self.filters[orig_idx]["hits"] = subset_counts[j]
 
-                # Colors map: raw_index -> (fg, bg)
-                # tag_codes[raw_idx] = filter_index + 2 (0=None, 1=Exclude)
-                # We iterate tag_codes to build map
-                color_map = {}
-
-                # Note: tag_codes corresponds to raw lines.
-                # If we filter indices, we still need colors for visible lines.
-                # The engine should return tag_codes for all lines or we iterate.
-                # Assuming tag_codes is list of u8 same length as raw lines.
-
-                # Map codes back to filter colors
-                # Code 2 = rust_filters[0], Code 3 = rust_filters[1]...
+                # Colors map: Use adjust_color_for_theme
                 code_to_filter = {}
                 for j, rf in enumerate(rust_filters):
                     orig_idx = rf[4]
                     code_to_filter[j+2] = self.filters[orig_idx]
 
-                # Optimization: Only build map if needed or process on demand in model?
-                # Building a dict for 1M lines is expensive.
-                # Better: Model stores tag_codes and map, and looks up on fly.
-                # But current Model expects dict. Let's optimize: Model stores tag_codes list directly.
-
-                # Wait, transferring 1M items list from Rust to Python is the bottleneck we avoided with Flet.
-                # Does `filter` return full tag_codes list? Yes in previous impl.
-                # If it's a list of ints, it's fast enough in PySide6 usually.
-
-                # Actually, let's update Model to accept tag_codes and the filter definitions to resolve colors.
-                # Passing `color_map` (dict) is too memory heavy for 1M lines.
-
-                # Updating logic to use tag_codes directly.
-                # For now, let's stick to the plan: pass colors.
-                # But wait, building `color_map` here is huge.
-                # Let's pass `tag_codes` and `filter_palette` to model.
-
-                # Refined Plan implemented here:
-                # 1. Construct palette: {code: (fg, bg)}
                 palette = {}
                 for code, flt in code_to_filter.items():
-                    palette[code] = (flt["fg_color"], flt["bg_color"])
+                    fg = adjust_color_for_theme(flt["fg_color"], False, self.is_dark_mode)
+                    bg = adjust_color_for_theme(flt["bg_color"], True, self.is_dark_mode)
+                    palette[code] = (fg, bg)
 
-                # 2. Pass tags and palette to model
                 self.model.set_filter_data(tag_codes, palette)
 
-                # Update Hits UI
                 self.refresh_filter_tree()
 
                 if self.show_filtered_only and rust_filters:

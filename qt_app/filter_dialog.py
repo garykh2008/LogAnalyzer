@@ -35,11 +35,7 @@ class FilterDialog(QDialog):
         self.btn_fg = QPushButton("Text Color")
         self.btn_bg = QPushButton("Background")
 
-        # Default colors should be context-aware ideally, but fixed defaults are safer if theme unknown.
-        # User reported "dark background in light mode", likely because I defaulted to #FFFFFF/#000000
-        # but the button style might be inheriting dark theme sheet.
-        # We explicitly set style on buttons below so defaults are just values.
-
+        # Default colors
         self.fg_color = self.filter_data.get("fg_color", "#000000")
         self.bg_color = self.filter_data.get("bg_color", "#FFFFFF")
 
@@ -74,13 +70,12 @@ class FilterDialog(QDialog):
         # Calculate contrast text for button readability
         def contrast(hex_color):
             c = QColor(hex_color)
-            # Use standard luma
             lum = 0.2126 * c.red() + 0.7152 * c.green() + 0.0722 * c.blue()
             return "#000000" if lum > 128 else "#FFFFFF"
 
         # Explicitly setting border to ensure visibility in both themes
-        self.btn_fg.setStyleSheet(f"background-color: {self.fg_color}; color: {contrast(self.fg_color)}; border: 1px solid #888;")
-        self.btn_bg.setStyleSheet(f"background-color: {self.bg_color}; color: {contrast(self.bg_color)}; border: 1px solid #888;")
+        self.btn_fg.setStyleSheet(f"background-color: {self.fg_color}; color: {contrast(self.fg_color)}; border: 1px solid #888; padding: 5px;")
+        self.btn_bg.setStyleSheet(f"background-color: {self.bg_color}; color: {contrast(self.bg_color)}; border: 1px solid #888; padding: 5px;")
 
     def get_data(self):
         return {
