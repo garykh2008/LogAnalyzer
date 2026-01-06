@@ -61,7 +61,12 @@ class MainWindow(QMainWindow):
         # Status Bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.update_status_bar("Ready")
+
+        # Persistent Status Label (prevents menu hover from clearing the message)
+        self.status_label = QLabel("Ready")
+        self.status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        # Add some padding to the label itself if needed, or via QSS
+        self.status_bar.addWidget(self.status_label, 1) # Stretch=1 to take space
 
         # Toast notification
         self.toast = Toast(self)
@@ -115,7 +120,8 @@ class MainWindow(QMainWindow):
 
     def update_status_bar(self, message):
         self.last_status_message = message
-        self.status_bar.showMessage(message)
+        # Use setText on the persistent label instead of showMessage
+        self.status_label.setText(message)
 
     def _set_windows_title_bar_color(self, is_dark):
         """
@@ -137,10 +143,6 @@ class MainWindow(QMainWindow):
                 ctypes.byref(value),
                 ctypes.sizeof(value)
             )
-
-            # Force a repaint of the title bar by tweaking opacity or geometry
-            # Often handled by Windows automatically, but sometimes needs a nudge.
-            # Usually calling this before show() is best, but runtime toggle works too.
         except Exception as e:
             print(f"Failed to set title bar color: {e}")
 
@@ -183,8 +185,8 @@ class MainWindow(QMainWindow):
         # Apply Title Bar Color (Windows)
         self._set_windows_title_bar_color(self.is_dark_mode)
 
-        # Restore status bar text if it gets cleared by style change (unlikely but safe)
-        self.status_bar.showMessage(self.last_status_message)
+        # Restore status bar text
+        self.update_status_bar(self.last_status_message)
 
         style = f"""
         QMainWindow {{
@@ -212,7 +214,7 @@ class MainWindow(QMainWindow):
             border: 1px solid #454545;
         }}
         QMenu::item {{
-            padding: 5px 30px 5px 20px; /* Padding fix for "tight right" issue */
+            padding: 5px 30px 5px 20px;
             background-color: transparent;
         }}
         QMenu::item:selected {{
@@ -242,6 +244,7 @@ class MainWindow(QMainWindow):
         }}
         QStatusBar QLabel {{
             color: {bar_fg};
+            background-color: transparent;
         }}
         /* Scrollbar Styling */
         QScrollBar:vertical {{
