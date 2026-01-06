@@ -1,8 +1,9 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication,
-                               QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect)
+                               QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
+                               QGraphicsOpacityEffect, QCheckBox)
 from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon
-from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent
+from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation
 from .models import LogModel
 from .engine_wrapper import get_engine
 from .toast import Toast
@@ -67,7 +68,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.list_view)
 
         # --- Search Bar (Floating) ---
-        # Note: Reparent to MainWindow or central_widget to float
         self.search_widget = QWidget(central_widget)
         self.search_widget.setObjectName("search_widget")
         self.search_layout = QHBoxLayout(self.search_widget)
@@ -92,16 +92,25 @@ class MainWindow(QMainWindow):
         self.btn_next.setToolTip("Next (F3)")
         self.btn_next.clicked.connect(self.find_next)
 
+        # Options
+        self.chk_case = QCheckBox("Aa")
+        self.chk_case.setToolTip("Case Sensitive")
+        self.chk_wrap = QCheckBox("Wrap")
+        self.chk_wrap.setToolTip("Wrap Search")
+        self.chk_wrap.setChecked(True) # Default on
+
         self.btn_close_search = QToolButton()
         self.btn_close_search.setText("X")
         self.btn_close_search.setToolTip("Close (Esc)")
         self.btn_close_search.clicked.connect(self.hide_search_bar)
 
         self.search_info_label = QLabel("")
-        self.search_info_label.setFixedWidth(100) # Slightly reduced width
+        self.search_info_label.setFixedWidth(100)
         self.search_info_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        self.search_layout.addWidget(self.search_input) # Removed "Find:" label for cleaner float look
+        self.search_layout.addWidget(self.search_input)
+        self.search_layout.addWidget(self.chk_case)
+        self.search_layout.addWidget(self.chk_wrap)
         self.search_layout.addWidget(self.btn_prev)
         self.search_layout.addWidget(self.btn_next)
         self.search_layout.addWidget(self.search_info_label)
@@ -114,8 +123,26 @@ class MainWindow(QMainWindow):
         shadow.setOffset(0, 2)
         self.search_widget.setGraphicsEffect(shadow)
 
-        self.search_widget.setFixedWidth(400)
-        self.search_widget.hide() # Hidden by default
+        # Opacity Effect for Focus
+        self.search_opacity_effect = QGraphicsOpacityEffect(self.search_widget)
+        self.search_widget.setGraphicsEffect(self.search_opacity_effect)
+        self.search_opacity_effect.setOpacity(0.95)
+
+        # Opacity Animation
+        self.search_anim = QPropertyAnimation(self.search_opacity_effect, b"opacity")
+        self.search_anim.setDuration(200)
+
+        self.search_widget.setFixedWidth(550) # Increased width for options
+        self.search_widget.hide()
+
+        # Install Event Filter to track focus
+        self.search_input.installEventFilter(self)
+        self.search_input.lineEdit().installEventFilter(self)
+        self.chk_case.installEventFilter(self)
+        self.chk_wrap.installEventFilter(self)
+        self.btn_prev.installEventFilter(self)
+        self.btn_next.installEventFilter(self)
+        self.search_widget.installEventFilter(self)
 
         # Status Bar
         self.status_bar = QStatusBar()
@@ -181,7 +208,6 @@ class MainWindow(QMainWindow):
         self.addAction(prev_action)
 
         # Clear Search Shortcut (Esc)
-        # Note: Esc usually handled by event filter or override if specific widget has focus
         escape_action = QAction("Clear Search", self)
         escape_action.setShortcut("Esc")
         escape_action.triggered.connect(self.hide_search_bar)
@@ -192,12 +218,39 @@ class MainWindow(QMainWindow):
         copy_action.setShortcut(QKeySequence.Copy) # Ctrl+C
         copy_action.triggered.connect(self.copy_selection)
 
-        # Add to window AND list_view to ensure it catches focus
         self.addAction(copy_action)
         self.list_view.addAction(copy_action)
 
         edit_menu = menu_bar.addMenu("&Edit")
         edit_menu.addAction(copy_action)
+
+    def eventFilter(self, obj, event):
+        # Detect Focus In/Out on search widgets
+        if event.type() == QEvent.FocusIn:
+            self._animate_search_opacity(0.95)
+        elif event.type() == QEvent.FocusOut:
+            # Only fade out if we are really losing focus to something outside the search widget
+            # But "FocusOut" triggers even when tabbing between buttons inside.
+            # We defer the check slightly or check focusWidget.
+            QTimer.singleShot(10, self._check_search_focus)
+
+        return super().eventFilter(obj, event)
+
+    def _check_search_focus(self):
+        fw = QApplication.focusWidget()
+        if not fw: return
+        # If focus is still inside search widget, keep opaque
+        if self.search_widget.isAncestorOf(fw) or fw == self.search_widget or fw == self.search_input.lineEdit():
+            self._animate_search_opacity(0.95)
+        else:
+            self._animate_search_opacity(0.3) # "Extreme transparency"
+
+    def _animate_search_opacity(self, target):
+        if self.search_opacity_effect.opacity() == target: return
+        self.search_anim.stop()
+        self.search_anim.setStartValue(self.search_opacity_effect.opacity())
+        self.search_anim.setEndValue(target)
+        self.search_anim.start()
 
     def toggle_theme(self):
         self.is_dark_mode = not self.is_dark_mode
@@ -237,8 +290,7 @@ class MainWindow(QMainWindow):
             bar_fg = "#ffffff"
             input_bg = "#3c3c3c"
             input_fg = "#cccccc"
-            # Floating Widget Colors
-            float_bg = "rgba(37, 37, 38, 0.95)" # 95% opacity
+            float_bg = "#252526" # Using solid color, opacity handled by Effect
             float_border = "#454545"
         else:
             # VS Code Light Theme Colors
@@ -257,8 +309,7 @@ class MainWindow(QMainWindow):
             bar_fg = "#ffffff"
             input_bg = "#ffffff"
             input_fg = "#000000"
-            # Floating Widget Colors
-            float_bg = "rgba(243, 243, 243, 0.95)"
+            float_bg = "#f3f3f3"
             float_border = "#cecece"
 
         self.delegate.set_hover_color(hover_bg)
@@ -299,6 +350,8 @@ class MainWindow(QMainWindow):
         QComboBox QAbstractItemView {{ background-color: {menu_bg}; color: {menu_fg}; selection-background-color: {menu_sel}; }}
         QToolButton {{ background-color: transparent; color: {input_fg}; border: none; font-weight: bold; }}
         QToolButton:hover {{ background-color: {hover_bg}; border-radius: 3px; }}
+        QCheckBox {{ spacing: 5px; }}
+        QCheckBox::indicator {{ width: 13px; height: 13px; }}
         """
         self.setStyleSheet(style)
 
@@ -324,7 +377,6 @@ class MainWindow(QMainWindow):
         self.update_status_bar(f"Shows {count:,} lines (Total {count:,})")
         self.toast.show_message(f"Loaded {count:,} lines in {duration:.3f}s", duration=4000)
 
-        # Reset search
         self.search_results = []
         self.current_match_index = -1
         self.search_info_label.setText("")
@@ -350,23 +402,15 @@ class MainWindow(QMainWindow):
             self.toast.show_message(f"Copied {len(text_lines)} lines", duration=3000)
 
     def resizeEvent(self, event):
-        # 1. Update Toast Position
         if not self.toast.isHidden():
              txt = self.toast.label.text()
              self.toast.show_message(txt, duration=self.toast.timer.remainingTime())
 
-        # 2. Update Floating Search Widget Position
         if not self.search_widget.isHidden():
-            # Top-Right Corner: x = width - search_width - margin, y = margin
-            # We assume central_widget geometry
             cw = self.centralWidget()
             sw_w = self.search_widget.width()
-            sw_h = self.search_widget.height()
-
-            x = cw.width() - sw_w - 20 # 20px padding from right
-            y = 0 # Stick to top (below menu if menu is native/top, but here relative to central widget)
-            # Actually central widget starts below menu bar usually.
-
+            x = cw.width() - sw_w - 20
+            y = 0
             self.search_widget.move(x, y)
 
         super().resizeEvent(event)
@@ -377,10 +421,10 @@ class MainWindow(QMainWindow):
         if self.search_widget.isHidden():
             self.search_widget.show()
             self.search_widget.raise_()
-            # Trigger resize to position it correctly initially
             self.resizeEvent(None)
             self.search_input.setFocus()
             self.search_input.lineEdit().selectAll()
+            self._animate_search_opacity(0.95)
         else:
             self.search_input.setFocus()
             self.search_input.lineEdit().selectAll()
@@ -390,22 +434,19 @@ class MainWindow(QMainWindow):
         self.delegate.set_search_query(None)
         self.list_view.viewport().update()
         self.search_info_label.setText("")
-        # Return focus to list view
         self.list_view.setFocus()
 
     def _update_search_history(self, query):
         if query in self.search_history:
             self.search_history.remove(query)
         self.search_history.insert(0, query)
-        self.search_history = self.search_history[:10] # Max 10
+        self.search_history = self.search_history[:10]
 
         self.search_input.blockSignals(True)
         self.search_input.clear()
         self.search_input.addItems(self.search_history)
         self.search_input.setCurrentText(query)
         self.search_input.blockSignals(False)
-
-        # Save history
         self.settings.setValue("search_history", self.search_history)
 
     def _load_search_history(self):
@@ -420,22 +461,24 @@ class MainWindow(QMainWindow):
 
         self.toast.show_message(f"Searching for '{query}'...", duration=1000)
         self.update_status_bar("Searching...")
-        QApplication.processEvents() # Force UI update before blocking search
+        QApplication.processEvents()
+
+        # Read Toggle States
+        is_case = self.chk_case.isChecked()
+        is_wrap = self.chk_wrap.isChecked() # Used in navigation, logic stored locally
 
         # Perform Search (Rust Backend)
-        # Assuming simple case-insensitive substring search for now as per delegates logic
-        results = self.current_engine.search(query, False, False) # query, regex=False, case=False
+        # Note: If engine supports regex, we could toggle that too. For now assume False.
+        results = self.current_engine.search(query, False, is_case)
 
         self.search_results = results
         self.current_match_index = -1
 
-        # Update Delegate to Highlight
         self.delegate.set_search_query(query)
         self.list_view.viewport().update()
 
         self.update_status_bar(f"Found {len(results):,} matches")
 
-        # If matches found, jump to first one visible or just the first one
         if results:
             self._jump_to_match(0)
         else:
@@ -449,36 +492,36 @@ class MainWindow(QMainWindow):
         self.current_match_index = result_index
         row_idx = self.search_results[result_index]
 
-        # Scroll to item
         index = self.model.index(row_idx, 0)
         if index.isValid():
-            # Center the row
             self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
-            # Select it
             self.list_view.setCurrentIndex(index)
+            # Give focus to list view, which will trigger the opacity fade-out naturally via focus event
+            self.list_view.setFocus()
 
-        # Update Info Label
         self.search_info_label.setText(f"{result_index + 1} / {len(self.search_results)}")
 
     def find_next(self):
         query = self.search_input.currentText()
         if not query: return
 
-        # New Search Check
         if self.delegate.search_query != query or not self.search_results:
             self._update_search_history(query)
             self._perform_search(query)
             return
 
-        # Navigate
         if not self.search_results: return
 
-        # If we are already at a match, find the next one relative to current selection
-        # But for simplicity, we just increment our internal index
         next_idx = self.current_match_index + 1
+        is_wrap = self.chk_wrap.isChecked()
+
         if next_idx >= len(self.search_results):
-            next_idx = 0 # Wrap
-            self.toast.show_message("Wrapped to top", duration=1000)
+            if is_wrap:
+                next_idx = 0
+                self.toast.show_message("Wrapped to top", duration=1000)
+            else:
+                self.toast.show_message("End of results", duration=1000)
+                return
 
         self._jump_to_match(next_idx)
 
@@ -486,7 +529,6 @@ class MainWindow(QMainWindow):
         query = self.search_input.currentText()
         if not query: return
 
-        # New Search Check
         if self.delegate.search_query != query or not self.search_results:
             self._update_search_history(query)
             self._perform_search(query)
@@ -495,8 +537,14 @@ class MainWindow(QMainWindow):
         if not self.search_results: return
 
         prev_idx = self.current_match_index - 1
+        is_wrap = self.chk_wrap.isChecked()
+
         if prev_idx < 0:
-            prev_idx = len(self.search_results) - 1 # Wrap
-            self.toast.show_message("Wrapped to bottom", duration=1000)
+            if is_wrap:
+                prev_idx = len(self.search_results) - 1
+                self.toast.show_message("Wrapped to bottom", duration=1000)
+            else:
+                self.toast.show_message("Start of results", duration=1000)
+                return
 
         self._jump_to_match(prev_idx)
