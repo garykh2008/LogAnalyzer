@@ -73,13 +73,14 @@ class MainWindow(QMainWindow):
         self.filter_tree.setRootIsDecorated(False) # Remove indentation for column alignment
 
         # Fixed Widths for metadata columns, Stretch for Pattern
+        self.filter_tree.header().setStretchLastSection(False)
         self.filter_tree.header().setSectionResizeMode(0, QHeaderView.Fixed)
         self.filter_tree.header().resizeSection(0, 25)  # Minimized En
         self.filter_tree.header().setSectionResizeMode(1, QHeaderView.Fixed)
         self.filter_tree.header().resizeSection(1, 40)  # Minimized Type
         self.filter_tree.header().setSectionResizeMode(2, QHeaderView.Stretch)
         self.filter_tree.header().setSectionResizeMode(3, QHeaderView.Fixed)
-        self.filter_tree.header().resizeSection(3, 80)  # Fits 7 digits comfortably
+        self.filter_tree.header().resizeSection(3, 60)  # Fits 7 digits comfortably
 
         self.filter_tree.setDragDropMode(QAbstractItemView.InternalMove)
         self.filter_tree.setSelectionMode(QAbstractItemView.SingleSelection)
