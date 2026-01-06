@@ -511,7 +511,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem(self.filter_tree)
 
             # En column as checkbox
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setFlags((item.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsDropEnabled)
             item.setCheckState(0, Qt.Checked if flt["enabled"] else Qt.Unchecked)
 
             item.setText(1, pattern_display)
