@@ -1,7 +1,8 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
-                               QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication)
-from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor
-from PySide6.QtCore import Qt, QSettings, QTimer
+                               QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication,
+                               QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy)
+from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon
+from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex
 from .models import LogModel
 from .engine_wrapper import get_engine
 from .toast import Toast
@@ -10,6 +11,7 @@ import os
 import time
 import sys
 import ctypes
+import bisect
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -23,6 +25,12 @@ class MainWindow(QMainWindow):
         self.is_dark_mode = self.settings.value("dark_mode", True, type=bool)
         self.last_status_message = "Ready"
 
+        # Search State
+        self.current_engine = None
+        self.search_results = []
+        self.current_match_index = -1
+        self.search_history = []
+
         # Central Widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -31,6 +39,49 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central_widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        # --- Search Bar (Hidden by default) ---
+        self.search_widget = QWidget()
+        self.search_layout = QHBoxLayout(self.search_widget)
+        self.search_layout.setContentsMargins(5, 5, 5, 5)
+        self.search_layout.setSpacing(5)
+
+        self.search_input = QComboBox()
+        self.search_input.setEditable(True)
+        self.search_input.setPlaceholderText("Find...")
+        self.search_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.search_input.setInsertPolicy(QComboBox.InsertAtTop)
+        # Handle Enter key in combo box line edit
+        self.search_input.lineEdit().returnPressed.connect(self.find_next)
+
+        self.btn_prev = QToolButton()
+        self.btn_prev.setText("<")
+        self.btn_prev.setToolTip("Previous (F2)")
+        self.btn_prev.clicked.connect(self.find_previous)
+
+        self.btn_next = QToolButton()
+        self.btn_next.setText(">")
+        self.btn_next.setToolTip("Next (F3)")
+        self.btn_next.clicked.connect(self.find_next)
+
+        self.btn_close_search = QToolButton()
+        self.btn_close_search.setText("X")
+        self.btn_close_search.setToolTip("Close (Esc)")
+        self.btn_close_search.clicked.connect(self.hide_search_bar)
+
+        self.search_info_label = QLabel("")
+        self.search_info_label.setFixedWidth(120)
+        self.search_info_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        self.search_layout.addWidget(QLabel("Find:"))
+        self.search_layout.addWidget(self.search_input)
+        self.search_layout.addWidget(self.btn_prev)
+        self.search_layout.addWidget(self.btn_next)
+        self.search_layout.addWidget(self.search_info_label)
+        self.search_layout.addWidget(self.btn_close_search)
+
+        layout.addWidget(self.search_widget)
+        self.search_widget.hide()
 
         # Log List View
         self.list_view = QListView()
@@ -62,17 +113,19 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
 
-        # Persistent Status Label (prevents menu hover from clearing the message)
+        # Persistent Status Label
         self.status_label = QLabel("Ready")
         self.status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        # Add some padding to the label itself if needed, or via QSS
-        self.status_bar.addWidget(self.status_label, 1) # Stretch=1 to take space
+        self.status_bar.addWidget(self.status_label, 1)
 
         # Toast notification
         self.toast = Toast(self)
 
         # Menu
         self._create_menu()
+
+        # Load History
+        self._load_search_history()
 
         # Styling
         self.apply_theme()
@@ -101,6 +154,31 @@ class MainWindow(QMainWindow):
         toggle_theme_action.triggered.connect(self.toggle_theme)
         view_menu.addAction(toggle_theme_action)
 
+        # Find Action
+        find_action = QAction("&Find...", self)
+        find_action.setShortcut(QKeySequence.Find) # Ctrl+F
+        find_action.triggered.connect(self.show_search_bar)
+        self.addAction(find_action)
+        view_menu.addAction(find_action)
+
+        # Find Next/Prev Global Shortcuts
+        next_action = QAction("Find Next", self)
+        next_action.setShortcut("F3")
+        next_action.triggered.connect(self.find_next)
+        self.addAction(next_action)
+
+        prev_action = QAction("Find Previous", self)
+        prev_action.setShortcut("F2")
+        prev_action.triggered.connect(self.find_previous)
+        self.addAction(prev_action)
+
+        # Clear Search Shortcut (Esc)
+        # Note: Esc usually handled by event filter or override if specific widget has focus
+        escape_action = QAction("Clear Search", self)
+        escape_action.setShortcut("Esc")
+        escape_action.triggered.connect(self.hide_search_bar)
+        self.addAction(escape_action)
+
         # Copy Action (Global shortcut)
         copy_action = QAction("&Copy", self)
         copy_action.setShortcut(QKeySequence.Copy) # Ctrl+C
@@ -120,35 +198,21 @@ class MainWindow(QMainWindow):
 
     def update_status_bar(self, message):
         self.last_status_message = message
-        # Use setText on the persistent label instead of showMessage
         self.status_label.setText(message)
 
     def _set_windows_title_bar_color(self, is_dark):
-        """
-        Uses ctypes to set the Windows 10/11 title bar color preference.
-        """
-        if sys.platform != "win32":
-            return
-
+        if sys.platform != "win32": return
         try:
             hwnd = int(self.winId())
-            # DWMWA_USE_IMMERSIVE_DARK_MODE = 20 (Windows 10 2004 build 19041+)
-            # Prior to that, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20h1 = 19
             DWMWA_USE_IMMERSIVE_DARK_MODE = 20
             value = ctypes.c_int(1 if is_dark else 0)
-
             ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_USE_IMMERSIVE_DARK_MODE,
-                ctypes.byref(value),
-                ctypes.sizeof(value)
+                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ctypes.byref(value), ctypes.sizeof(value)
             )
-        except Exception as e:
-            print(f"Failed to set title bar color: {e}")
+        except Exception: pass
 
     def apply_theme(self):
         if self.is_dark_mode:
-            # VS Code Dark Theme Colors
             bg_color = "#1e1e1e"
             fg_color = "#d4d4d4"
             selection_bg = "#264f78"
@@ -162,8 +226,9 @@ class MainWindow(QMainWindow):
             menu_sel = "#094771"
             bar_bg = "#007acc"
             bar_fg = "#ffffff"
+            input_bg = "#3c3c3c"
+            input_fg = "#cccccc"
         else:
-            # VS Code Light Theme Colors
             bg_color = "#ffffff"
             fg_color = "#000000"
             selection_bg = "#add6ff"
@@ -177,129 +242,69 @@ class MainWindow(QMainWindow):
             menu_sel = "#0060c0"
             bar_bg = "#007acc"
             bar_fg = "#ffffff"
+            input_bg = "#ffffff"
+            input_fg = "#000000"
 
-        # Update Delegate Hover Color
         self.delegate.set_hover_color(hover_bg)
         self.list_view.viewport().update()
-
-        # Apply Title Bar Color (Windows)
         self._set_windows_title_bar_color(self.is_dark_mode)
-
-        # Restore status bar text
         self.update_status_bar(self.last_status_message)
 
         style = f"""
-        QMainWindow {{
-            background-color: {bg_color};
-            color: {fg_color};
-        }}
-        QWidget {{
-            color: {fg_color};
-        }}
-        QMenuBar {{
-            background-color: {menu_bg};
-            color: {menu_fg};
-        }}
-        QMenuBar::item {{
-            background-color: transparent;
-            padding: 4px 8px;
-        }}
-        QMenuBar::item:selected {{
-            background-color: {selection_bg};
-            color: {selection_fg};
-        }}
-        QMenu {{
-            background-color: {menu_bg};
-            color: {menu_fg};
-            border: 1px solid #454545;
-        }}
-        QMenu::item {{
-            padding: 5px 30px 5px 20px;
-            background-color: transparent;
-        }}
-        QMenu::item:selected {{
-            background-color: {menu_sel};
-            color: #ffffff;
-        }}
-        QListView {{
-            background-color: {bg_color};
-            color: {fg_color};
-            border: none;
-            outline: 0;
-        }}
-        QListView::item {{
-            padding: 0px 4px;
-            border-bottom: 0px solid transparent;
-        }}
-        QListView::item:selected {{
-            background-color: {selection_bg};
-            color: {selection_fg};
-        }}
-        QStatusBar {{
-            background-color: {bar_bg};
-            color: {bar_fg};
-        }}
-        QStatusBar::item {{
-            border: none;
-        }}
-        QStatusBar QLabel {{
-            color: {bar_fg};
-            background-color: transparent;
-        }}
-        /* Scrollbar Styling */
-        QScrollBar:vertical {{
-            border: none;
-            background: {scrollbar_bg};
-            width: 14px;
-            margin: 0px;
-        }}
-        QScrollBar::handle:vertical {{
-            background: {scrollbar_handle};
-            min-height: 20px;
-        }}
-        QScrollBar::handle:vertical:hover {{
-            background: {scrollbar_hover};
-        }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-            height: 0px;
-        }}
-        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
-            background: none;
-        }}
+        QMainWindow {{ background-color: {bg_color}; color: {fg_color}; }}
+        QWidget {{ color: {fg_color}; }}
+        QMenuBar {{ background-color: {menu_bg}; color: {menu_fg}; }}
+        QMenuBar::item {{ background-color: transparent; padding: 4px 8px; }}
+        QMenuBar::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
+        QMenu {{ background-color: {menu_bg}; color: {menu_fg}; border: 1px solid #454545; }}
+        QMenu::item {{ padding: 5px 30px 5px 20px; background-color: transparent; }}
+        QMenu::item:selected {{ background-color: {menu_sel}; color: #ffffff; }}
+        QListView {{ background-color: {bg_color}; color: {fg_color}; border: none; outline: 0; }}
+        QListView::item {{ padding: 0px 4px; border-bottom: 0px solid transparent; }}
+        QListView::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
+        QStatusBar {{ background-color: {bar_bg}; color: {bar_fg}; }}
+        QStatusBar::item {{ border: none; }}
+        QStatusBar QLabel {{ color: {bar_fg}; background-color: transparent; }}
+        QScrollBar:vertical {{ border: none; background: {scrollbar_bg}; width: 14px; margin: 0px; }}
+        QScrollBar::handle:vertical {{ background: {scrollbar_handle}; min-height: 20px; }}
+        QScrollBar::handle:vertical:hover {{ background: {scrollbar_hover}; }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
+
+        /* Search Bar Styling */
+        QComboBox {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid #555; padding: 2px; }}
+        QComboBox QAbstractItemView {{ background-color: {menu_bg}; color: {menu_fg}; selection-background-color: {menu_sel}; }}
+        QToolButton {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid #555; }}
+        QToolButton:hover {{ background-color: {hover_bg}; }}
         """
         self.setStyleSheet(style)
 
     def open_file_dialog(self):
-        # 3. App Memory: Load last directory
         last_dir = self.settings.value("last_dir", "")
-
         filepath, _ = QFileDialog.getOpenFileName(self, "Open Log File", last_dir, "Log Files (*.log *.txt);;All Files (*)")
         if filepath:
             self.load_log(filepath)
 
     def load_log(self, filepath):
         self.update_status_bar(f"Loading {filepath}...")
-
         start_time = time.time()
-
-        # Save last directory
         self.settings.setValue("last_dir", os.path.dirname(filepath))
 
-        engine = get_engine(filepath)
-        self.model.set_engine(engine)
+        self.current_engine = get_engine(filepath)
+        self.model.set_engine(self.current_engine)
 
         end_time = time.time()
         duration = end_time - start_time
 
-        count = engine.line_count()
+        count = self.current_engine.line_count()
         self.setWindowTitle(f"{os.path.basename(filepath)} - Log Analyzer")
-
-        # Status Bar Update (Shows xxx lines (Total xxx))
-        # Currently no filtering, so Shows == Total
         self.update_status_bar(f"Shows {count:,} lines (Total {count:,})")
-
-        # 4. Toast Notification
         self.toast.show_message(f"Loaded {count:,} lines in {duration:.3f}s", duration=4000)
+
+        # Reset search
+        self.search_results = []
+        self.current_match_index = -1
+        self.search_info_label.setText("")
 
     def show_context_menu(self, pos):
         menu = QMenu(self)
@@ -310,30 +315,146 @@ class MainWindow(QMainWindow):
 
     def copy_selection(self):
         indexes = self.list_view.selectionModel().selectedIndexes()
-        if not indexes:
-            return
-
-        # Sort by row to ensure correct order
+        if not indexes: return
         indexes.sort(key=lambda x: x.row())
-
         text_lines = []
         for index in indexes:
-            # We assume data(DisplayRole) returns the string
             line = self.model.data(index, Qt.DisplayRole)
-            if line:
-                text_lines.append(line)
-
+            if line: text_lines.append(line)
         if text_lines:
             clipboard = QApplication.clipboard()
             clipboard.setText("\n".join(text_lines))
-
-            # Use Toast for feedback
             self.toast.show_message(f"Copied {len(text_lines)} lines", duration=3000)
 
     def resizeEvent(self, event):
-        # Ensure toast stays positioned on resize
         if not self.toast.isHidden():
-             # Re-trigger show logic to update position
              txt = self.toast.label.text()
              self.toast.show_message(txt, duration=self.toast.timer.remainingTime())
         super().resizeEvent(event)
+
+    # --- Search Logic ---
+
+    def show_search_bar(self):
+        if self.search_widget.isHidden():
+            self.search_widget.show()
+            self.search_input.setFocus()
+            self.search_input.lineEdit().selectAll()
+        else:
+            self.search_input.setFocus()
+            self.search_input.lineEdit().selectAll()
+
+    def hide_search_bar(self):
+        self.search_widget.hide()
+        self.delegate.set_search_query(None)
+        self.list_view.viewport().update()
+        self.search_info_label.setText("")
+        # Return focus to list view
+        self.list_view.setFocus()
+
+    def _update_search_history(self, query):
+        if query in self.search_history:
+            self.search_history.remove(query)
+        self.search_history.insert(0, query)
+        self.search_history = self.search_history[:10] # Max 10
+
+        self.search_input.blockSignals(True)
+        self.search_input.clear()
+        self.search_input.addItems(self.search_history)
+        self.search_input.setCurrentText(query)
+        self.search_input.blockSignals(False)
+
+        # Save history
+        self.settings.setValue("search_history", self.search_history)
+
+    def _load_search_history(self):
+        hist = self.settings.value("search_history", [])
+        if hist:
+            self.search_history = [str(x) for x in hist]
+            self.search_input.addItems(self.search_history)
+            self.search_input.setCurrentIndex(-1)
+
+    def _perform_search(self, query):
+        if not query or not self.current_engine: return
+
+        self.toast.show_message(f"Searching for '{query}'...", duration=1000)
+        self.update_status_bar("Searching...")
+        QApplication.processEvents() # Force UI update before blocking search
+
+        # Perform Search (Rust Backend)
+        # Assuming simple case-insensitive substring search for now as per delegates logic
+        results = self.current_engine.search(query, False, False) # query, regex=False, case=False
+
+        self.search_results = results
+        self.current_match_index = -1
+
+        # Update Delegate to Highlight
+        self.delegate.set_search_query(query)
+        self.list_view.viewport().update()
+
+        self.update_status_bar(f"Found {len(results):,} matches")
+
+        # If matches found, jump to first one visible or just the first one
+        if results:
+            self._jump_to_match(0)
+        else:
+            self.search_info_label.setText("No results")
+            self.toast.show_message("No results found", duration=2000)
+
+    def _jump_to_match(self, result_index):
+        if not self.search_results or result_index < 0 or result_index >= len(self.search_results):
+            return
+
+        self.current_match_index = result_index
+        row_idx = self.search_results[result_index]
+
+        # Scroll to item
+        index = self.model.index(row_idx, 0)
+        if index.isValid():
+            # Center the row
+            self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
+            # Select it
+            self.list_view.setCurrentIndex(index)
+
+        # Update Info Label
+        self.search_info_label.setText(f"{result_index + 1} / {len(self.search_results)}")
+
+    def find_next(self):
+        query = self.search_input.currentText()
+        if not query: return
+
+        # New Search Check
+        if self.delegate.search_query != query or not self.search_results:
+            self._update_search_history(query)
+            self._perform_search(query)
+            return
+
+        # Navigate
+        if not self.search_results: return
+
+        # If we are already at a match, find the next one relative to current selection
+        # But for simplicity, we just increment our internal index
+        next_idx = self.current_match_index + 1
+        if next_idx >= len(self.search_results):
+            next_idx = 0 # Wrap
+            self.toast.show_message("Wrapped to top", duration=1000)
+
+        self._jump_to_match(next_idx)
+
+    def find_previous(self):
+        query = self.search_input.currentText()
+        if not query: return
+
+        # New Search Check
+        if self.delegate.search_query != query or not self.search_results:
+            self._update_search_history(query)
+            self._perform_search(query)
+            return
+
+        if not self.search_results: return
+
+        prev_idx = self.current_match_index - 1
+        if prev_idx < 0:
+            prev_idx = len(self.search_results) - 1 # Wrap
+            self.toast.show_message("Wrapped to bottom", duration=1000)
+
+        self._jump_to_match(prev_idx)

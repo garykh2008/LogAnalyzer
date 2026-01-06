@@ -33,8 +33,23 @@ class MockLogEngine:
         return [], [], [], []
 
     def search(self, query, is_regex, case_sensitive):
-        # Dummy search
-        return []
+        # Simple Python search for Mock engine
+        results = []
+        import re
+        try:
+            for i, line in enumerate(self._lines):
+                if is_regex:
+                    flags = 0 if case_sensitive else re.IGNORECASE
+                    if re.search(query, line, flags):
+                        results.append(i)
+                else:
+                    target = query if case_sensitive else query.lower()
+                    source = line if case_sensitive else line.lower()
+                    if target in source:
+                        results.append(i)
+        except Exception:
+            pass
+        return results
 
 def get_engine(filepath):
     if HAS_RUST:
