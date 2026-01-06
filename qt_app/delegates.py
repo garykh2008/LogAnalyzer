@@ -32,24 +32,20 @@ class LogDelegate(QStyledItemDelegate):
                 else:
                     painter.setPen(option.palette.text().color())
 
-                # Calculate rect with padding
-                # Using 4px left/right padding
+                # Simple drawText is fastest.
+                # QRect adjustment for padding
                 rect = option.rect.adjusted(4, 0, -4, 0)
-
-                # Use ElideNone to show full text if possible, or ElideRight if preferred.
-                # Log viewers usually prioritize seeing start of line, but scrolling handles horizontal.
 
                 font_metrics = option.fontMetrics
                 elided_text = font_metrics.elidedText(text, Qt.ElideNone, rect.width())
 
-                # Vertically center
-                painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, elided_text)
+                # Draw text aligned left (User feedback: remove VCenter to fix layout)
+                painter.drawText(rect, Qt.AlignLeft, elided_text)
 
         finally:
             painter.restore()
 
     def sizeHint(self, option, index):
-        # Use lineSpacing() which includes proper vertical leading.
-        # Add 8px padding (4px top, 4px bottom) to prevent any overlap/clipping.
-        height = option.fontMetrics.lineSpacing() + 8
+        # User feedback: Remove extra padding, rely on standard height/lineSpacing
+        height = option.fontMetrics.height()
         return QSize(option.rect.width(), height)
