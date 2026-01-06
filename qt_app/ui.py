@@ -1,10 +1,11 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
-                               QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView)
-from PySide6.QtGui import QAction, QFont, QPalette, QColor
+                               QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication)
+from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor
 from PySide6.QtCore import Qt, QSettings, QTimer
 from .models import LogModel
 from .engine_wrapper import get_engine
 from .toast import Toast
+from .delegates import LogDelegate
 import os
 import time
 
@@ -31,8 +32,14 @@ class MainWindow(QMainWindow):
         self.model = LogModel()
         self.list_view.setModel(self.model)
 
+        # Set Delegate
+        self.delegate = LogDelegate(self.list_view)
+        self.list_view.setItemDelegate(self.delegate)
+
         # 1. Multi-selection
         self.list_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list_view.customContextMenuRequested.connect(self.show_context_menu)
 
         # Performance Settings
         self.list_view.setUniformItemSizes(True)
@@ -78,7 +85,18 @@ class MainWindow(QMainWindow):
 
         # View Menu
         view_menu = menu_bar.addMenu("&View")
-        # Placeholder for future features
+
+        # Copy Action (Global shortcut)
+        copy_action = QAction("&Copy", self)
+        copy_action.setShortcut(QKeySequence.Copy) # Ctrl+C
+        copy_action.triggered.connect(self.copy_selection)
+
+        # Add to window AND list_view to ensure it catches focus
+        self.addAction(copy_action)
+        self.list_view.addAction(copy_action)
+
+        edit_menu = menu_bar.addMenu("&Edit")
+        edit_menu.addAction(copy_action)
 
     def _apply_theme(self):
         # VS Code Dark Theme Colors
@@ -177,16 +195,52 @@ class MainWindow(QMainWindow):
 
         count = engine.line_count()
         self.setWindowTitle(f"{os.path.basename(filepath)} - Log Analyzer")
-        self.status_bar.showMessage(f"Loaded {count:,} lines from {filepath}")
+
+        # Status Bar Update (Shows xxx lines (Total xxx))
+        # Currently no filtering, so Shows == Total
+        self.status_bar.showMessage(f"Shows {count:,} lines (Total {count:,})")
 
         # 4. Toast Notification
-        self.toast.show_message(f"Loaded {count:,} lines in {duration:.3f}s")
+        self.toast.show_message(f"Loaded {count:,} lines in {duration:.3f}s", duration=4000)
+
+    def show_context_menu(self, pos):
+        menu = QMenu(self)
+        copy_action = QAction("Copy", self)
+        copy_action.triggered.connect(self.copy_selection)
+        menu.addAction(copy_action)
+        menu.exec_(self.list_view.mapToGlobal(pos))
+
+    def copy_selection(self):
+        indexes = self.list_view.selectionModel().selectedIndexes()
+        if not indexes:
+            return
+
+        # Sort by row to ensure correct order
+        indexes.sort(key=lambda x: x.row())
+
+        text_lines = []
+        for index in indexes:
+            # We assume data(DisplayRole) returns the string
+            line = self.model.data(index, Qt.DisplayRole)
+            if line:
+                text_lines.append(line)
+
+        if text_lines:
+            clipboard = QApplication.clipboard()
+            clipboard.setText("\n".join(text_lines))
+
+            # Use Toast for feedback
+            self.toast.show_message(f"Copied {len(text_lines)} lines", duration=3000)
 
     def resizeEvent(self, event):
         # Ensure toast stays positioned on resize
         if not self.toast.isHidden():
-             # Re-trigger show logic to update position or just let it stay relative?
-             # Simpler to just let it be or manually move it.
-             # For now, let's keep it simple.
-             pass
+             # Re-trigger show logic to update position
+             # Since show_message calculates pos based on parent size,
+             # calling adjustSize/move logic again would be ideal but show_message resets text.
+             # Ideally Toast would handle its own resize events or we move it here.
+             # For now, let's just re-center it if we can access the label text.
+             # A simple hack is to re-show the current text.
+             txt = self.toast.label.text()
+             self.toast.show_message(txt, duration=self.toast.timer.remainingTime())
         super().resizeEvent(event)
