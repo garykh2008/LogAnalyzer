@@ -230,8 +230,6 @@ class MainWindow(QMainWindow):
             self._animate_search_opacity(0.95)
         elif event.type() == QEvent.FocusOut:
             # Only fade out if we are really losing focus to something outside the search widget
-            # But "FocusOut" triggers even when tabbing between buttons inside.
-            # We defer the check slightly or check focusWidget.
             QTimer.singleShot(10, self._check_search_focus)
 
         return super().eventFilter(obj, event)
@@ -243,7 +241,7 @@ class MainWindow(QMainWindow):
         if self.search_widget.isAncestorOf(fw) or fw == self.search_widget or fw == self.search_input.lineEdit():
             self._animate_search_opacity(0.95)
         else:
-            self._animate_search_opacity(0.3) # "Extreme transparency"
+            self._animate_search_opacity(0.5) # Medium transparency
 
     def _animate_search_opacity(self, target):
         if self.search_opacity_effect.opacity() == target: return
@@ -468,7 +466,6 @@ class MainWindow(QMainWindow):
         is_wrap = self.chk_wrap.isChecked() # Used in navigation, logic stored locally
 
         # Perform Search (Rust Backend)
-        # Note: If engine supports regex, we could toggle that too. For now assume False.
         results = self.current_engine.search(query, False, is_case)
 
         self.search_results = results
@@ -480,6 +477,8 @@ class MainWindow(QMainWindow):
         self.update_status_bar(f"Found {len(results):,} matches")
 
         if results:
+            # We don't necessarily jump to 0 anymore; find_next logic will determine.
+            # But initial search usually jumps to first match.
             self._jump_to_match(0)
         else:
             self.search_info_label.setText("No results")
@@ -505,6 +504,7 @@ class MainWindow(QMainWindow):
         query = self.search_input.currentText()
         if not query: return
 
+        # New Search Check
         if self.delegate.search_query != query or not self.search_results:
             self._update_search_history(query)
             self._perform_search(query)
@@ -512,18 +512,25 @@ class MainWindow(QMainWindow):
 
         if not self.search_results: return
 
-        next_idx = self.current_match_index + 1
+        # Calculate next index relative to current selection
+        current_row = self.list_view.currentIndex().row()
+
+        # Find insertion point
+        # bisect_right returns index where item should be inserted to maintain order.
+        # Elements to the left are <= current_row. Elements to the right are > current_row.
+        next_match_list_idx = bisect.bisect_right(self.search_results, current_row)
+
         is_wrap = self.chk_wrap.isChecked()
 
-        if next_idx >= len(self.search_results):
+        if next_match_list_idx >= len(self.search_results):
             if is_wrap:
-                next_idx = 0
+                next_match_list_idx = 0
                 self.toast.show_message("Wrapped to top", duration=1000)
             else:
                 self.toast.show_message("End of results", duration=1000)
                 return
 
-        self._jump_to_match(next_idx)
+        self._jump_to_match(next_match_list_idx)
 
     def find_previous(self):
         query = self.search_input.currentText()
@@ -536,15 +543,25 @@ class MainWindow(QMainWindow):
 
         if not self.search_results: return
 
-        prev_idx = self.current_match_index - 1
+        current_row = self.list_view.currentIndex().row()
+
+        # bisect_left returns index where item could be inserted while maintaining order.
+        # all(val < x for val in a[lo:i])
+        # all(val >= x for val in a[i:hi])
+        # So search_results[i] >= current_row.
+        # We want the item BEFORE that, i.e., strictly less than current_row.
+
+        insertion_point = bisect.bisect_left(self.search_results, current_row)
+        prev_match_list_idx = insertion_point - 1
+
         is_wrap = self.chk_wrap.isChecked()
 
-        if prev_idx < 0:
+        if prev_match_list_idx < 0:
             if is_wrap:
-                prev_idx = len(self.search_results) - 1
+                prev_match_list_idx = len(self.search_results) - 1
                 self.toast.show_message("Wrapped to bottom", duration=1000)
             else:
                 self.toast.show_message("Start of results", duration=1000)
                 return
 
-        self._jump_to_match(prev_idx)
+        self._jump_to_match(prev_match_list_idx)
