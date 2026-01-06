@@ -1,16 +1,21 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
-                               QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar)
+                               QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView)
 from PySide6.QtGui import QAction, QFont, QPalette, QColor
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings, QTimer
 from .models import LogModel
 from .engine_wrapper import get_engine
+from .toast import Toast
 import os
+import time
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Log Analyzer (PySide6)")
         self.resize(1200, 800)
+
+        # Settings
+        self.settings = QSettings("LogAnalyzer", "QtApp")
 
         # Central Widget
         central_widget = QWidget()
@@ -21,12 +26,13 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header / Toolbar Area (Optional, using Menu for now)
-
         # Log List View
         self.list_view = QListView()
         self.model = LogModel()
         self.list_view.setModel(self.model)
+
+        # 1. Multi-selection
+        self.list_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
 
         # Performance Settings
         self.list_view.setUniformItemSizes(True)
@@ -44,6 +50,9 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready")
+
+        # Toast notification
+        self.toast = Toast(self)
 
         # Menu
         self._create_menu()
@@ -79,6 +88,10 @@ class MainWindow(QMainWindow):
         scrollbar_bg = "#1e1e1e"
         scrollbar_handle = "#424242"
 
+        # 2. Reduced Line Height (via reduced padding and potential CSS adjustments)
+        # Note: QListView with setUniformItemSizes relies heavily on the first item's size.
+        # Reducing padding helps.
+
         style = f"""
         QMainWindow {{
             background-color: {bg_color};
@@ -105,7 +118,9 @@ class MainWindow(QMainWindow):
             outline: 0;
         }}
         QListView::item {{
-            padding: 2px;
+            padding: 0px 4px;  /* Reduced vertical padding from 2px to 0px */
+            border-bottom: 0px solid transparent; /* Ensure no border adds height */
+            height: 18px; /* Force a tighter height (Consolas 11 is roughly 15-16px high) */
         }}
         QListView::item:selected {{
             background-color: {selection_bg};
@@ -139,18 +154,39 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(style)
 
     def open_file_dialog(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Open Log File", "", "Log Files (*.log *.txt);;All Files (*)")
+        # 3. App Memory: Load last directory
+        last_dir = self.settings.value("last_dir", "")
+
+        filepath, _ = QFileDialog.getOpenFileName(self, "Open Log File", last_dir, "Log Files (*.log *.txt);;All Files (*)")
         if filepath:
             self.load_log(filepath)
 
     def load_log(self, filepath):
         self.status_bar.showMessage(f"Loading {filepath}...")
 
-        # Assuming the Engine load is blocking for now, but Rust is fast.
-        # In a real app, we might want to thread this instantiation if it takes time.
+        start_time = time.time()
+
+        # Save last directory
+        self.settings.setValue("last_dir", os.path.dirname(filepath))
+
         engine = get_engine(filepath)
         self.model.set_engine(engine)
+
+        end_time = time.time()
+        duration = end_time - start_time
 
         count = engine.line_count()
         self.setWindowTitle(f"{os.path.basename(filepath)} - Log Analyzer")
         self.status_bar.showMessage(f"Loaded {count:,} lines from {filepath}")
+
+        # 4. Toast Notification
+        self.toast.show_message(f"Loaded {count:,} lines in {duration:.3f}s")
+
+    def resizeEvent(self, event):
+        # Ensure toast stays positioned on resize
+        if not self.toast.isHidden():
+             # Re-trigger show logic to update position or just let it stay relative?
+             # Simpler to just let it be or manually move it.
+             # For now, let's keep it simple.
+             pass
+        super().resizeEvent(event)
