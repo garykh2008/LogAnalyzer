@@ -1,9 +1,13 @@
 import sys
 import os
+import signal
 from PySide6.QtWidgets import QApplication
 from qt_app.ui import MainWindow
 
 def main():
+    # Allow Ctrl+C to terminate the app from console
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
     app = QApplication(sys.argv)
 
     # Set organization info for QSettings (if used later)
