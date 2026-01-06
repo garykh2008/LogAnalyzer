@@ -67,27 +67,28 @@ class MainWindow(QMainWindow):
         self.filter_dock = QDockWidget("Filters", self)
         self.filter_dock.setObjectName("FilterDock")
         self.filter_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
+        # Handle floating dock color
+        self.filter_dock.topLevelChanged.connect(lambda is_floating: self._set_windows_title_bar_color(self.is_dark_mode))
 
         self.filter_tree = QTreeWidget()
-        self.filter_tree.setHeaderLabels(["En", "Type", "Pattern", "Hits"])
+        self.filter_tree.setHeaderLabels(["En", "Pattern", "Hits"])
         self.filter_tree.setRootIsDecorated(False) # Remove indentation for column alignment
 
         # Fixed Widths for metadata columns, Stretch for Pattern
         self.filter_tree.header().setStretchLastSection(False)
         self.filter_tree.header().setSectionResizeMode(0, QHeaderView.Fixed)
         self.filter_tree.header().resizeSection(0, 25)  # Minimized En
-        self.filter_tree.header().setSectionResizeMode(1, QHeaderView.Fixed)
-        self.filter_tree.header().resizeSection(1, 40)  # Minimized Type
-        self.filter_tree.header().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.filter_tree.header().setSectionResizeMode(3, QHeaderView.Fixed)
-        self.filter_tree.header().resizeSection(3, 60)  # Fits 7 digits comfortably
+        self.filter_tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.filter_tree.header().setSectionResizeMode(2, QHeaderView.Fixed)
+        self.filter_tree.header().resizeSection(2, 60)  # Fits 7 digits comfortably
 
         self.filter_tree.setDragDropMode(QAbstractItemView.InternalMove)
         self.filter_tree.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.filter_tree.setDefaultDropAction(Qt.MoveAction)
         self.filter_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.filter_tree.customContextMenuRequested.connect(self.show_filter_menu)
         self.filter_tree.itemDoubleClicked.connect(self.edit_selected_filter)
-        self.filter_tree.itemClicked.connect(self.on_filter_item_clicked)
+        self.filter_tree.itemChanged.connect(self.on_filter_item_changed)
 
         self.filter_dock.setWidget(self.filter_tree)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.filter_dock)
@@ -167,6 +168,13 @@ class MainWindow(QMainWindow):
 
         self.toast = Toast(self)
         self._create_menu()
+
+        # Restore Dock State
+        if self.settings.value("window_geometry"):
+            self.restoreGeometry(self.settings.value("window_geometry"))
+        if self.settings.value("window_state"):
+            self.restoreState(self.settings.value("window_state"))
+
         self.apply_theme()
 
         self.btn_prev.clicked.connect(self.find_previous)
@@ -196,7 +204,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut("Ctrl+Q")
-        exit_action.triggered.connect(self.close)
+        exit_action.triggered.connect(self.close_app)
         file_menu.addAction(exit_action)
 
         view_menu = menu_bar.addMenu("&View")
@@ -281,7 +289,7 @@ class MainWindow(QMainWindow):
     def _set_windows_title_bar_color(self, is_dark):
         set_windows_title_bar_color(self.winId(), is_dark)
 
-        # Attempt to set for all top-level widgets (Dialogs)
+        # Attempt to set for all top-level widgets (Dialogs, Floating Docks)
         for widget in QApplication.topLevelWidgets():
             if widget.isWindow() and widget != self:
                 set_windows_title_bar_color(widget.winId(), is_dark)
@@ -489,28 +497,42 @@ class MainWindow(QMainWindow):
 
     # --- Filter Logic ---
     def refresh_filter_tree(self):
+        self.filter_tree.blockSignals(True) # Prevent recursive signals during build
         self.filter_tree.clear()
         for i, flt in enumerate(self.filters):
-            en_char = "☑" if flt["enabled"] else "☐"
-            type_str = "Excl" if flt["is_exclude"] else ("Regex" if flt["is_regex"] else "Text")
             hits_str = str(flt.get("hits", 0))
+
+            # Pattern Prefix
+            prefix = ""
+            if flt["is_exclude"]: prefix += "[x]"
+            if flt["is_regex"]: prefix += "[R]"
+            pattern_display = f"{prefix} {flt['text']}" if prefix else flt['text']
+
             item = QTreeWidgetItem(self.filter_tree)
-            item.setText(0, en_char)
-            item.setText(1, type_str)
-            item.setText(2, flt["text"])
-            item.setText(3, hits_str)
+
+            # En column as checkbox
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(0, Qt.Checked if flt["enabled"] else Qt.Unchecked)
+
+            item.setText(1, pattern_display)
+            item.setText(2, hits_str)
             item.setData(0, Qt.UserRole, i)
+
             fg = adjust_color_for_theme(flt["fg_color"], False, self.is_dark_mode)
             bg = adjust_color_for_theme(flt["bg_color"], True, self.is_dark_mode)
-            item.setForeground(2, QColor(fg))
-            item.setBackground(2, QColor(bg))
+            item.setForeground(1, QColor(fg))
+            item.setBackground(1, QColor(bg))
+        self.filter_tree.blockSignals(False)
 
-    def on_filter_item_clicked(self, item, column):
+    def on_filter_item_changed(self, item, column):
         if column == 0:
             idx = item.data(0, Qt.UserRole)
-            self.filters[idx]["enabled"] = not self.filters[idx]["enabled"]
-            self.refresh_filter_tree()
-            self.recalc_filters()
+            # Ensure index is valid and within range
+            if 0 <= idx < len(self.filters):
+                new_state = (item.checkState(0) == Qt.Checked)
+                if self.filters[idx]["enabled"] != new_state:
+                    self.filters[idx]["enabled"] = new_state
+                    self.recalc_filters()
 
     def on_log_double_clicked(self, index):
         text = self.model.data(index, Qt.DisplayRole)
@@ -574,6 +596,14 @@ class MainWindow(QMainWindow):
             self.refresh_filter_tree()
             self.filter_tree.setCurrentItem(self.filter_tree.topLevelItem(len(self.filters)-1))
             self.recalc_filters()
+
+    def closeEvent(self, event):
+        self.settings.setValue("window_geometry", self.saveGeometry())
+        self.settings.setValue("window_state", self.saveState())
+        super().closeEvent(event)
+
+    def close_app(self):
+        self.close()
 
     def show_filter_menu(self, pos):
         item = self.filter_tree.itemAt(pos)
