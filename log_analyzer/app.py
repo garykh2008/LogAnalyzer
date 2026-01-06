@@ -403,7 +403,7 @@ class LogAnalyzerApp:
                 content=ft.Stack([self.scrollbar_thumb]),
                 width=12,
                 bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.GREY),
-                alignment=ft.alignment.top_center,
+                alignment=ft.Alignment(0, -1), # Top Center
             ),
             on_pan_update=self.on_scrollbar_drag,
             on_tap_down=self.on_scrollbar_drag,
@@ -965,8 +965,8 @@ class LogAnalyzerApp:
         total_items = self.navigator.total_items
         target_idx = int(percentage * total_items)
 
-        # Jump
-        self.jump_to_index(target_idx, update_slider=False, immediate=True, center=True)
+        # Jump (center=False to avoid bouncing, dragging sets top)
+        self.jump_to_index(target_idx, update_slider=False, immediate=True, center=False)
 
     def sync_scrollbar_position(self):
         # Update custom scrollbar thumb
@@ -1438,7 +1438,8 @@ class LogAnalyzerApp:
         item_bottom = item_top + self.ROW_HEIGHT
 
         viewport_top = self.current_scroll_pixels
-        viewport_bottom = viewport_top + (self.available_log_height if hasattr(self, "available_log_height") else 500)
+        viewport_h = (self.available_log_height if hasattr(self, "available_log_height") else 500) - 20 # Padding
+        viewport_bottom = viewport_top + viewport_h
 
         # 3. Native Scroll if needed
         if item_top < viewport_top:
@@ -1447,7 +1448,7 @@ class LogAnalyzerApp:
                 self.current_scroll_pixels = item_top
             except: pass
         elif item_bottom > viewport_bottom:
-            target = item_bottom - (self.available_log_height if hasattr(self, "available_log_height") else 500)
+            target = item_bottom - viewport_h
             try:
                 await self.log_list_view.scroll_to(offset=target, duration=0)
                 self.current_scroll_pixels = target
