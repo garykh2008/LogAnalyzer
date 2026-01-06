@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication,
-                               QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy)
+                               QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect)
 from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon
-from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex
+from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent
 from .models import LogModel
 from .engine_wrapper import get_engine
 from .toast import Toast
@@ -40,8 +40,36 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # --- Search Bar (Hidden by default) ---
-        self.search_widget = QWidget()
+        # Log List View
+        self.list_view = QListView()
+        self.model = LogModel()
+        self.list_view.setModel(self.model)
+
+        # Set Delegate
+        self.delegate = LogDelegate(self.list_view)
+        self.list_view.setItemDelegate(self.delegate)
+
+        # 1. Multi-selection
+        self.list_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list_view.customContextMenuRequested.connect(self.show_context_menu)
+
+        # Performance Settings
+        self.list_view.setUniformItemSizes(True)
+        self.list_view.setLayoutMode(QListView.Batched)
+        self.list_view.setBatchSize(100)
+
+        # Font
+        font = QFont("Consolas", 11)
+        font.setStyleHint(QFont.Monospace)
+        self.list_view.setFont(font)
+
+        layout.addWidget(self.list_view)
+
+        # --- Search Bar (Floating) ---
+        # Note: Reparent to MainWindow or central_widget to float
+        self.search_widget = QWidget(central_widget)
+        self.search_widget.setObjectName("search_widget")
         self.search_layout = QHBoxLayout(self.search_widget)
         self.search_layout.setContentsMargins(5, 5, 5, 5)
         self.search_layout.setSpacing(5)
@@ -70,44 +98,24 @@ class MainWindow(QMainWindow):
         self.btn_close_search.clicked.connect(self.hide_search_bar)
 
         self.search_info_label = QLabel("")
-        self.search_info_label.setFixedWidth(120)
+        self.search_info_label.setFixedWidth(100) # Slightly reduced width
         self.search_info_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        self.search_layout.addWidget(QLabel("Find:"))
-        self.search_layout.addWidget(self.search_input)
+        self.search_layout.addWidget(self.search_input) # Removed "Find:" label for cleaner float look
         self.search_layout.addWidget(self.btn_prev)
         self.search_layout.addWidget(self.btn_next)
         self.search_layout.addWidget(self.search_info_label)
         self.search_layout.addWidget(self.btn_close_search)
 
-        layout.addWidget(self.search_widget)
-        self.search_widget.hide()
+        # Shadow Effect
+        shadow = QGraphicsDropShadowEffect(self.search_widget)
+        shadow.setBlurRadius(15)
+        shadow.setColor(QColor(0, 0, 0, 100))
+        shadow.setOffset(0, 2)
+        self.search_widget.setGraphicsEffect(shadow)
 
-        # Log List View
-        self.list_view = QListView()
-        self.model = LogModel()
-        self.list_view.setModel(self.model)
-
-        # Set Delegate
-        self.delegate = LogDelegate(self.list_view)
-        self.list_view.setItemDelegate(self.delegate)
-
-        # 1. Multi-selection
-        self.list_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.list_view.customContextMenuRequested.connect(self.show_context_menu)
-
-        # Performance Settings
-        self.list_view.setUniformItemSizes(True)
-        self.list_view.setLayoutMode(QListView.Batched)
-        self.list_view.setBatchSize(100)
-
-        # Font
-        font = QFont("Consolas", 11)
-        font.setStyleHint(QFont.Monospace)
-        self.list_view.setFont(font)
-
-        layout.addWidget(self.list_view)
+        self.search_widget.setFixedWidth(400)
+        self.search_widget.hide() # Hidden by default
 
         # Status Bar
         self.status_bar = QStatusBar()
@@ -213,6 +221,7 @@ class MainWindow(QMainWindow):
 
     def apply_theme(self):
         if self.is_dark_mode:
+            # VS Code Dark Theme Colors
             bg_color = "#1e1e1e"
             fg_color = "#d4d4d4"
             selection_bg = "#264f78"
@@ -228,7 +237,11 @@ class MainWindow(QMainWindow):
             bar_fg = "#ffffff"
             input_bg = "#3c3c3c"
             input_fg = "#cccccc"
+            # Floating Widget Colors
+            float_bg = "rgba(37, 37, 38, 0.95)" # 95% opacity
+            float_border = "#454545"
         else:
+            # VS Code Light Theme Colors
             bg_color = "#ffffff"
             fg_color = "#000000"
             selection_bg = "#add6ff"
@@ -244,6 +257,9 @@ class MainWindow(QMainWindow):
             bar_fg = "#ffffff"
             input_bg = "#ffffff"
             input_fg = "#000000"
+            # Floating Widget Colors
+            float_bg = "rgba(243, 243, 243, 0.95)"
+            float_border = "#cecece"
 
         self.delegate.set_hover_color(hover_bg)
         self.list_view.viewport().update()
@@ -272,10 +288,17 @@ class MainWindow(QMainWindow):
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
 
         /* Search Bar Styling */
+        #search_widget {{
+            background-color: {float_bg};
+            border: 1px solid {float_border};
+            border-top: none;
+            border-bottom-left-radius: 5px;
+            border-bottom-right-radius: 5px;
+        }}
         QComboBox {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid #555; padding: 2px; }}
         QComboBox QAbstractItemView {{ background-color: {menu_bg}; color: {menu_fg}; selection-background-color: {menu_sel}; }}
-        QToolButton {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid #555; }}
-        QToolButton:hover {{ background-color: {hover_bg}; }}
+        QToolButton {{ background-color: transparent; color: {input_fg}; border: none; font-weight: bold; }}
+        QToolButton:hover {{ background-color: {hover_bg}; border-radius: 3px; }}
         """
         self.setStyleSheet(style)
 
@@ -327,9 +350,25 @@ class MainWindow(QMainWindow):
             self.toast.show_message(f"Copied {len(text_lines)} lines", duration=3000)
 
     def resizeEvent(self, event):
+        # 1. Update Toast Position
         if not self.toast.isHidden():
              txt = self.toast.label.text()
              self.toast.show_message(txt, duration=self.toast.timer.remainingTime())
+
+        # 2. Update Floating Search Widget Position
+        if not self.search_widget.isHidden():
+            # Top-Right Corner: x = width - search_width - margin, y = margin
+            # We assume central_widget geometry
+            cw = self.centralWidget()
+            sw_w = self.search_widget.width()
+            sw_h = self.search_widget.height()
+
+            x = cw.width() - sw_w - 20 # 20px padding from right
+            y = 0 # Stick to top (below menu if menu is native/top, but here relative to central widget)
+            # Actually central widget starts below menu bar usually.
+
+            self.search_widget.move(x, y)
+
         super().resizeEvent(event)
 
     # --- Search Logic ---
@@ -337,6 +376,9 @@ class MainWindow(QMainWindow):
     def show_search_bar(self):
         if self.search_widget.isHidden():
             self.search_widget.show()
+            self.search_widget.raise_()
+            # Trigger resize to position it correctly initially
+            self.resizeEvent(None)
             self.search_input.setFocus()
             self.search_input.lineEdit().selectAll()
         else:
