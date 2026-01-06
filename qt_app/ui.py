@@ -8,6 +8,8 @@ from .toast import Toast
 from .delegates import LogDelegate
 import os
 import time
+import sys
+import ctypes
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -19,6 +21,7 @@ class MainWindow(QMainWindow):
         self.settings = QSettings("LogAnalyzer", "QtApp")
         # Load theme preference (default to True/Dark)
         self.is_dark_mode = self.settings.value("dark_mode", True, type=bool)
+        self.last_status_message = "Ready"
 
         # Central Widget
         central_widget = QWidget()
@@ -58,7 +61,7 @@ class MainWindow(QMainWindow):
         # Status Bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready")
+        self.update_status_bar("Ready")
 
         # Toast notification
         self.toast = Toast(self)
@@ -110,6 +113,37 @@ class MainWindow(QMainWindow):
         self.settings.setValue("dark_mode", self.is_dark_mode)
         self.apply_theme()
 
+    def update_status_bar(self, message):
+        self.last_status_message = message
+        self.status_bar.showMessage(message)
+
+    def _set_windows_title_bar_color(self, is_dark):
+        """
+        Uses ctypes to set the Windows 10/11 title bar color preference.
+        """
+        if sys.platform != "win32":
+            return
+
+        try:
+            hwnd = int(self.winId())
+            # DWMWA_USE_IMMERSIVE_DARK_MODE = 20 (Windows 10 2004 build 19041+)
+            # Prior to that, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20h1 = 19
+            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+            value = ctypes.c_int(1 if is_dark else 0)
+
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                ctypes.byref(value),
+                ctypes.sizeof(value)
+            )
+
+            # Force a repaint of the title bar by tweaking opacity or geometry
+            # Often handled by Windows automatically, but sometimes needs a nudge.
+            # Usually calling this before show() is best, but runtime toggle works too.
+        except Exception as e:
+            print(f"Failed to set title bar color: {e}")
+
     def apply_theme(self):
         if self.is_dark_mode:
             # VS Code Dark Theme Colors
@@ -122,11 +156,12 @@ class MainWindow(QMainWindow):
             scrollbar_handle = "#424242"
             scrollbar_hover = "#4f4f4f"
             menu_bg = "#252526"
+            menu_fg = "#cccccc"
             menu_sel = "#094771"
             bar_bg = "#007acc"
             bar_fg = "#ffffff"
         else:
-            # VS Code Light Theme Colors (Approximate)
+            # VS Code Light Theme Colors
             bg_color = "#ffffff"
             fg_color = "#000000"
             selection_bg = "#add6ff"
@@ -136,15 +171,20 @@ class MainWindow(QMainWindow):
             scrollbar_handle = "#c1c1c1"
             scrollbar_hover = "#a8a8a8"
             menu_bg = "#f3f3f3"
-            menu_sel = "#0060c0" # Native-ish highlight
-            bar_bg = "#007acc" # VS Code usually keeps blue status bar, or purple
+            menu_fg = "#333333"
+            menu_sel = "#0060c0"
+            bar_bg = "#007acc"
             bar_fg = "#ffffff"
 
         # Update Delegate Hover Color
         self.delegate.set_hover_color(hover_bg)
-
-        # We need to manually trigger a repaint of the list view to apply delegate changes immediately
         self.list_view.viewport().update()
+
+        # Apply Title Bar Color (Windows)
+        self._set_windows_title_bar_color(self.is_dark_mode)
+
+        # Restore status bar text if it gets cleared by style change (unlikely but safe)
+        self.status_bar.showMessage(self.last_status_message)
 
         style = f"""
         QMainWindow {{
@@ -156,7 +196,11 @@ class MainWindow(QMainWindow):
         }}
         QMenuBar {{
             background-color: {menu_bg};
-            color: {fg_color};
+            color: {menu_fg};
+        }}
+        QMenuBar::item {{
+            background-color: transparent;
+            padding: 4px 8px;
         }}
         QMenuBar::item:selected {{
             background-color: {selection_bg};
@@ -164,8 +208,12 @@ class MainWindow(QMainWindow):
         }}
         QMenu {{
             background-color: {menu_bg};
-            color: {fg_color};
+            color: {menu_fg};
             border: 1px solid #454545;
+        }}
+        QMenu::item {{
+            padding: 5px 30px 5px 20px; /* Padding fix for "tight right" issue */
+            background-color: transparent;
         }}
         QMenu::item:selected {{
             background-color: {menu_sel};
@@ -187,6 +235,12 @@ class MainWindow(QMainWindow):
         }}
         QStatusBar {{
             background-color: {bar_bg};
+            color: {bar_fg};
+        }}
+        QStatusBar::item {{
+            border: none;
+        }}
+        QStatusBar QLabel {{
             color: {bar_fg};
         }}
         /* Scrollbar Styling */
@@ -221,7 +275,7 @@ class MainWindow(QMainWindow):
             self.load_log(filepath)
 
     def load_log(self, filepath):
-        self.status_bar.showMessage(f"Loading {filepath}...")
+        self.update_status_bar(f"Loading {filepath}...")
 
         start_time = time.time()
 
@@ -239,7 +293,7 @@ class MainWindow(QMainWindow):
 
         # Status Bar Update (Shows xxx lines (Total xxx))
         # Currently no filtering, so Shows == Total
-        self.status_bar.showMessage(f"Shows {count:,} lines (Total {count:,})")
+        self.update_status_bar(f"Shows {count:,} lines (Total {count:,})")
 
         # 4. Toast Notification
         self.toast.show_message(f"Loaded {count:,} lines in {duration:.3f}s", duration=4000)
