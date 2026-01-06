@@ -10,7 +10,7 @@ from .engine_wrapper import get_engine
 from .toast import Toast
 from .delegates import LogDelegate
 from .filter_dialog import FilterDialog
-from .utils import adjust_color_for_theme, load_tat_filters, save_tat_filters
+from .utils import adjust_color_for_theme, load_tat_filters, save_tat_filters, set_windows_title_bar_color
 import os
 import time
 import sys
@@ -70,15 +70,16 @@ class MainWindow(QMainWindow):
 
         self.filter_tree = QTreeWidget()
         self.filter_tree.setHeaderLabels(["En", "Type", "Pattern", "Hits"])
+        self.filter_tree.setRootIsDecorated(False) # Remove indentation for column alignment
 
         # Fixed Widths for metadata columns, Stretch for Pattern
         self.filter_tree.header().setSectionResizeMode(0, QHeaderView.Fixed)
-        self.filter_tree.header().resizeSection(0, 30)
+        self.filter_tree.header().resizeSection(0, 25)  # Minimized En
         self.filter_tree.header().setSectionResizeMode(1, QHeaderView.Fixed)
-        self.filter_tree.header().resizeSection(1, 60)
+        self.filter_tree.header().resizeSection(1, 40)  # Minimized Type
         self.filter_tree.header().setSectionResizeMode(2, QHeaderView.Stretch)
         self.filter_tree.header().setSectionResizeMode(3, QHeaderView.Fixed)
-        self.filter_tree.header().resizeSection(3, 50)
+        self.filter_tree.header().resizeSection(3, 70)  # Fits 7 digits
 
         self.filter_tree.setDragDropMode(QAbstractItemView.InternalMove)
         self.filter_tree.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -274,13 +275,12 @@ class MainWindow(QMainWindow):
         self.status_label.setText(message)
 
     def _set_windows_title_bar_color(self, is_dark):
-        if sys.platform != "win32": return
-        try:
-            hwnd = int(self.winId())
-            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
-            value = ctypes.c_int(1 if is_dark else 0)
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ctypes.byref(value), ctypes.sizeof(value))
-        except Exception: pass
+        set_windows_title_bar_color(self.winId(), is_dark)
+
+        # Attempt to set for all top-level widgets (Dialogs)
+        for widget in QApplication.topLevelWidgets():
+            if widget.isWindow() and widget != self:
+                set_windows_title_bar_color(widget.winId(), is_dark)
 
     def apply_theme(self):
         # Set Global Style to affect Dialogs
@@ -369,14 +369,23 @@ class MainWindow(QMainWindow):
         end_time = time.time()
         duration = end_time - start_time
         count = self.current_engine.line_count()
-        self.setWindowTitle(f"{os.path.basename(filepath)} - Log Analyzer")
+
+        title = f"{os.path.basename(filepath)}"
+        if self.current_filter_file:
+            title += f" - {os.path.basename(self.current_filter_file)}"
+        title += " - Log Analyzer"
+        self.setWindowTitle(title)
+
         self.update_status_bar(f"Shows {count:,} lines (Total {count:,})")
         self.toast.show_message(f"Loaded {count:,} lines in {duration:.3f}s", duration=4000)
         self.search_results = []
         self.current_match_index = -1
         self.search_info_label.setText("")
-        self.filters.clear()
-        self.refresh_filter_tree()
+        # Do not clear filters, re-apply them
+        if self.filters:
+            self.recalc_filters()
+        else:
+            self.refresh_filter_tree()
 
     def show_context_menu(self, pos):
         menu = QMenu(self)
@@ -605,6 +614,24 @@ class MainWindow(QMainWindow):
             if loaded is not None:
                 self.filters = loaded
                 self.current_filter_file = filepath
+
+                # Update title with filter name
+                title = self.windowTitle().split(" - ")[0] # Attempt to keep log name part
+                if self.current_engine: # If log loaded, reconstruct proper title
+                    log_name = os.path.basename(self.settings.value("last_dir", "")) # Fallback
+                    # Try to get log name from window title or cache?
+                    # Simpler: just get current title, replace/append filter part
+                    # But load_log sets strict format. Let's just update if we can.
+                    # Best way: store current log path in variable instead of relying on title
+
+                # Refresh title logic
+                current_title = self.windowTitle()
+                if " - Log Analyzer" in current_title:
+                    base = current_title.split(" - ")[0] # This is log filename usually
+                    if self.current_filter_file:
+                        new_title = f"{base} - {os.path.basename(self.current_filter_file)} - Log Analyzer"
+                        self.setWindowTitle(new_title)
+
                 self.refresh_filter_tree()
                 self.recalc_filters()
                 self.toast.show_message(f"Imported {len(loaded)} filters")

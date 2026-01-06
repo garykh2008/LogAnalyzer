@@ -1,5 +1,7 @@
 import xml.etree.ElementTree as ET
 import os
+import sys
+import ctypes
 
 def hex_to_rgb(hex_str):
     hex_str = hex_str.lstrip('#')
@@ -47,6 +49,18 @@ def adjust_color_for_theme(hex_color, is_background, is_dark_mode):
         return '#{:02x}{:02x}{:02x}'.format(*tuple(int(c + (255 - c) * 0.6) for c in rgb))
 
     return hex_color
+
+def set_windows_title_bar_color(win_id, is_dark):
+    """
+    Sets the Windows title bar color to match the theme (Dark/Light).
+    """
+    if sys.platform != "win32": return
+    try:
+        hwnd = int(win_id)
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        value = ctypes.c_int(1 if is_dark else 0)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ctypes.byref(value), ctypes.sizeof(value))
+    except Exception: pass
 
 def bool_to_tat(value):
     return 'y' if value else 'n'

@@ -2,6 +2,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineE
                                QCheckBox, QPushButton, QColorDialog, QDialogButtonBox)
 from PySide6.QtGui import QColor
 from PySide6.QtCore import Qt
+from .utils import set_windows_title_bar_color
 
 class FilterDialog(QDialog):
     def __init__(self, parent=None, filter_data=None):
@@ -53,6 +54,10 @@ class FilterDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+        # Apply Title Bar Theme
+        if parent and hasattr(parent, 'is_dark_mode'):
+            set_windows_title_bar_color(self.winId(), parent.is_dark_mode)
 
     def _pick_fg(self):
         c = QColorDialog.getColor(QColor(self.fg_color), self, "Select Text Color")
