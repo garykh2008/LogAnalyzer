@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication,
                                QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
                                QGraphicsOpacityEffect, QCheckBox)
-from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon
+from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation
 from .models import LogModel
 from .engine_wrapper import get_engine
@@ -79,8 +79,15 @@ class MainWindow(QMainWindow):
         self.search_input.setPlaceholderText("Find...")
         self.search_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.search_input.setInsertPolicy(QComboBox.InsertAtTop)
-        # Handle Enter key in combo box line edit
+
+        # Handle Enter key via signal (Primary method for LineEdit)
         self.search_input.lineEdit().returnPressed.connect(self.find_next)
+
+        # Shortcuts for Enter key scoped to search_widget (Catch-all for other focused widgets in bar)
+        self.shortcut_enter = QShortcut(QKeySequence(Qt.Key_Return), self.search_widget)
+        self.shortcut_enter.activated.connect(self.find_next)
+        self.shortcut_enter_num = QShortcut(QKeySequence(Qt.Key_Enter), self.search_widget)
+        self.shortcut_enter_num.activated.connect(self.find_next)
 
         self.btn_prev = QToolButton()
         self.btn_prev.setText("<")
@@ -159,6 +166,9 @@ class MainWindow(QMainWindow):
         # Menu
         self._create_menu()
 
+        # Load History
+        self._load_search_history()
+
         # Styling
         self.apply_theme()
 
@@ -222,13 +232,7 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(copy_action)
 
     def eventFilter(self, obj, event):
-        # 1. Handle Enter Key in Search Input manually to ensure reliability
-        if (obj == self.search_input or obj == self.search_input.lineEdit()) and event.type() == QEvent.KeyPress:
-            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                self.find_next()
-                return True # Consume event
-
-        # 2. Detect Focus In/Out on search widgets
+        # 1. Detect Focus In/Out on search widgets
         if event.type() == QEvent.FocusIn:
             self._animate_search_opacity(0.95)
         elif event.type() == QEvent.FocusOut:
@@ -450,6 +454,10 @@ class MainWindow(QMainWindow):
         self.search_input.blockSignals(False)
         # Not saving to settings as per request
 
+    def _load_search_history(self):
+        # Ephemeral, do nothing (or we could keep list empty)
+        pass
+
     def _perform_search(self, query):
         if not query or not self.current_engine: return
 
@@ -488,7 +496,6 @@ class MainWindow(QMainWindow):
         if index.isValid():
             self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
             self.list_view.setCurrentIndex(index)
-            # Give focus to list view, which will trigger the opacity fade-out naturally via focus event
             self.list_view.setFocus()
 
         self.search_info_label.setText(f"{result_index + 1} / {len(self.search_results)}")
@@ -508,9 +515,6 @@ class MainWindow(QMainWindow):
         # Calculate next index relative to current selection
         current_row = self.list_view.currentIndex().row()
 
-        # Find insertion point
-        # bisect_right returns index where item should be inserted to maintain order.
-        # Elements to the left are <= current_row. Elements to the right are > current_row.
         next_match_list_idx = bisect.bisect_right(self.search_results, current_row)
 
         is_wrap = self.chk_wrap.isChecked()
@@ -537,12 +541,6 @@ class MainWindow(QMainWindow):
         if not self.search_results: return
 
         current_row = self.list_view.currentIndex().row()
-
-        # bisect_left returns index where item could be inserted while maintaining order.
-        # all(val < x for val in a[lo:i])
-        # all(val >= x for val in a[i:hi])
-        # So search_results[i] >= current_row.
-        # We want the item BEFORE that, i.e., strictly less than current_row.
 
         insertion_point = bisect.bisect_left(self.search_results, current_row)
         prev_match_list_idx = insertion_point - 1
