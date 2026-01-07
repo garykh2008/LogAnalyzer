@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication,
                                QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
                                QGraphicsOpacityEffect, QCheckBox, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView,
-                               QDialog, QMessageBox, QScrollBar)
+                               QDialog, QMessageBox, QScrollBar, QPushButton)
 from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation
 from .models import LogModel
@@ -31,9 +31,12 @@ class FilterTreeWidget(QTreeWidget):
             self.on_drop_callback()
 
 class MainWindow(QMainWindow):
+    VERSION = "V2.0"
+    APP_NAME = "Log Analyzer"
+
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Log Analyzer (PySide6)")
+        self.setWindowTitle(f"{self.APP_NAME} (PySide6)")
         self.resize(1200, 800)
 
         self.settings = QSettings("LogAnalyzer", "QtApp")
@@ -329,6 +332,18 @@ class MainWindow(QMainWindow):
 
         edit_menu = menu_bar.addMenu("&Edit")
         edit_menu.addAction(copy_action)
+
+        help_menu = menu_bar.addMenu("&Help")
+        
+        shortcuts_action = QAction("Keyboard Shortcuts", self)
+        shortcuts_action.triggered.connect(self.show_shortcuts)
+        help_menu.addAction(shortcuts_action)
+        
+        help_menu.addSeparator()
+        
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
 
     def toggle_show_filtered_only(self):
         self.show_filtered_only = self.show_filtered_action.isChecked()
@@ -1150,7 +1165,7 @@ class MainWindow(QMainWindow):
         elif self.filters_modified:
              parts.append("*Unsaved Filters")
 
-        parts.append("Log Analyzer")
+        parts.append(f"{self.APP_NAME} {self.VERSION}")
         self.setWindowTitle(" - ".join(parts))
 
     def navigate_filter_hit(self, reverse=False):
@@ -1328,3 +1343,73 @@ class MainWindow(QMainWindow):
                     self.update_status_bar(f"Filtered: {len(indices_to_set):,} lines (Total {total_lines:,})")
                 else:
                     self.update_status_bar(f"Shows {total_lines:,} lines")
+
+    def show_shortcuts(self):
+        shortcuts = [
+            ("General", ""),
+            ("Ctrl + O", "Open Log File"),
+            ("Ctrl + Q", "Exit Application"),
+            ("", ""),
+            ("View & Navigation", ""),
+            ("Ctrl + F", "Open Find Bar"),
+            ("Esc", "Close Find Bar / Clear Selection"),
+            ("Ctrl + H", "Toggle Show Filtered Only"),
+            ("F2 / F3", "Find Previous / Next"),
+            ("Ctrl + Left / Right", "Navigate Filter Hits (Selected Filter)"),
+            ("Home / End", "Jump to Start / End of Log"),
+            ("", ""),
+            ("Log View", ""),
+            ("Double-Click", "Create Filter from selected text"),
+            ("'C' key", "Add / Edit Note for current line"),
+            ("Ctrl + C", "Copy selected lines"),
+            ("", ""),
+            ("Filters", ""),
+            ("Delete", "Remove selected filter"),
+            ("Double-Click", "Edit filter properties"),
+            ("Space", "Toggle filter enabled/disabled"),
+        ]
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Keyboard Shortcuts")
+        dialog.resize(550, 600)
+        layout = QVBoxLayout(dialog)
+        
+        tree = QTreeWidget()
+        tree.setHeaderLabels(["Key", "Description"])
+        tree.setRootIsDecorated(False)
+        tree.setAlternatingRowColors(True)
+        
+        for key, desc in shortcuts:
+            item = QTreeWidgetItem(tree)
+            if not key and not desc:
+                # item.setFlags(Qt.NoItemFlags)
+                pass
+            elif not desc:
+                # Category Header
+                item.setText(0, key)
+                bg = QColor(60, 60, 60) if self.is_dark_mode else QColor(230, 230, 230)
+                item.setBackground(0, bg)
+                item.setBackground(1, bg)
+                font = item.font(0)
+                font.setBold(True)
+                item.setFont(0, font)
+            else:
+                item.setText(0, key)
+                item.setText(1, desc)
+        
+        tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
+        layout.addWidget(tree)
+        
+        btn = QPushButton("Close")
+        btn.clicked.connect(dialog.accept)
+        layout.addWidget(btn)
+        
+        set_windows_title_bar_color(dialog.winId(), self.is_dark_mode)
+        dialog.exec()
+
+    def show_about(self):
+        msg = f"<h3>{self.APP_NAME} {self.VERSION}</h3>" \
+              f"<p>A high-performance log analysis tool built with PySide6 and Rust extension.</p>" \
+              f"<p>Developer: Gary Hsieh</p>"
+        QMessageBox.about(self, "About", msg)
