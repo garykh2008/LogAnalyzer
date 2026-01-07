@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication,
                                QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
                                QGraphicsOpacityEffect, QCheckBox, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView,
-                               QDialog)
+                               QDialog, QMessageBox)
 from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation
 from .models import LogModel
@@ -34,6 +34,11 @@ class MainWindow(QMainWindow):
         self.search_history = []
         self.filters = []
         self.show_filtered_only = False
+
+        # State tracking
+        self.filters_modified = False
+        self.selected_filter_index = -1
+        self.current_log_path = None
 
         self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
 
@@ -89,6 +94,8 @@ class MainWindow(QMainWindow):
         self.filter_tree.customContextMenuRequested.connect(self.show_filter_menu)
         self.filter_tree.itemDoubleClicked.connect(self.edit_selected_filter)
         self.filter_tree.itemChanged.connect(self.on_filter_item_changed)
+        self.filter_tree.itemClicked.connect(self.on_filter_item_clicked)
+        self.filter_tree.installEventFilter(self)
 
         self.filter_dock.setWidget(self.filter_tree)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.filter_dock)
@@ -254,8 +261,15 @@ class MainWindow(QMainWindow):
         self.show_filtered_only = self.show_filtered_action.isChecked()
         self.recalc_filters()
 
-    # ... [Search & Event Filters Logic kept as is, abbreviated for update] ...
     def eventFilter(self, obj, event):
+        if obj == self.filter_tree and event.type() == QEvent.KeyPress:
+            if event.modifiers() & Qt.ControlModifier:
+                if event.key() == Qt.Key_Left:
+                    self.navigate_filter_hit(reverse=True)
+                    return True
+                elif event.key() == Qt.Key_Right:
+                    self.navigate_filter_hit(reverse=False)
+                    return True
         if event.type() == QEvent.FocusIn: self._animate_search_opacity(0.95)
         elif event.type() == QEvent.FocusOut: QTimer.singleShot(10, self._check_search_focus)
         return super().eventFilter(obj, event)
@@ -278,8 +292,9 @@ class MainWindow(QMainWindow):
         self.is_dark_mode = not self.is_dark_mode
         self.settings.setValue("dark_mode", self.is_dark_mode)
         self.apply_theme()
-        # Refresh colors for filters
-        if self.filters:
+        # Refresh colors for filters immediately (unconditional)
+        self.refresh_filter_tree()
+        if self.current_engine and self.filters:
             self.recalc_filters()
 
     def update_status_bar(self, message):
@@ -378,15 +393,12 @@ class MainWindow(QMainWindow):
         self.settings.setValue("last_dir", os.path.dirname(filepath))
         self.current_engine = get_engine(filepath)
         self.model.set_engine(self.current_engine)
+        self.current_log_path = filepath
         end_time = time.time()
         duration = end_time - start_time
         count = self.current_engine.line_count()
 
-        title = f"{os.path.basename(filepath)}"
-        if self.current_filter_file:
-            title += f" - {os.path.basename(self.current_filter_file)}"
-        title += " - Log Analyzer"
-        self.setWindowTitle(title)
+        self.update_window_title()
 
         self.update_status_bar(f"Shows {count:,} lines (Total {count:,})")
         self.toast.show_message(f"Loaded {count:,} lines in {duration:.3f}s", duration=4000)
@@ -524,6 +536,10 @@ class MainWindow(QMainWindow):
             item.setBackground(1, QColor(bg))
         self.filter_tree.blockSignals(False)
 
+    def on_filter_item_clicked(self, item, column):
+        # Just update selected index for navigation
+        self.selected_filter_index = item.data(0, Qt.UserRole)
+
     def on_filter_item_changed(self, item, column):
         if column == 0:
             idx = item.data(0, Qt.UserRole)
@@ -532,16 +548,13 @@ class MainWindow(QMainWindow):
                 new_state = (item.checkState(0) == Qt.Checked)
                 if self.filters[idx]["enabled"] != new_state:
                     self.filters[idx]["enabled"] = new_state
+                    self.filters_modified = True
+                    self.update_window_title()
                     self.recalc_filters()
 
     def on_log_double_clicked(self, index):
         text = self.model.data(index, Qt.DisplayRole)
         if text:
-            # Maybe strip timestamp? For now just use full text or selected text?
-            # Standard is selected text if any, else line.
-            # But double click usually selects word.
-            # If QListView selection mode is extended, double click might select row.
-            # Let's assume we pass the line content.
             self.add_filter_dialog(initial_text=text.strip())
 
     def edit_selected_filter(self):
@@ -553,6 +566,8 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             new_data = dialog.get_data()
             self.filters[idx].update(new_data)
+            self.filters_modified = True
+            self.update_window_title()
             self.refresh_filter_tree()
             self.recalc_filters()
 
@@ -564,6 +579,8 @@ class MainWindow(QMainWindow):
             flt = dialog.get_data()
             flt["hits"] = 0
             self.filters.append(flt)
+            self.filters_modified = True
+            self.update_window_title()
             self.refresh_filter_tree()
             self.recalc_filters()
 
@@ -572,6 +589,8 @@ class MainWindow(QMainWindow):
         if not item: return
         idx = item.data(0, Qt.UserRole)
         del self.filters[idx]
+        self.filters_modified = True
+        self.update_window_title()
         self.refresh_filter_tree()
         self.recalc_filters()
 
@@ -582,6 +601,8 @@ class MainWindow(QMainWindow):
         if idx > 0:
             flt = self.filters.pop(idx)
             self.filters.insert(0, flt)
+            self.filters_modified = True
+            self.update_window_title()
             self.refresh_filter_tree()
             self.filter_tree.setCurrentItem(self.filter_tree.topLevelItem(0))
             self.recalc_filters()
@@ -593,14 +614,34 @@ class MainWindow(QMainWindow):
         if idx < len(self.filters) - 1:
             flt = self.filters.pop(idx)
             self.filters.append(flt)
+            self.filters_modified = True
+            self.update_window_title()
             self.refresh_filter_tree()
             self.filter_tree.setCurrentItem(self.filter_tree.topLevelItem(len(self.filters)-1))
             self.recalc_filters()
 
     def closeEvent(self, event):
-        self.settings.setValue("window_geometry", self.saveGeometry())
-        self.settings.setValue("window_state", self.saveState())
-        super().closeEvent(event)
+        try:
+            if self.filters_modified and self.filters:
+                reply = QMessageBox.question(self, "Save Filters?",
+                                             "You have unsaved filter changes. Do you want to save them?",
+                                             QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                                             QMessageBox.Save)
+                if reply == QMessageBox.Save:
+                    self.quick_save_filters()
+                    if self.filters_modified: # If cancel inside save dialog
+                         event.ignore()
+                         return
+                elif reply == QMessageBox.Cancel:
+                    event.ignore()
+                    return
+
+            self.settings.setValue("window_geometry", self.saveGeometry())
+            self.settings.setValue("window_state", self.saveState())
+            super().closeEvent(event)
+        except Exception as e:
+            # Handle cases like KeyboardInterrupt during close
+            pass
 
     def close_app(self):
         self.close()
@@ -648,24 +689,9 @@ class MainWindow(QMainWindow):
             if loaded is not None:
                 self.filters = loaded
                 self.current_filter_file = filepath
+                self.filters_modified = False
 
-                # Update title with filter name
-                title = self.windowTitle().split(" - ")[0] # Attempt to keep log name part
-                if self.current_engine: # If log loaded, reconstruct proper title
-                    log_name = os.path.basename(self.settings.value("last_dir", "")) # Fallback
-                    # Try to get log name from window title or cache?
-                    # Simpler: just get current title, replace/append filter part
-                    # But load_log sets strict format. Let's just update if we can.
-                    # Best way: store current log path in variable instead of relying on title
-
-                # Refresh title logic
-                current_title = self.windowTitle()
-                if " - Log Analyzer" in current_title:
-                    base = current_title.split(" - ")[0] # This is log filename usually
-                    if self.current_filter_file:
-                        new_title = f"{base} - {os.path.basename(self.current_filter_file)} - Log Analyzer"
-                        self.setWindowTitle(new_title)
-
+                self.update_window_title()
                 self.refresh_filter_tree()
                 self.recalc_filters()
                 self.toast.show_message(f"Imported {len(loaded)} filters")
@@ -673,6 +699,8 @@ class MainWindow(QMainWindow):
     def quick_save_filters(self):
         if self.current_filter_file:
             if save_tat_filters(self.current_filter_file, self.filters):
+                self.filters_modified = False
+                self.update_window_title()
                 self.toast.show_message("Filters saved")
         else:
             self.save_filters_as()
@@ -684,7 +712,92 @@ class MainWindow(QMainWindow):
             self.settings.setValue("last_filter_dir", os.path.dirname(filepath))
             if save_tat_filters(filepath, self.filters):
                 self.current_filter_file = filepath
+                self.filters_modified = False
+                self.update_window_title()
                 self.toast.show_message("Filters saved")
+
+    def update_window_title(self):
+        parts = []
+        if self.current_log_path:
+            parts.append(os.path.basename(self.current_log_path))
+
+        if self.current_filter_file:
+            filter_name = os.path.basename(self.current_filter_file)
+            if self.filters_modified:
+                filter_name = "*" + filter_name
+            parts.append(filter_name)
+        elif self.filters_modified:
+             parts.append("*Unsaved Filters")
+
+        parts.append("Log Analyzer")
+        self.setWindowTitle(" - ".join(parts))
+
+    def navigate_filter_hit(self, reverse=False):
+        if not self.current_engine or not self.model.tag_codes:
+            return
+
+        if self.selected_filter_index < 0 or self.selected_filter_index >= len(self.filters):
+            self.toast.show_message("Select a filter to navigate")
+            return
+
+        target_filter_idx = self.selected_filter_index
+
+        # Determine the target code used in tag_codes
+        target_code = -1
+        current_j = 0
+        for i, f in enumerate(self.filters):
+            if f["enabled"]:
+                if i == target_filter_idx:
+                    target_code = current_j + 2
+                    break
+                current_j += 1
+
+        if target_code == -1:
+            self.toast.show_message("Selected filter is disabled")
+            return
+
+        current_row = self.list_view.currentIndex().row()
+        if current_row < 0: current_row = 0
+
+        found_row = -1
+
+        # Get raw_index of current view row
+        start_raw_index = current_row
+        if self.show_filtered_only and self.model.filtered_indices:
+             if current_row < len(self.model.filtered_indices):
+                 start_raw_index = self.model.filtered_indices[current_row]
+
+        count = len(self.model.tag_codes)
+
+        if reverse:
+            # Look backwards
+            for r in range(start_raw_index - 1, -1, -1):
+                if self.model.tag_codes[r] == target_code:
+                    found_row = r
+                    break
+        else:
+            # Look forward
+            for r in range(start_raw_index + 1, count):
+                if self.model.tag_codes[r] == target_code:
+                    found_row = r
+                    break
+
+        if found_row != -1:
+            view_row = found_row
+            if self.show_filtered_only and self.model.filtered_indices:
+                idx = bisect.bisect_left(self.model.filtered_indices, found_row)
+                if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == found_row:
+                    view_row = idx
+                else:
+                    return # Should not happen
+
+            index = self.model.index(view_row, 0)
+            if index.isValid():
+                self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
+                self.list_view.setCurrentIndex(index)
+                self.toast.show_message(f"Jumped to line {found_row+1}")
+        else:
+            self.toast.show_message("No more matches for this filter")
 
     def recalc_filters(self):
         if not self.current_engine: return
