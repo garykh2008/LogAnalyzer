@@ -571,7 +571,7 @@ class MainWindow(QMainWindow):
         /* Dialog specific */
         QDialog {{ background-color: {dialog_bg}; color: {dialog_fg}; }}
         QLabel, QCheckBox {{ color: {dialog_fg}; }}
-        QLineEdit {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid #555; }}
+        QLineEdit, QTextEdit, QPlainTextEdit {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid #555; }}
 
         #search_widget {{
             background-color: {float_bg};
@@ -588,6 +588,10 @@ class MainWindow(QMainWindow):
 
         QCheckBox {{ spacing: 5px; }}
         QCheckBox::indicator {{ width: 13px; height: 13px; }}
+
+        QPushButton {{ background-color: {menu_bg}; color: {fg_color}; border: 1px solid {float_border}; padding: 4px 12px; border-radius: 3px; }}
+        QPushButton:hover {{ background-color: {hover_bg}; }}
+        QPushButton:pressed {{ background-color: {selection_bg}; color: {selection_fg}; }}
         """
         app.setStyleSheet(style)
 
