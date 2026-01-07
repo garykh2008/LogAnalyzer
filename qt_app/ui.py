@@ -155,12 +155,26 @@ class MainWindow(QMainWindow):
         self.shortcut_enter_num.activated.connect(self.find_next)
 
         self.btn_prev = QToolButton()
-        self.btn_prev.setText("<")
+        self.btn_prev.setText("▲")
+        self.btn_prev.setFixedSize(26, 24)
         self.btn_next = QToolButton()
-        self.btn_next.setText(">")
-        self.chk_case = QCheckBox("Aa")
-        self.chk_case.stateChanged.connect(self.on_search_case_changed)
-        self.chk_wrap = QCheckBox("Wrap")
+        self.btn_next.setText("▼")
+        self.btn_next.setFixedSize(26, 24)
+        
+        self.chk_case = QToolButton()
+        self.chk_case.setText("Aa")
+        self.chk_case.setCheckable(True)
+        self.chk_case.setFixedSize(26, 24)
+        self.chk_case.setToolTip("Match Case")
+        self.chk_case.setFocusPolicy(Qt.NoFocus)
+        self.chk_case.toggled.connect(self.on_search_case_changed)
+
+        self.chk_wrap = QToolButton()
+        self.chk_wrap.setText("W")
+        self.chk_wrap.setToolTip("Wrap Search")
+        self.chk_wrap.setCheckable(True)
+        self.chk_wrap.setFixedSize(26, 24)
+        self.chk_wrap.setFocusPolicy(Qt.NoFocus)
         self.chk_wrap.setChecked(True)
 
         self.btn_close_search = QToolButton()
@@ -168,8 +182,9 @@ class MainWindow(QMainWindow):
         self.btn_close_search.clicked.connect(self.hide_search_bar)
 
         self.search_info_label = QLabel("")
-        self.search_info_label.setFixedWidth(100)
-        self.search_info_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.search_info_label.setMinimumWidth(40) # Ensure a base width
+        self.search_info_label.setContentsMargins(5, 0, 5, 0) # Add horizontal padding
+        self.search_info_label.setAlignment(Qt.AlignCenter)
 
         self.search_layout.addWidget(self.search_input)
         self.search_layout.addWidget(self.chk_case)
@@ -553,6 +568,8 @@ class MainWindow(QMainWindow):
         QComboBox QAbstractItemView {{ background-color: {menu_bg}; color: {menu_fg}; selection-background-color: {menu_sel}; }}
         QToolButton {{ background-color: transparent; color: {input_fg}; border: none; font-weight: bold; }}
         QToolButton:hover {{ background-color: {hover_bg}; border-radius: 3px; }}
+        QToolButton:checked {{ background-color: {selection_bg}; color: {selection_fg}; border-radius: 3px; }}
+
         QCheckBox {{ spacing: 5px; }}
         QCheckBox::indicator {{ width: 13px; height: 13px; }}
         """
@@ -645,8 +662,19 @@ class MainWindow(QMainWindow):
         if not query: return
         if self.delegate.search_query != query or not self.search_results: self._perform_search(query); return
         if not self.search_results: return
-        current_row = self.list_view.currentIndex().row()
-        next_match_list_idx = bisect.bisect_right(self.search_results, current_row)
+        
+        # Calculate current RAW row index from view selection
+        current_raw_row = -1
+        idx = self.list_view.currentIndex()
+        if idx.isValid():
+            view_abs_row = self.model.viewport_start + idx.row()
+            if self.show_filtered_only and self.model.filtered_indices:
+                if view_abs_row < len(self.model.filtered_indices):
+                    current_raw_row = self.model.filtered_indices[view_abs_row]
+            else:
+                current_raw_row = view_abs_row
+
+        next_match_list_idx = bisect.bisect_right(self.search_results, current_raw_row)
         is_wrap = self.chk_wrap.isChecked()
         if next_match_list_idx >= len(self.search_results):
             if is_wrap: next_match_list_idx = 0; self.toast.show_message("Wrapped to top", duration=1000)
@@ -658,8 +686,19 @@ class MainWindow(QMainWindow):
         if not query: return
         if self.delegate.search_query != query or not self.search_results: self._perform_search(query); return
         if not self.search_results: return
-        current_row = self.list_view.currentIndex().row()
-        insertion_point = bisect.bisect_left(self.search_results, current_row)
+        
+        # Calculate current RAW row index from view selection
+        current_raw_row = -1
+        idx = self.list_view.currentIndex()
+        if idx.isValid():
+            view_abs_row = self.model.viewport_start + idx.row()
+            if self.show_filtered_only and self.model.filtered_indices:
+                if view_abs_row < len(self.model.filtered_indices):
+                    current_raw_row = self.model.filtered_indices[view_abs_row]
+            else:
+                current_raw_row = view_abs_row
+
+        insertion_point = bisect.bisect_left(self.search_results, current_raw_row)
         prev_match_list_idx = insertion_point - 1
         is_wrap = self.chk_wrap.isChecked()
         if prev_match_list_idx < 0:
@@ -690,12 +729,47 @@ class MainWindow(QMainWindow):
     def _jump_to_match(self, result_index):
         if not self.search_results or result_index < 0 or result_index >= len(self.search_results): return
         self.current_match_index = result_index
-        row_idx = self.search_results[result_index]
-        index = self.model.index(row_idx, 0)
+        raw_row_idx = self.search_results[result_index]
+        
+        # Determine visual absolute row
+        view_abs_row = raw_row_idx
+        if self.show_filtered_only and self.model.filtered_indices:
+             # Find where this raw index is in the filtered list
+             idx = bisect.bisect_left(self.model.filtered_indices, raw_row_idx)
+             if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == raw_row_idx:
+                 view_abs_row = idx
+             else:
+                 # Match exists in full log but hidden by filter
+                 self.toast.show_message("Match is hidden by current filter")
+                 return
+
+        # Calculate new viewport start to center the result
+        vp_size = self.calculate_viewport_size()
+        new_vp_start = max(0, view_abs_row - (vp_size // 2))
+        
+        # Update Scrollbar (triggers model viewport update)
+        self.v_scrollbar.setValue(new_vp_start)
+        
+        # Force model update to ensure sync even if scrollbar value didn't change
+        # (e.g. target is already in view range but we want to be sure model covers it)
+        actual_vp_start = self.v_scrollbar.value()
+        self.model.set_viewport(actual_vp_start, vp_size)
+        
+        # Ensure view processes the layout change before we try to select/scroll
+        QApplication.processEvents()
+
+        # Calculate relative index in the new viewport
+        relative_row = view_abs_row - actual_vp_start
+        
+        index = self.model.index(relative_row, 0)
         if index.isValid():
-            self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
+            self.list_view.clearSelection()
             self.list_view.setCurrentIndex(index)
+            self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
             self.list_view.setFocus()
+        else:
+            self.toast.show_message(f"Nav Error: View {relative_row} invalid")
+
         self.search_info_label.setText(f"{result_index + 1} / {len(self.search_results)}")
 
     # --- Filter Logic ---
