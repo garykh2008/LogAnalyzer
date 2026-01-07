@@ -51,6 +51,8 @@ class MainWindow(QMainWindow):
         self.filters_modified = False
         self.selected_filter_index = -1
         self.current_log_path = None
+        self.filters_dirty_cache = True # Indicates if backend needs to re-run filter
+        self.cached_filter_results = None # Stores result of last engine.filter()
 
         self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
 
@@ -271,6 +273,7 @@ class MainWindow(QMainWindow):
 
     def toggle_show_filtered_only(self):
         self.show_filtered_only = self.show_filtered_action.isChecked()
+        # Toggle view should not invalidate cache, just re-apply cached results if available
         self.recalc_filters()
 
     def eventFilter(self, obj, event):
@@ -307,7 +310,9 @@ class MainWindow(QMainWindow):
         # Refresh colors for filters immediately (unconditional)
         self.refresh_filter_tree()
         if self.current_engine and self.filters:
-            self.recalc_filters()
+            # Theme change affects colors, but not line matches, so cache is still valid regarding indices/tags
+            # But we need to regenerate the palette in the model
+            self.recalc_filters(force_color_update=True)
 
     def update_status_bar(self, message):
         self.last_status_message = message
@@ -417,6 +422,8 @@ class MainWindow(QMainWindow):
         self.search_results = []
         self.current_match_index = -1
         self.search_info_label.setText("")
+
+        self.filters_dirty_cache = True # New file, must re-filter
         # Do not clear filters, re-apply them
         if self.filters:
             self.recalc_filters()
@@ -528,13 +535,13 @@ class MainWindow(QMainWindow):
             item = root.child(i)
             idx = item.data(0, Qt.UserRole)
             new_filters.append(self.filters[idx])
-            # Update the item data to reflect the new index mapping if we were to refresh
-            # But refresh_filter_tree will do that.
+            # Update the item data to reflect the new index
+            item.setData(0, Qt.UserRole, i)
 
         self.filters = new_filters
         self.filters_modified = True
+        self.filters_dirty_cache = True # Order changes can affect priority
         self.update_window_title()
-        self.refresh_filter_tree()
         self.recalc_filters()
 
     def refresh_filter_tree(self):
@@ -567,10 +574,11 @@ class MainWindow(QMainWindow):
 
     def on_filter_item_clicked(self, item, column):
         # Just update selected index for navigation
-        self.selected_filter_index = item.data(0, Qt.UserRole)
+        if item:
+            self.selected_filter_index = item.data(0, Qt.UserRole)
 
     def on_filter_item_changed(self, item, column):
-        if column == 0:
+        if column == 0 and item:
             idx = item.data(0, Qt.UserRole)
             # Ensure index is valid and within range
             if 0 <= idx < len(self.filters):
@@ -578,6 +586,7 @@ class MainWindow(QMainWindow):
                 if self.filters[idx]["enabled"] != new_state:
                     self.filters[idx]["enabled"] = new_state
                     self.filters_modified = True
+                    self.filters_dirty_cache = True
                     self.update_window_title()
                     self.recalc_filters()
 
@@ -596,6 +605,7 @@ class MainWindow(QMainWindow):
             new_data = dialog.get_data()
             self.filters[idx].update(new_data)
             self.filters_modified = True
+            self.filters_dirty_cache = True
             self.update_window_title()
             self.refresh_filter_tree()
             self.recalc_filters()
@@ -609,6 +619,7 @@ class MainWindow(QMainWindow):
             flt["hits"] = 0
             self.filters.append(flt)
             self.filters_modified = True
+            self.filters_dirty_cache = True
             self.update_window_title()
             self.refresh_filter_tree()
             self.recalc_filters()
@@ -619,6 +630,7 @@ class MainWindow(QMainWindow):
         idx = item.data(0, Qt.UserRole)
         del self.filters[idx]
         self.filters_modified = True
+        self.filters_dirty_cache = True
         self.update_window_title()
         self.refresh_filter_tree()
         self.recalc_filters()
@@ -631,6 +643,7 @@ class MainWindow(QMainWindow):
             flt = self.filters.pop(idx)
             self.filters.insert(0, flt)
             self.filters_modified = True
+            self.filters_dirty_cache = True
             self.update_window_title()
             self.refresh_filter_tree()
             self.filter_tree.setCurrentItem(self.filter_tree.topLevelItem(0))
@@ -644,6 +657,7 @@ class MainWindow(QMainWindow):
             flt = self.filters.pop(idx)
             self.filters.append(flt)
             self.filters_modified = True
+            self.filters_dirty_cache = True
             self.update_window_title()
             self.refresh_filter_tree()
             self.filter_tree.setCurrentItem(self.filter_tree.topLevelItem(len(self.filters)-1))
@@ -702,6 +716,7 @@ class MainWindow(QMainWindow):
             toggle_action = QAction(toggle_txt, self)
             def toggle_func():
                 self.filters[idx]["enabled"] = not is_enabled
+                self.filters_dirty_cache = True
                 self.refresh_filter_tree()
                 self.recalc_filters()
             toggle_action.triggered.connect(toggle_func)
@@ -719,6 +734,7 @@ class MainWindow(QMainWindow):
                 self.filters = loaded
                 self.current_filter_file = filepath
                 self.filters_modified = False
+                self.filters_dirty_cache = True
 
                 self.update_window_title()
                 self.refresh_filter_tree()
@@ -822,38 +838,58 @@ class MainWindow(QMainWindow):
 
             index = self.model.index(view_row, 0)
             if index.isValid():
+                # Clear previous selections to avoid "highlighting every line"
+                self.list_view.clearSelection()
                 self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
                 self.list_view.setCurrentIndex(index)
                 self.toast.show_message(f"Jumped to line {found_row+1}")
         else:
             self.toast.show_message("No more matches for this filter")
 
-    def recalc_filters(self):
+    def recalc_filters(self, force_color_update=False):
         if not self.current_engine: return
         if not hasattr(self.current_engine, 'filter'): return
 
-        self.update_status_bar("Filtering...")
-        QApplication.processEvents()
+        # Optimization: Only run engine filter if filters have actually changed
+        if self.filters_dirty_cache:
+            self.update_status_bar("Filtering...")
+            QApplication.processEvents()
 
-        rust_filters = []
-        for i, f in enumerate(self.filters):
-            if f["enabled"]:
-                rust_filters.append((f["text"], f["is_regex"], f["is_exclude"], False, i))
+            rust_filters = []
+            for i, f in enumerate(self.filters):
+                if f["enabled"]:
+                    rust_filters.append((f["text"], f["is_regex"], f["is_exclude"], False, i))
 
-        try:
-            start_t = time.time()
-            res = self.current_engine.filter(rust_filters)
-            dur = time.time() - start_t
+            try:
+                start_t = time.time()
+                # Returns: tag_codes, filtered_indices, subset_counts, error
+                res = self.current_engine.filter(rust_filters)
+                dur = time.time() - start_t
+
+                self.cached_filter_results = (res, rust_filters)
+                self.filters_dirty_cache = False
+                self.toast.show_message(f"Filter applied in {dur:.3f}s")
+
+            except Exception as e:
+                print(f"Filter Error: {e}")
+                self.toast.show_message("Filter Error")
+                return
+
+        # If we have results (cached or new)
+        if self.cached_filter_results:
+            res, rust_filters = self.cached_filter_results
 
             if len(res) == 4:
                 tag_codes, filtered_indices, subset_counts, _ = res
 
-                for j, rf in enumerate(rust_filters):
-                    orig_idx = rf[4]
-                    if j < len(subset_counts):
-                        self.filters[orig_idx]["hits"] = subset_counts[j]
+                # Update hits (only if we just ran the filter, but harmless to repeat)
+                if self.filters_dirty_cache is False: # means we just updated or it's valid
+                     for j, rf in enumerate(rust_filters):
+                        orig_idx = rf[4]
+                        if j < len(subset_counts):
+                            self.filters[orig_idx]["hits"] = subset_counts[j]
 
-                # Colors map: Use adjust_color_for_theme
+                # Colors map
                 code_to_filter = {}
                 for j, rf in enumerate(rust_filters):
                     orig_idx = rf[4]
@@ -867,7 +903,11 @@ class MainWindow(QMainWindow):
 
                 self.model.set_filter_data(tag_codes, palette)
 
-                self.refresh_filter_tree()
+                # Refresh tree to show hits
+                # Note: recalc_filters calls refresh_filter_tree?
+                # We should avoid circular dependency. refresh_filter_tree triggers no signals.
+                if not force_color_update:
+                     self.refresh_filter_tree()
 
                 if self.show_filtered_only and rust_filters:
                     self.model.set_filtered_indices(filtered_indices)
@@ -875,9 +915,3 @@ class MainWindow(QMainWindow):
                 else:
                     self.model.set_filtered_indices(None)
                     self.update_status_bar(f"Shows {self.current_engine.line_count():,} lines")
-
-                self.toast.show_message(f"Filter applied in {dur:.3f}s")
-
-        except Exception as e:
-            print(f"Filter Error: {e}")
-            self.toast.show_message("Filter Error")
