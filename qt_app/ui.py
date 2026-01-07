@@ -2,8 +2,8 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication,
                                QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
                                QGraphicsOpacityEffect, QCheckBox, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView,
-                               QDialog, QMessageBox)
-from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut
+                               QDialog, QMessageBox, QScrollBar)
+from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation
 from .models import LogModel
 from .engine_wrapper import get_engine
@@ -53,7 +53,8 @@ class MainWindow(QMainWindow):
         self.current_log_path = None
         self.filters_dirty_cache = True # Indicates if backend needs to re-run filter
         self.cached_filter_results = None # Stores result of last engine.filter()
-
+        self.is_scrolling = False
+        
         self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
 
         self.list_view = QListView()
@@ -69,18 +70,38 @@ class MainWindow(QMainWindow):
         self.list_view.doubleClicked.connect(self.on_log_double_clicked)
 
         self.list_view.setUniformItemSizes(True)
-        self.list_view.setLayoutMode(QListView.Batched)
-        self.list_view.setBatchSize(100)
+        # self.list_view.setLayoutMode(QListView.Batched) # Removed for virtual viewport optimization
+        # self.list_view.setBatchSize(100)
+
+        # Virtual Viewport Setup
+        self.list_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.v_scrollbar = QScrollBar(Qt.Vertical)
+        self.v_scrollbar.valueChanged.connect(self.on_scrollbar_value_changed)
+        self.list_view.installEventFilter(self) # For wheel events
+        
+        # Track selection for reliable navigation
+        self.list_view.selectionModel().currentChanged.connect(self.on_view_selection_changed)
 
         font = QFont("Consolas", 11)
         font.setStyleHint(QFont.Monospace)
         self.list_view.setFont(font)
 
+
         central_widget = QWidget()
         central_layout = QVBoxLayout(central_widget)
         central_layout.setContentsMargins(0, 0, 0, 0)
-        central_layout.addWidget(self.list_view)
+        
+        # Horizontal container for List + Scrollbar
+        list_container = QWidget()
+        list_layout = QHBoxLayout(list_container)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        list_layout.setSpacing(0)
+        list_layout.addWidget(self.list_view)
+        list_layout.addWidget(self.v_scrollbar)
+        
+        central_layout.addWidget(list_container)
         self.setCentralWidget(central_widget)
+
 
         # --- Filter Panel ---
         self.filter_dock = QDockWidget("Filters", self)
@@ -278,7 +299,71 @@ class MainWindow(QMainWindow):
         self.recalc_filters()
 
     def eventFilter(self, obj, event):
-        if obj == self.filter_tree and event.type() == QEvent.KeyPress:
+        if obj == self.list_view and event.type() == QEvent.Resize:
+            self.update_scrollbar_range()
+            return False # Don't consume, let list view handle layout
+
+        if obj == self.list_view and event.type() == QEvent.Wheel:
+            # Forward wheel events to custom scrollbar
+            delta = event.angleDelta().y()
+            # Standard step is 120 per notch. One notch = 3 lines?
+            steps = -delta / 40 # Sensitivity
+            current = self.v_scrollbar.value()
+            self.v_scrollbar.setValue(current + steps)
+            return True # Consume event
+
+        if obj == self.list_view and event.type() == QEvent.KeyPress:
+            key = event.key()
+            mod = event.modifiers()
+            
+            # Virtual Viewport Navigation
+            if key == Qt.Key_Down:
+                idx = self.list_view.currentIndex()
+                row = idx.row() if idx.isValid() else -1
+                if row >= self.model.rowCount() - 1:
+                    # At bottom of viewport, scroll down
+                    self.v_scrollbar.setValue(self.v_scrollbar.value() + 1)
+                    return True # Consume
+            
+            elif key == Qt.Key_Up:
+                idx = self.list_view.currentIndex()
+                row = idx.row() if idx.isValid() else -1
+                if row <= 0:
+                    # At top of viewport, scroll up
+                    self.v_scrollbar.setValue(self.v_scrollbar.value() - 1)
+                    return True # Consume
+
+            elif key == Qt.Key_PageDown:
+                self.v_scrollbar.setValue(self.v_scrollbar.value() + self.v_scrollbar.pageStep())
+                return True
+                
+            elif key == Qt.Key_PageUp:
+                self.v_scrollbar.setValue(self.v_scrollbar.value() - self.v_scrollbar.pageStep())
+                return True
+
+            elif key == Qt.Key_Home:
+                # Home or Ctrl+Home -> Top of Log
+                self.v_scrollbar.setValue(0)
+                self.list_view.setCurrentIndex(self.model.index(0, 0))
+                return True
+
+            elif key == Qt.Key_End:
+                # End or Ctrl+End -> Bottom of Log
+                self.v_scrollbar.setValue(self.v_scrollbar.maximum())
+                last = self.model.rowCount() - 1
+                if last >= 0:
+                    self.list_view.setCurrentIndex(self.model.index(last, 0))
+                return True
+            
+            elif (mod & Qt.ControlModifier):
+                 if key == Qt.Key_Left:
+                    self.navigate_filter_hit(reverse=True)
+                    return True
+                 elif key == Qt.Key_Right:
+                    self.navigate_filter_hit(reverse=False)
+                    return True
+
+        if hasattr(self, 'filter_tree') and obj == self.filter_tree and event.type() == QEvent.KeyPress:
             if event.modifiers() & Qt.ControlModifier:
                 if event.key() == Qt.Key_Left:
                     self.navigate_filter_hit(reverse=True)
@@ -296,6 +381,76 @@ class MainWindow(QMainWindow):
         if self.search_widget.isAncestorOf(fw) or fw == self.search_widget or fw == self.search_input.lineEdit():
             self._animate_search_opacity(0.95)
         else: self._animate_search_opacity(0.5)
+
+    def calculate_viewport_size(self):
+        h = self.list_view.viewport().height()
+        if h <= 0: return 100
+        
+        row_height = QFontMetrics(self.list_view.font()).height()
+        if row_height <= 0: row_height = 20
+        
+        # Buffer needs to be generous to handle resizing and scrolling gaps
+        return (h // row_height) + 100 
+
+    def on_scrollbar_value_changed(self, value):
+        self.is_scrolling = True
+        try:
+            size = self.calculate_viewport_size()
+            self.model.set_viewport(value, size)
+        finally:
+            self.is_scrolling = False
+
+    def on_view_selection_changed(self, current, previous):
+        if self.is_scrolling: return
+        if not current.isValid(): return
+        
+        # Calculate raw index from visual index
+        relative_row = current.row()
+        view_abs_row = self.model.viewport_start + relative_row
+        
+        # Map to raw index
+        raw_index = view_abs_row
+        if self.show_filtered_only and self.model.filtered_indices:
+            if view_abs_row < len(self.model.filtered_indices):
+                raw_index = self.model.filtered_indices[view_abs_row]
+        
+        self.selected_raw_index = raw_index
+
+    def update_scrollbar_range(self):
+        if not self.current_engine: return
+        
+        # Get total count (filtered or full)
+        if self.show_filtered_only and self.model.filtered_indices:
+             total = len(self.model.filtered_indices)
+        elif self.model.filtered_indices is not None and len(self.model.filtered_indices) == 0 and self.show_filtered_only:
+             total = 0 # special case empty filter
+        else:
+             total = self.current_engine.line_count()
+
+        vp_size = self.calculate_viewport_size()
+        max_val = max(0, total - vp_size)
+        
+        self.v_scrollbar.setRange(0, max_val)
+        self.v_scrollbar.setPageStep(vp_size)
+        self.v_scrollbar.setSingleStep(1)
+
+        # Trigger update of model viewport in case range changed but value didn't
+        self.on_scrollbar_value_changed(self.v_scrollbar.value())
+
+    def resizeEvent(self, event):
+        # Update viewport size on resize
+        self.update_scrollbar_range()
+        
+        if not self.toast.isHidden():
+             txt = self.toast.label.text()
+             self.toast.show_message(txt, duration=self.toast.timer.remainingTime())
+        if not self.search_widget.isHidden():
+            cw = self.centralWidget()
+            sw_w = self.search_widget.width()
+            x = cw.width() - sw_w - 20
+            y = 0
+            self.search_widget.move(x, y)
+        super().resizeEvent(event)
 
     def _animate_search_opacity(self, target):
         if self.search_opacity_effect.opacity() == target: return
@@ -423,6 +578,10 @@ class MainWindow(QMainWindow):
         self.search_results = []
         self.current_match_index = -1
         self.search_info_label.setText("")
+        
+        # Reset Scrollbar
+        self.update_scrollbar_range()
+        self.v_scrollbar.setValue(0)
 
         self.filters_dirty_cache = True # New file, must re-filter
         # Do not clear filters, re-apply them
@@ -452,6 +611,9 @@ class MainWindow(QMainWindow):
             self.toast.show_message(f"Copied {len(text_lines)} lines", duration=3000)
 
     def resizeEvent(self, event):
+        # Update viewport size on resize
+        self.update_scrollbar_range()
+        
         if not self.toast.isHidden():
              txt = self.toast.label.text()
              self.toast.show_message(txt, duration=self.toast.timer.remainingTime())
@@ -802,18 +964,28 @@ class MainWindow(QMainWindow):
             self.toast.show_message("Selected filter is disabled")
             return
 
-        current_row = self.list_view.currentIndex().row()
-        if current_row < 0: current_row = 0
-
-        found_row = -1
-
-        # Get raw_index of current view row
-        start_raw_index = current_row
-        if self.show_filtered_only and self.model.filtered_indices:
-             if current_row < len(self.model.filtered_indices):
-                 start_raw_index = self.model.filtered_indices[current_row]
+        # Use internal state for reliable navigation source
+        start_raw_index = -1
+        
+        # Priority: Selected Raw Index > Current View Selection > Viewport Top
+        if self.selected_raw_index != -1:
+             start_raw_index = self.selected_raw_index
+        else:
+             idx = self.list_view.currentIndex()
+             if idx.isValid():
+                 start_raw_index = self.model.viewport_start + idx.row()
+                 # Map if filtered
+                 if self.show_filtered_only and self.model.filtered_indices:
+                     if start_raw_index < len(self.model.filtered_indices):
+                         start_raw_index = self.model.filtered_indices[start_raw_index]
+             else:
+                 start_raw_index = self.model.viewport_start
+                 if self.show_filtered_only and self.model.filtered_indices:
+                     if start_raw_index < len(self.model.filtered_indices):
+                         start_raw_index = self.model.filtered_indices[start_raw_index]
 
         count = len(self.model.tag_codes)
+        found_row = -1
 
         if reverse:
             # Look backwards
@@ -829,6 +1001,11 @@ class MainWindow(QMainWindow):
                     break
 
         if found_row != -1:
+            # Update internal state immediately
+            self.selected_raw_index = found_row
+            
+            # found_row is a RAW index.
+            # We need to convert it to VIEW index (absolute) first.
             view_row = found_row
             if self.show_filtered_only and self.model.filtered_indices:
                 idx = bisect.bisect_left(self.model.filtered_indices, found_row)
@@ -837,12 +1014,26 @@ class MainWindow(QMainWindow):
                 else:
                     return # Should not happen
 
-            index = self.model.index(view_row, 0)
+            # --- Virtual Viewport Adjustment ---
+            # Calculate new viewport start to center the found row
+            vp_size = self.calculate_viewport_size()
+            new_vp_start = max(0, view_row - (vp_size // 2))
+            
+            # Update Scrollbar (this triggers model update via signal)
+            self.v_scrollbar.setValue(new_vp_start)
+            
+            # Now calculate the relative row index within the new viewport
+            # Note: v_scrollbar.value() might be clamped by its range, so read it back
+            actual_vp_start = self.v_scrollbar.value()
+            relative_row = view_row - actual_vp_start
+            
+            # Select the item
+            index = self.model.index(relative_row, 0)
             if index.isValid():
-                # Clear previous selections to avoid "highlighting every line"
                 self.list_view.clearSelection()
-                self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
                 self.list_view.setCurrentIndex(index)
+                self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter) # Local scroll within viewport
+                self.list_view.setFocus() # Ensure focus for keyboard nav
                 self.toast.show_message(f"Jumped to line {found_row+1}")
         else:
             self.toast.show_message("No more matches for this filter")
@@ -850,8 +1041,6 @@ class MainWindow(QMainWindow):
     def recalc_filters(self, force_color_update=False):
         if not self.current_engine: return
         if not hasattr(self.current_engine, 'filter'): return
-
-        engine_ran = False
 
         # Optimization: Only run engine filter if filters have actually changed
         if self.filters_dirty_cache:
@@ -865,13 +1054,12 @@ class MainWindow(QMainWindow):
 
             try:
                 start_t = time.time()
-                # Returns: tag_codes, filtered_indices, subset_counts, error
+                # Returns: tag_codes, filtered_indices, subset_counts, timeline_events
                 res = self.current_engine.filter(rust_filters)
                 dur = time.time() - start_t
 
                 self.cached_filter_results = (res, rust_filters)
                 self.filters_dirty_cache = False
-                engine_ran = True
                 self.toast.show_message(f"Filter applied in {dur:.3f}s")
 
             except Exception as e:
@@ -883,17 +1071,18 @@ class MainWindow(QMainWindow):
         if self.cached_filter_results:
             res, rust_filters = self.cached_filter_results
 
-            if len(res) == 4:
-                tag_codes, filtered_indices, subset_counts, _ = res
+            if len(res) >= 3:
+                tag_codes = res[0]
+                filtered_indices = res[1]
+                subset_counts = res[2]
 
-                # Update hits (only if we just ran the filter, but harmless to repeat)
-                if self.filters_dirty_cache is False: # means we just updated or it's valid
-                     for j, rf in enumerate(rust_filters):
-                        orig_idx = rf[4]
-                        if j < len(subset_counts):
-                            self.filters[orig_idx]["hits"] = subset_counts[j]
+                # Update hits
+                for j, rf in enumerate(rust_filters):
+                    orig_idx = rf[4]
+                    if j < len(subset_counts):
+                        self.filters[orig_idx]["hits"] = subset_counts[j]
 
-                # Colors map
+                # Colors map (Strings, let Model create QColor)
                 code_to_filter = {}
                 for j, rf in enumerate(rust_filters):
                     orig_idx = rf[4]
@@ -905,17 +1094,24 @@ class MainWindow(QMainWindow):
                     bg = adjust_color_for_theme(flt["bg_color"], True, self.is_dark_mode)
                     palette[code] = (fg, bg)
 
-                self.model.set_filter_data(tag_codes, palette)
+                # Determine indices to show based on mode
+                indices_to_set = None
+                if self.show_filtered_only and rust_filters:
+                    indices_to_set = filtered_indices
+
+                # Atomically update model to avoid double refresh
+                self.model.update_filter_result(tag_codes, palette, indices_to_set)
+
+                self.update_scrollbar_range()
+                # self.v_scrollbar.setValue(0) # Optional: reset scroll on filter change
 
                 # Refresh tree to show hits
-                # Note: recalc_filters calls refresh_filter_tree?
-                # We should avoid circular dependency. refresh_filter_tree triggers no signals.
                 if not force_color_update:
                      self.refresh_filter_tree()
 
-                if self.show_filtered_only and rust_filters:
-                    self.model.set_filtered_indices(filtered_indices)
-                    self.update_status_bar(f"Filtered: {len(filtered_indices):,} lines (Total {self.current_engine.line_count():,})")
+                # Update Status Bar
+                total_lines = self.current_engine.line_count()
+                if indices_to_set is not None:
+                    self.update_status_bar(f"Filtered: {len(indices_to_set):,} lines (Total {total_lines:,})")
                 else:
-                    self.model.set_filtered_indices(None)
-                    self.update_status_bar(f"Shows {self.current_engine.line_count():,} lines")
+                    self.update_status_bar(f"Shows {total_lines:,} lines")
