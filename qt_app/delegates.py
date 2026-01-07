@@ -7,14 +7,16 @@ class LogDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self.hover_color = QColor("#2a2d2e")
         self.search_query = None
+        self.search_case_sensitive = False
         self.search_match_color = QColor("#653306")
         self.search_match_text_color = QColor("#ffffff")
 
     def set_hover_color(self, color):
         self.hover_color = QColor(color)
 
-    def set_search_query(self, query):
+    def set_search_query(self, query, case_sensitive=False):
         self.search_query = query
+        self.search_case_sensitive = case_sensitive
 
     def paint(self, painter, option, index):
         painter.save()
@@ -55,10 +57,14 @@ class LogDelegate(QStyledItemDelegate):
                 rect = option.rect.adjusted(4, 0, -4, 0)
 
                 # Search Highlight check
-                # FIX: "ctrl+right highlight everything" implies search_query might be "" or handled wrong
-                # .find() with empty string returns 0, infinite loop potential if not careful,
-                # but we usually check if query is truthy.
-                if self.search_query and self.search_query.strip() and self.search_query.lower() in text.lower():
+                should_highlight = False
+                if self.search_query and self.search_query.strip():
+                    if self.search_case_sensitive:
+                        if self.search_query in text: should_highlight = True
+                    else:
+                        if self.search_query.lower() in text.lower(): should_highlight = True
+                
+                if should_highlight:
                     self._paint_highlighted_text(painter, rect, text, option)
                 else:
                     font_metrics = option.fontMetrics
@@ -70,8 +76,13 @@ class LogDelegate(QStyledItemDelegate):
 
     def _paint_highlighted_text(self, painter, rect, text, option):
         query = self.search_query
-        lower_query = query.lower()
-        lower_text = text.lower()
+        
+        if self.search_case_sensitive:
+            search_text = text
+            search_query = query
+        else:
+            search_text = text.lower()
+            search_query = query.lower()
 
         start = 0
         x = rect.left()
@@ -81,7 +92,7 @@ class LogDelegate(QStyledItemDelegate):
         base_pen = painter.pen()
 
         while True:
-            idx = lower_text.find(lower_query, start)
+            idx = search_text.find(search_query, start)
             if idx == -1:
                 remaining = text[start:]
                 painter.setPen(base_pen)

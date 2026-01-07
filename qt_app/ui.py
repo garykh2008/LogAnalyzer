@@ -159,6 +159,7 @@ class MainWindow(QMainWindow):
         self.btn_next = QToolButton()
         self.btn_next.setText(">")
         self.chk_case = QCheckBox("Aa")
+        self.chk_case.stateChanged.connect(self.on_search_case_changed)
         self.chk_wrap = QCheckBox("Wrap")
         self.chk_wrap.setChecked(True)
 
@@ -178,18 +179,20 @@ class MainWindow(QMainWindow):
         self.search_layout.addWidget(self.search_info_label)
         self.search_layout.addWidget(self.btn_close_search)
 
-        shadow = QGraphicsDropShadowEffect(self.search_widget)
-        shadow.setBlurRadius(15)
-        shadow.setColor(QColor(0, 0, 0, 100))
-        shadow.setOffset(0, 2)
-        self.search_widget.setGraphicsEffect(shadow)
+        # TODO: Resolve text visibility issue when Graphics Effects are enabled. 
+        # Disabling both Shadow and Opacity for now to ensure functional search box.
+        # shadow = QGraphicsDropShadowEffect(self.search_widget)
+        # shadow.setBlurRadius(15)
+        # shadow.setColor(QColor(0, 0, 0, 100))
+        # shadow.setOffset(0, 2)
+        # self.search_widget.setGraphicsEffect(shadow)
 
-        self.search_opacity_effect = QGraphicsOpacityEffect(self.search_widget)
-        self.search_widget.setGraphicsEffect(self.search_opacity_effect)
-        self.search_opacity_effect.setOpacity(0.95)
+        # self.search_opacity_effect = QGraphicsOpacityEffect(self.search_widget)
+        # self.search_widget.setGraphicsEffect(self.search_opacity_effect)
+        # self.search_opacity_effect.setOpacity(0.95)
 
-        self.search_anim = QPropertyAnimation(self.search_opacity_effect, b"opacity")
-        self.search_anim.setDuration(200)
+        # self.search_anim = QPropertyAnimation(self.search_opacity_effect, b"opacity")
+        # self.search_anim.setDuration(200)
 
         self.search_widget.setFixedWidth(550)
         self.search_widget.hide()
@@ -453,11 +456,12 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
 
     def _animate_search_opacity(self, target):
-        if self.search_opacity_effect.opacity() == target: return
-        self.search_anim.stop()
-        self.search_anim.setStartValue(self.search_opacity_effect.opacity())
-        self.search_anim.setEndValue(target)
-        self.search_anim.start()
+        pass
+        # if self.search_opacity_effect.opacity() == target: return
+        # self.search_anim.stop()
+        # self.search_anim.setStartValue(self.search_opacity_effect.opacity())
+        # self.search_anim.setEndValue(target)
+        # self.search_anim.start()
 
     def toggle_theme(self):
         self.is_dark_mode = not self.is_dark_mode
@@ -633,7 +637,7 @@ class MainWindow(QMainWindow):
         else: self.search_input.setFocus(); self.search_input.lineEdit().selectAll()
 
     def hide_search_bar(self):
-        self.search_widget.hide(); self.delegate.set_search_query(None); self.list_view.viewport().update()
+        self.search_widget.hide(); self.delegate.set_search_query(None, False); self.list_view.viewport().update()
         self.search_info_label.setText(""); self.list_view.setFocus()
 
     def find_next(self):
@@ -663,6 +667,11 @@ class MainWindow(QMainWindow):
             else: self.toast.show_message("Start of results", duration=1000); return
         self._jump_to_match(prev_match_list_idx)
 
+    def on_search_case_changed(self):
+        query = self.search_input.currentText()
+        if query:
+            self._perform_search(query)
+
     def _perform_search(self, query):
         if not query or not self.current_engine: return
         self.toast.show_message(f"Searching for '{query}'...", duration=1000)
@@ -672,7 +681,7 @@ class MainWindow(QMainWindow):
         results = self.current_engine.search(query, False, is_case)
         self.search_results = results
         self.current_match_index = -1
-        self.delegate.set_search_query(query)
+        self.delegate.set_search_query(query, is_case)
         self.list_view.viewport().update()
         self.update_status_bar(f"Found {len(results):,} matches")
         if results: self._jump_to_match(0)
