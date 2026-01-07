@@ -17,6 +17,18 @@ import sys
 import ctypes
 import bisect
 
+class FilterTreeWidget(QTreeWidget):
+    def __init__(self, on_drop_callback=None, parent=None):
+        super().__init__(parent)
+        self.on_drop_callback = on_drop_callback
+
+    def dropEvent(self, event):
+        # Perform the default drop logic (moving items in the tree visually)
+        super().dropEvent(event)
+        # Notify parent to sync internal data structure
+        if self.on_drop_callback:
+            self.on_drop_callback()
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -75,7 +87,7 @@ class MainWindow(QMainWindow):
         # Handle floating dock color
         self.filter_dock.topLevelChanged.connect(lambda is_floating: self._set_windows_title_bar_color(self.is_dark_mode))
 
-        self.filter_tree = QTreeWidget()
+        self.filter_tree = FilterTreeWidget(on_drop_callback=self.on_filter_tree_reordered)
         self.filter_tree.setHeaderLabels(["En", "Pattern", "Hits"])
         self.filter_tree.setRootIsDecorated(False) # Remove indentation for column alignment
 
@@ -508,6 +520,23 @@ class MainWindow(QMainWindow):
         self.search_info_label.setText(f"{result_index + 1} / {len(self.search_results)}")
 
     # --- Filter Logic ---
+    def on_filter_tree_reordered(self):
+        # Sync self.filters with the visual tree order after drag-and-drop
+        new_filters = []
+        root = self.filter_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            item = root.child(i)
+            idx = item.data(0, Qt.UserRole)
+            new_filters.append(self.filters[idx])
+            # Update the item data to reflect the new index mapping if we were to refresh
+            # But refresh_filter_tree will do that.
+
+        self.filters = new_filters
+        self.filters_modified = True
+        self.update_window_title()
+        self.refresh_filter_tree()
+        self.recalc_filters()
+
     def refresh_filter_tree(self):
         self.filter_tree.blockSignals(True) # Prevent recursive signals during build
         self.filter_tree.clear()
