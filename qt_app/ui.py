@@ -274,6 +274,7 @@ class MainWindow(QMainWindow):
     def toggle_show_filtered_only(self):
         self.show_filtered_only = self.show_filtered_action.isChecked()
         # Toggle view should not invalidate cache, just re-apply cached results if available
+        # But we need to update the view indices
         self.recalc_filters()
 
     def eventFilter(self, obj, event):
@@ -850,6 +851,8 @@ class MainWindow(QMainWindow):
         if not self.current_engine: return
         if not hasattr(self.current_engine, 'filter'): return
 
+        engine_ran = False
+
         # Optimization: Only run engine filter if filters have actually changed
         if self.filters_dirty_cache:
             self.update_status_bar("Filtering...")
@@ -868,6 +871,7 @@ class MainWindow(QMainWindow):
 
                 self.cached_filter_results = (res, rust_filters)
                 self.filters_dirty_cache = False
+                engine_ran = True
                 self.toast.show_message(f"Filter applied in {dur:.3f}s")
 
             except Exception as e:

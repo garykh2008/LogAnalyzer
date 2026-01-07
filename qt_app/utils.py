@@ -2,6 +2,7 @@ import xml.etree.ElementTree as ET
 import os
 import sys
 import ctypes
+from xml.dom import minidom
 
 def hex_to_rgb(hex_str):
     hex_str = hex_str.lstrip('#')
@@ -118,8 +119,12 @@ def save_tat_filters(filepath, filters):
             if fg != "#000000": f_node.set("foreColor", color_to_tat(fg))
             if bg != "#FFFFFF": f_node.set("backColor", color_to_tat(bg))
 
-        tree = ET.ElementTree(root)
-        tree.write(filepath, encoding="utf-8", xml_declaration=True)
+        # Use minidom to pretty print
+        xmlstr = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
+
+        # minidom adds <?xml ... ?> by default
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(xmlstr)
         return True
     except Exception as e:
         print(f"Error saving TAT file: {e}")
