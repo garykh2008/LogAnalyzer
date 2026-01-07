@@ -63,8 +63,7 @@ class LogDelegate(QStyledItemDelegate):
                 else:
                     font_metrics = option.fontMetrics
                     elided_text = font_metrics.elidedText(text, Qt.ElideNone, rect.width())
-                    # Use AlignVCenter to ensure vertical centering
-                    painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, elided_text)
+                    painter.drawText(rect, Qt.AlignLeft, elided_text)
 
         finally:
             painter.restore()
@@ -76,18 +75,7 @@ class LogDelegate(QStyledItemDelegate):
 
         start = 0
         x = rect.left()
-
-        # Calculate Y for vertical centering
-        # drawText(x, y, string) uses baseline.
-        # But rect aligned drawing uses Flags.
-        # We are manually drawing parts.
-        # Option 1: Calculate baseline
-        # baseline = rect.top() + (rect.height() + option.fontMetrics.ascent() - option.fontMetrics.descent()) / 2
-        # Simple approximation: top + ascent (top aligned) -> adjust for center
-
-        # Better: use drawText with rect for segments if possible, but X varies.
-        # Let's align to font baseline:
-        y_baseline = rect.top() + (rect.height() - option.fontMetrics.height()) / 2 + option.fontMetrics.ascent()
+        y = rect.top() + option.fontMetrics.ascent()
 
         # Use current pen (set in paint method) as base text color
         base_pen = painter.pen()
@@ -97,13 +85,13 @@ class LogDelegate(QStyledItemDelegate):
             if idx == -1:
                 remaining = text[start:]
                 painter.setPen(base_pen)
-                painter.drawText(x, y_baseline, remaining)
+                painter.drawText(x, y, remaining)
                 break
 
             pre_text = text[start:idx]
             if pre_text:
                 painter.setPen(base_pen)
-                painter.drawText(x, y_baseline, pre_text)
+                painter.drawText(x, y, pre_text)
                 x += option.fontMetrics.horizontalAdvance(pre_text)
 
             match_text = text[idx:idx+len(query)]
@@ -113,7 +101,7 @@ class LogDelegate(QStyledItemDelegate):
             painter.fillRect(bg_rect, self.search_match_color)
 
             painter.setPen(self.search_match_text_color)
-            painter.drawText(x, y_baseline, match_text)
+            painter.drawText(x, y, match_text)
             x += match_width
 
             start = idx + len(query)
