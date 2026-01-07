@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication,
                                QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
                                QGraphicsOpacityEffect, QCheckBox, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView,
-                               QDialog, QMessageBox, QScrollBar, QPushButton)
+                               QDialog, QMessageBox, QScrollBar, QPushButton, QStackedLayout)
 from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation
 from .models import LogModel
@@ -106,10 +106,17 @@ class MainWindow(QMainWindow):
 
 
         central_widget = QWidget()
-        central_layout = QVBoxLayout(central_widget)
-        central_layout.setContentsMargins(0, 0, 0, 0)
+        self.central_stack = QStackedLayout(central_widget)
         
-        # Horizontal container for List + Scrollbar
+        # Page 0: Welcome
+        self.welcome_label = QLabel("Drag & Drop Log File Here\nor use File > Open Log")
+        self.welcome_label.setAlignment(Qt.AlignCenter)
+        font_welcome = QFont("Consolas", 14)
+        self.welcome_label.setFont(font_welcome)
+        self.welcome_label.setStyleSheet("color: #888888;")
+        self.central_stack.addWidget(self.welcome_label)
+
+        # Page 1: List View Container
         list_container = QWidget()
         list_layout = QHBoxLayout(list_container)
         list_layout.setContentsMargins(0, 0, 0, 0)
@@ -117,7 +124,11 @@ class MainWindow(QMainWindow):
         list_layout.addWidget(self.list_view)
         list_layout.addWidget(self.v_scrollbar)
         
-        central_layout.addWidget(list_container)
+        self.central_stack.addWidget(list_container)
+        
+        # Default to Welcome
+        self.central_stack.setCurrentIndex(0)
+
         self.setCentralWidget(central_widget)
 
 
@@ -519,6 +530,7 @@ class MainWindow(QMainWindow):
         
         if not self.toast.isHidden():
              txt = self.toast.label.text()
+             txt = self.toast.label.text()
              self.toast.show_message(txt, duration=self.toast.timer.remainingTime())
         if not self.search_widget.isHidden():
             cw = self.centralWidget()
@@ -699,6 +711,8 @@ class MainWindow(QMainWindow):
                 return
 
         self.add_to_recent(filepath)
+        # Switch to Log View
+        self.central_stack.setCurrentIndex(1)
         self.update_status_bar(f"Loading {filepath}...")
         start_time = time.time()
         self.settings.setValue("last_dir", os.path.dirname(filepath))
