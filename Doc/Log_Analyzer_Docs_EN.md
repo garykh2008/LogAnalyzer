@@ -1,481 +1,126 @@
-# Log Analyzer User Manual
+# Log Analyzer V2.0 User Manual
 
 ## Table of Contents
 
-- [Log Analyzer User Manual](#log-analyzer-user-manual)
+- [Log Analyzer V2.0 User Manual](#log-analyzer-v20-user-manual)
   - [Table of Contents](#table-of-contents)
   - [1. Introduction](#1-introduction)
   - [2. Key Features](#2-key-features)
-    - [🚀 High Performance](#-high-performance)
-    - [🔍 Powerful Filtering System](#-powerful-filtering-system)
-    - [📂 File \& Compatibility](#-file--compatibility)
-    - [🖥️ Intuitive UI](#️-intuitive-ui)
-  - [3. Command-Line Usage](#3-command-line-usage)
-  - [4. User Guide](#4-user-guide)
+    - [🚀 Next-Gen Performance](#-next-gen-performance)
+    - [🖥️ Modern \& Flexible UI](#️-modern--flexible-ui)
+    - [🔍 Enhanced Search \& Navigation](#-enhanced-search--navigation)
+    - [📝 Comprehensive Notes System](#-comprehensive-notes-system)
+  - [3. User Guide](#3-user-guide)
     - [Menu Bar](#menu-bar)
       - [File](#file)
-      - [Sidebar \& Merged View](#sidebar--merged-view)
-      - [Filter](#filter)
       - [View](#view)
-      - [Notes](#notes)
+      - [Filter (Dock)](#filter-dock)
+      - [Notes (Dock)](#notes-dock)
       - [Help](#help)
-    - [Shortcuts \& Operations](#shortcuts--operations)
-  - [5. Release Notes](#5-release-notes)
-    - [Version 1.7 (2025-12-26)](#version-17-2025-12-26)
-      - [📂 Multi-Log Management \& Merged View](#-multi-log-management--merged-view)
-      - [🔍 Enhanced Search \& Navigation](#-enhanced-search--navigation)
-      - [🎨 UI \& UX Polish](#-ui--ux-polish)
-      - [🛠 Fixes \& Stability](#-fixes--stability)
-    - [Version 1.6.4 (2025-12-24)](#version-164-2025-12-24)
-      - [✨ Event Timeline](#-event-timeline)
-      - [🛠 General Fixes](#-general-fixes)
-    - [Version 1.6.3 (2025-12-22)](#version-163-2025-12-22)
-      - [✨ Filter List Enhancements](#-filter-list-enhancements)
-      - [🛠 Fixes](#-fixes)
-    - [Version 1.6.2 (2025-12-22)](#version-162-2025-12-22)
-      - [🔍 Find Functionality Upgrade](#-find-functionality-upgrade)
-      - [🎨 UI Polish](#-ui-polish)
-    - [Version 1.6.1 (2025-12-19)](#version-161-2025-12-19)
-      - [⚡ Performance \& UI Optimization](#-performance--ui-optimization)
-    - [Version 1.6 (2025-12-19)](#version-16-2025-12-19)
-      - [⚡ Core Engine Update](#-core-engine-update)
-    - [Version 1.5 (2025-12-18)](#version-15-2025-12-18)
-      - [⚡ Rust-Powered Core Engine](#-rust-powered-core-engine)
-      - [🎨 UI \& UX Improvements](#-ui--ux-improvements)
-    - [Version 1.4 (2025-12-08)](#version-14-2025-12-08)
-      - [🎨 UI \& Navigation Enhancements](#-ui--navigation-enhancements)
-      - [✨ Interactive Graphical Event Timeline](#-interactive-graphical-event-timeline)
-    - [Version 1.3 (2025-12-02)](#version-13-2025-12-02)
-      - [✨ Comprehensive Notes System](#-comprehensive-notes-system)
-      - [🎨 UI \& User Experience Overhaul](#-ui--user-experience-overhaul)
-    - [Version 1.2 (2025-11-28)](#version-12-2025-11-28)
-      - [✨ New Features](#-new-features)
-    - [Version 1.1 (2025-11-28)](#version-11-2025-11-28)
-      - [⚡ Performance \& Logic](#-performance--logic)
-      - [🛠 Fixes \& Changes](#-fixes--changes)
-    - [Version 1.0 (2025-11-27)](#version-10-2025-11-27)
-      - [✨ New Features](#-new-features-1)
-      - [⚡ Performance Improvements](#-performance-improvements)
-      - [🐛 Bug Fixes](#-bug-fixes)
-  - [6. System Requirements](#6-system-requirements)
+    - [Shortcuts](#shortcuts)
+  - [4. Release Notes](#4-release-notes)
+    - [Version 2.0 (2026-01-07)](#version-20-2026-01-07)
+      - [Major Architecture Overhaul](#major-architecture-overhaul)
+      - [Key Improvements](#key-improvements)
+      - [New Features \& Enhancements](#new-features--enhancements)
 
 ---
 
 ## 1. Introduction
 
-**Log Analyzer** is a high-performance log analysis tool designed specifically for developers and system administrators. It addresses the common issue of lag and unresponsiveness found in traditional text editors when opening large log files, providing powerful features for filtering, searching, and syntax highlighting.
+**Log Analyzer V2.0** represents a complete architectural overhaul, transitioning from the legacy Tkinter framework to the modern, industrial-grade **Qt (PySide6)** ecosystem. 
 
-Version 1.1 introduces a multi-threaded architecture and JIT (Just-In-Time) dynamic compilation technology, ensuring a smooth interface and rapid filtering operations even when handling log files that are hundreds of MBs in size or contain tens of millions of lines.
+Designed for developers and system administrators who demand speed and flexibility, V2.0 introduces a **Virtual Viewport** rendering engine capable of displaying millions of log lines with zero lag, a fully customizable **Docking UI**, and a refined user experience that retains the powerful Rust-based filtering core of previous versions.
 
 ## 2. Key Features
 
-### 🚀 High Performance
+### 🚀 Next-Gen Performance
 
-* **Multi-threading Architecture**: File reading and filtering operations are performed in the background, ensuring the main window (UI) always remains responsive and eliminating "Not Responding" scenarios.
+*   **Virtual Viewport**: A custom-built rendering engine that renders *only* the lines currently visible on screen. This allows the application to scroll through files with 100+ million lines as smoothly as a small text file, with minimal memory footprint for UI elements.
+*   **Rust-Powered Core**: Retains the high-performance Rust backend (`log_engine_rs`) for multi-threaded file loading and regular expression filtering.
 
-    * **Rust-Powered Core Engine**: The core filtering logic is powered by a custom Rust extension (`log_engine_rs`), replacing the legacy Python implementation.
+### 🖥️ Modern & Flexible UI
 
-      * **Parallel Processing**: Utilizes the `rayon` library to leverage all CPU cores, enabling sub-second filtering speeds even for massive log files (e.g., 1GB+).
+*   **Docking System**: The **Filters** and **Notes** panels are now fully dockable. You can:
+    *   Pin them to the Left, Right, or Bottom of the window.
+    *   Tab them together to save space.
+    *   Float them as separate windows for multi-monitor setups.
+*   **Professional Theming**: Features a polished **Dark Mode** (default) and **Light Mode**, with consistent styling across all dialogs, scrollbars, and menus.
+*   **Dynamic Line Numbers**: Integrated line number display that automatically adjusts its width based on the total line count.
 
-### 🔍 Powerful Filtering System
+### 🔍 Enhanced Search & Navigation
 
-* **Include & Exclude**: Supports positive filtering (showing only lines containing keywords) and negative exclusion (hiding lines containing keywords).
+*   **Modern Search Bar**: A sleek, floating search bar (`Ctrl+F`) with toggle buttons for **Match Case (Aa)** and **Wrap Around (W)**.
+*   **Global Navigation**: 
+    *   **F3 / F2**: Jump to the Next / Previous search match instantly, even if it's millions of lines away.
+    *   **Ctrl + Left / Right**: Jump to the Previous / Next line that matches the *currently selected filter*.
 
-* **Regular Expressions (Regex)**: Supports Python standard regular expressions for complex pattern matching.
+### 📝 Comprehensive Notes System
 
-* **Custom Color Highlighting**: Each filter rule can have custom foreground and background colors, making critical information stand out.
+*   **Integrated Workflow**: Press `C` on any line to instantly add or edit a note.
+*   **Visual Highlights**: Lines with notes are visually highlighted with a distinct background color.
+*   **Persistence**: Notes are automatically saved to sidecar `.note` (JSON) files and automatically reloaded when you open the log again.
+*   **Export**: Generate a readable text report of all your notes via the "Export Notes to Text..." menu.
 
-* **Instant Toggle**: Specific filters can be checked/unchecked at any time with immediate view updates.
-
-### 📂 File & Compatibility
-
-*   **Multi-Log Management**: Simultaneously load and switch between multiple log files using a dedicated sidebar. Files are automatically sorted by their start time for chronological analysis.
-
-*   **High-Performance Merged View**: Combine multiple logs into a single, unified view. Utilizing a smart Proxy-Based architecture, the tool can merge tens of millions of lines with minimal memory usage while maintaining full support for filtering and the timeline.
-
-*   **TAT Format Support**: Fully compatible with `TextAnalysisTool.NET`'s `.tat` file format, allowing for seamless import/export of existing filter rules.
-
-*   **JSON Support**: Built-in functionality for importing/exporting filter rules in JSON format (Advanced feature).
-
-### 🖥️ Intuitive UI
-
-*   **Dynamic Sidebar**: A collapsible log list panel that automatically appears when multiple files are loaded, featuring right-click management and auto-width adjustment.
-
-*   **Integrated Event Timeline**: A powerful, interactive timeline embedded directly into the main interface. It features density heatmap visualization, auto-focusing on active time ranges, block-style event rendering, and a time axis for precise context.
-
-*   **Find History**: Remembers up to 10 most recent search queries in a convenient dropdown menu.
-
-*   **Progress Feedback**: The status bar provides real-time statistics on Load Time, Filter Time, and processing progress for massive merge operations.
-
-*   **Data Safety**: Includes an unsaved changes warning when exiting to prevent accidental loss of filter rules.
-
-## 3. Command-Line Usage
-
-Log Analyzer supports several command-line arguments for quick startup and automation.
-
-*   **Open Single/Multiple Logs**: Pass one or more file paths as positional arguments.
-    ```bash
-    python loganalyzer.py file1.log file2.log
-    ```
-*   **Wildcard Support**: You can use wildcards to open multiple files matching a pattern (e.g., in Windows CMD or Linux shell).
-    ```bash
-    python loganalyzer.py logs/*.log
-    ```
-*   **Load Filters**: Use the `-f` or `--filter` flag to specify a `.tat` filter file to be applied on startup.
-    ```bash
-    python loganalyzer.py my_log.log -f standard_filters.tat
-    ```
-*   **Argument Files (@)**: If you have a very long list of files that exceeds the command-line length limit, you can put them in a text file and load them using the `@` prefix.
-    ```bash
-    python loganalyzer.py @file_list.txt
-    ```
-
-## 4. User Guide
+## 3. User Guide
 
 ### Menu Bar
 
 #### File
-
-* **Open Log...**: Open a log file (.log, .txt, *.*). Loading a single file clears the current multi-log session.
-
-* **Open Multiple Logs...**: Select and load multiple files. These will appear in the Log List sidebar. Duplicates are automatically ignored.
-
-* **Open Recent**: Provides a list of the last 10 opened files for quick access.
-
-* **Load Filters**: Import filter rule files in `.tat` or `.xml` format.
-
-* **Save Filters**: Save current filter rules.
-
-#### Sidebar & Merged View
-
-*   **Log List Sidebar**: Displays all loaded files sorted chronologically.
-    *   **Right-Click**: Access options to remove a specific file or clear the entire list.
-    *   **Selection**: Click any file to switch focus to its individual content.
-*   **Merge All Logs**: Clicking the button at the bottom of the sidebar creates a unified, time-sorted view of all loaded logs. This view supports full filtering and timeline analysis.
-
-#### Filter
-
-* **Add Filter**: Open the dialog to add a new filter rule.
-
-* **Show Filtered Only (Ctrl+H)**:
-  * **Checked**: Displays only lines that match enabled filter rules. Works in both single and merged views.
-  * **Unchecked**: Displays all lines with keyword highlighting.
+*   **Open Log... (Ctrl+O)**: Open a single log file.
+*   **Open Recent**: Quickly access recently opened files.
+*   **Load / Save Filters**: Import or export your filter rules (`.tat` format).
+*   **Exit (Ctrl+Q)**: Close the application.
 
 #### View
+*   **Toggle Notes**: Show or hide the Notes docking panel.
+*   **Export Notes to Text...**: Save all current notes to a `.txt` file.
+*   **Show Filtered Only (Ctrl+H)**: Toggle between showing all lines (with highlights) and showing only lines that match enabled filters.
+*   **Toggle Dark/Light Mode**: Switch the application theme.
+*   **Find... (Ctrl+F)**: Open the search bar.
 
-*   **Find... (Ctrl+F)**: Opens the search bar. Use the dropdown menu to access recent search history (up to 10 queries).
-*   **Show Log List**: Manually toggle the visibility of the sidebar.
-*   **Dark Mode**: Toggles the dark theme.
-*   **Toggle Timeline**: Shows or hides the interactive timeline. Now features block-style events and a time axis.
+#### Filter (Dock)
+*   **Management**: Add, Edit, or Remove filters.
+*   **Drag & Drop**: Reorder filters by dragging them.
+*   **Checkboxes**: Enable/Disable specific filters instantly.
 
-#### Notes
-
-*   **Show Notes**: Toggles the visibility of the Notes View panel.
-
-*   **Show in Separate Window**: When "Show Notes" is active, this toggles the Notes View between being docked in the main window or appearing as a separate, floating window.
-
-*   **Save Notes to Text file**: Exports all current notes to a human-readable `.txt` file, formatted as `Line <Tab> Timestamp <Tab> Note Content`.
-
+#### Notes (Dock)
+*   **List View**: Displays all notes associated with the current file, including line number and timestamp.
+*   **Navigation**: Double-click a note in the list to jump to that line in the log.
+*   **Save Button**: Manually save notes to disk (auto-save is also performed on exit).
 
 #### Help
-
-* **Keyboard Shortcuts**: Displays a window with a summary of all keyboard shortcuts.
-* **Documentation**: Opens this user manual.
-* **About**: Displays application version information.
-
-### Shortcuts & Operations
-
-* **Double-click Log Content**: Selects text and quickly adds it as a new Filter.
-
-*   **`c` key on Log View**: After selecting a line, press `c` to quickly add or edit a note for that line.
-
-* **Double-click Filter List**: Edits the selected filter rule.
-
-* **Space**: Toggles the Enable/Disable status of the selected filter in the list.
-
-* **Delete**: Removes the selected filter.
-
-* **Ctrl + H**: Toggles between "Show Filtered Only" and "Show All".
-
-* **Ctrl + Scroll Wheel**: Adjusts the font size.
-
-* **Ctrl + Left/Right Arrow**: Jumps to the previous/next match in the filtered results.
-
-## 5. Release Notes
-
-### Version 1.7 (2025-12-26)
-
-#### 📂 Multi-Log Management & Merged View
-
-*   **Multi-Log Support**:
-    *   Added a dynamic **Log List Sidebar** to manage multiple loaded files simultaneously.
-    *   Files in the sidebar are automatically sorted chronologically based on their start time.
-    *   **Sidebar Automation**: Automatically shows when 2+ files are loaded and hides for single files or empty state.
-    *   **Right-Click Context Menu**: Quickly remove specific files or **Clear All Logs** from the session.
-*   **High-Performance Merged View**:
-    *   New **"Merge All Logs"** feature to combine all loaded files into a single, seamless chronological view.
-    *   **Proxy-Based Architecture**: Optimized for massive datasets (e.g., 18M+ lines) using a reference-based system that significantly reduces memory overhead.
-    *   **Smart Persistence**: The Merged View automatically cleans itself up if the number of loaded files drops below two.
-    *   **Full Feature Parity**: Merged View now supports the complete Filtering and Event Timeline systems across all combined files.
-
-#### 🔍 Enhanced Search & Navigation
-
-*   **Find History**: The Find bar now features a **Search History** (Combobox), storing up to 10 most recent queries for quick access.
-*   **Cross-File Search**: Searching in Merged View automatically scans all constituent files using the parallel Rust engine.
-*   **Keyboard Workflow**:
-    *   **Esc Key**: Now consistently closes the Find, Add/Edit Filter, and Keyboard Shortcuts windows.
-    *   **Enter Key**: Quickly save and apply changes in the Add/Edit Filter dialog.
-    *   **Focus Management**: Improved keyboard focus handling to ensure shortcuts like `Ctrl+C` (Copy) and `c` (Add Note) work reliably immediately after clicking a log line.
-
-#### 🎨 UI & UX Polish
-
-*   **Sidebar Optimization**: Implemented dynamic width adjustment based on the longest filename and reduced font size for a cleaner look.
-*   **Timeline Upgrades**:
-    *   **Auto-Focus Range**: The timeline now automatically crops empty time periods to focus on actual log events.
-    *   **Block-Style Visualization**: Sparse events are now rendered as prominent blocks instead of thin lines for better visibility.
-    *   **Time Axis**: Added "HH:MM:SS" scale labels at the bottom of the timeline for better temporal context.
-*   **Data Protection**: Added an **Unsaved Changes Warning** when closing the application if filter rules have been modified.
-
-#### 🛠 Fixes & Stability
-
-*   **Robust FFI Handling**: Fixed a critical infinite loop issue during large file iterations via the Rust extension.
-*   **Race Condition Fixes**: Resolved UI crashes (TclErrors) related to concurrent file loading and duplicate entry insertions.
-*   **Merged View Logic**: Fixed an issue where the Merged View entry would persist incorrectly after removing log files.
-*   **General Polish**: Fixed multiple indentation-related syntax errors and stabilized status bar timing displays.
-
-### Version 1.6.4 (2025-12-24)
-
-#### ✨ Event Timeline
-*   **Integrated Display:** The Timeline is now embedded within the main application window, providing an always-available overview of log events.
-*   **Density Heatmap:** Events are displayed as a density heatmap, making it easy to spot clusters or anomalies in large log files.
-*   **Interactive Navigation:** Features include mouse scroll wheel Zoom, right-click Pan, and click-to-jump navigation.
-*   **Enhanced Visibility:** Smart color mapping ensures event highlights are clear in both light and dark themes.
-*   **Bi-directional Synchronization:** The timeline visually tracks the visible log area, and interaction with the timeline scrolls the log view.
-
-#### 🛠 General Fixes
-*   **Scrolling Stability:** Improved scrolling accuracy and stability in filtered log views.
-*   **Theme Integration:** Ensured the timeline's appearance correctly adapts to Dark Mode changes.
-*   **Default Behavior:** The timeline is now hidden by default on startup and can be toggled via the View menu.
-*   **Viewport Indicator:** Stabilized the timeline's viewport indicator for precise tracking of the visible log range.
-
-### Version 1.6.3 (2025-12-22)
-
-#### ✨ Filter List Enhancements
-
-*   **Drag-and-Drop Reordering**:
-    *   Filters can now be reordered simply by dragging and dropping them within the list.
-    *   Visual indicators show the insertion position during the drag operation.
-*   **Context Menu Options**: Added "Move to Top" and "Move to Bottom" options for quick reorganization.
-
-#### 🛠 Fixes
-
-*   **UI Stability**: Fixed an issue where the filter list would not refresh correctly if no log file was loaded.
-
-### Version 1.6.2 (2025-12-22)
-
-#### 🔍 Find Functionality Upgrade
-
-*   **Visual Highlights**: All visible search matches are now highlighted with a light yellow background for better visibility.
-*   **Improved Workflow**:
-    *   The Find window now auto-closes upon a successful search.
-    *   Search state is preserved, allowing `F3` (Next) and `F2` (Previous) to continue working after the dialog closes.
-    *   `Esc` key immediately cancels the search and clears highlights.
-*   **Keybinding Change**: "Find Previous" is now mapped to **F2** (previously Shift+F3).
-
-#### 🎨 UI Polish
-
-*   **Consistent Branding**: The application icon is now applied to all popup windows (Find, Go to Line, Notes, Filter, Timeline, Shortcuts).
-*   **Clean Layout**: Removed the unused progress bar from the status bar.
-*   **Typography**: Enforced **Consolas** as the global default font for consistent styling across all platforms.
-
-### Version 1.6.1 (2025-12-19)
-
-#### ⚡ Performance & UI Optimization
-
-*   **Responsiveness**: Fixed a UI freeze issue when disabling filters by simplifying the update logic.
-*   **Visual Improvements**:
-    *   Extended Log View background highlighting to span the full line width.
-    *   Optimized Filter View column widths and order for better readability.
-*   **Notes View**: Fixed layout instability by enforcing a default width when opening the panel.
-*   **Build System**: Modularized Rust extension build scripts (`update_rust`) for better cross-platform support.
-
-### Version 1.6 (2025-12-19)
-
-#### ⚡ Core Engine Update
-
-*   **Rust Engine Mandatory**: The legacy Python filtering fallback has been removed. The application now strictly relies on the high-performance Rust core (`log_engine_rs`) for all file loading and filtering operations.
-*   **Streamlined Architecture**: This change reduces code complexity and ensures that all users benefit from the multi-threaded, zero-copy performance optimizations introduced in V1.5.
-*   **Dependency Update**: The Rust toolchain is now a required dependency for building the application from source.
-
-### Version 1.5 (2025-12-18)
-
-#### ⚡ Rust-Powered Core Engine
-
-This release introduces a groundbreaking performance upgrade by integrating a
-Rust-based core engine.
-
-*   **Extreme Performance**: Replaced the core file loading and filtering logic
-    with a custom Rust extension (`log_engine_rs`).
-*   **Parallel Processing**: Utilizes the `rayon` library to leverage all CPU
-    cores for filtering, reducing processing time for large files (e.g., 1GB+)
-    from seconds/minutes to sub-second speeds.
-*   **Zero-Copy Loading**: Optimized memory usage by keeping log data in the
-    Rust backend, significantly reducing Python memory overhead.
-*   **Seamless Integration**: The application automatically detects the Rust
-    extension and falls back to the standard Python implementation if not found.
-
-#### 🎨 UI & UX Improvements
-
-*   **Unified Typography**: Standardized the application font to **Consolas**
-    (Size 12) for a consistent, developer-friendly look across all widgets.
-*   **Global Scaling**: The Zoom function (`Ctrl + Scroll`) now scales the
-    Notes View and other UI elements in sync with the Log View.
-*   **Large File Support**: The line number area now dynamically adjusts its
-    width to correctly display line numbers for files exceeding 10 million lines.
-*   **Improved Dialogs**: Adjusted the "Keyboard Shortcuts" window size to
-    prevent text truncation.
-
-### Version 1.4 (2025-12-08)
-
-#### 🎨 UI & Navigation Enhancements
-
-*   **Full Dark Mode**: A new "View" -> "Dark Mode" option toggles a persistent, application-wide dark theme. The theme covers all elements, including the main window, dialogs, timeline, and notes view, for a comfortable experience in low-light environments.
-*   **Recent Files Menu**: The "File" menu now includes an "Open Recent" list, providing one-click access to the last 10 opened log files.
-*   **Find (Ctrl+F)**: A powerful new find bar appears at the top of the log view, allowing full-text search across the *entire* log file (not just the visible portion).
-    *   Features include "Next (F3)" / "Previous (Shift+F3)", case sensitivity, and wrap-around search.
-    *   The found line is automatically centered and set as the new focus line for a seamless workflow.
-    *   The status bar provides clear feedback when a search completes.
-*   **Go to Line (Ctrl+G)**: A new dialog allows you to instantly jump to any specific line number within the current view (filtered or full).
-
-#### ✨ Interactive Graphical Event Timeline
-
-This release introduces a major new feature: a graphical, interactive timeline to visualize log events over time. This allows users to quickly identify event clusters, correlations, and anomalies.
-
-*   **New Timeline Window**: A new "View" -> "Show Timeline" menu option opens a resizable window that plots events based on their timestamps.
-*   **Interactive Navigation**:
-    *   **Zoom**: Use the mouse wheel to zoom in and out, centered on the cursor's position.
-    *   **Pan**: Click and drag to pan the timeline horizontally.
-*   **Event Configuration & Management**:
-    *   The "Add/Edit Filter" dialog now includes an **"As Event"** checkbox.
-    *   A new "Event" column in the filter list provides at-a-glance status (✓).
-    *   Quickly toggle a filter's event status via the right-click context menu.
-*   **Smart Tooltips & Interaction**:
-    *   Hovering over an event point displays a sleek, dark-themed tooltip with the precise timestamp (including milliseconds), line number, and filter text.
-    *   The tooltip intelligently repositions itself to avoid being clipped by the window edges.
-    *   Clicking an event point jumps directly to that line in the main log view.
-*   **Live Updates & Persistence**:
-    *   The timeline window automatically refreshes when filters are modified or event statuses are changed.
-    *   The "As Event" setting is now saved in the `.tat` filter file, ensuring persistence across sessions while maintaining compatibility with `TextAnalysisTool.NET`.
-
-### Version 1.3 (2025-12-02)
-
-#### ✨ Comprehensive Notes System
-
-This release introduces a powerful notes system, allowing users to annotate, save, and share their findings directly within the application.
-
-*   **Integrated Note View**: A new "Notes" panel can be docked to the right of the log view, allowing for simultaneous analysis and note-taking.
-*   **Flexible Layout**: The Notes View can be toggled between a docked panel and a separate floating window via the "Notes" menu to suit any workflow.
-*   **Automatic Save/Load**: Notes can be exported to a `.note` (JSON) file, which is automatically named after the log file. When reloading the same log, the application will detect the note file and ask to import it, preserving your work across sessions.
-*   **Plain Text Export**: Added an option to "Save Notes to Text file," exporting notes in a clean, readable `.txt` format.
-*   **Timestamp Extraction**: The Notes View automatically extracts and displays the timestamp from the corresponding log line, providing crucial context.
-*   **Quick-Add Shortcut**: In the log view, simply select a line and press the `c` key to instantly add or edit a note.
-
-#### 🎨 UI & User Experience Overhaul
-
-This release brings a modernized look and feel to the application with a complete UI refresh.
-
-*   **Modernized UI Theme**:
-    *   Adopted the **'clam'** theme for a cleaner, more professional appearance.
-    *   Replaced standard Tkinter widgets with **ttk widgets** (Buttons, Labels, Scrollbars, Frames) for better consistency and style.
-    *   Updated the default font to **Segoe UI** for improved readability on Windows.
-
-*   **Enhanced Filter Dialog**:
-    *   Refactored the "Add/Edit Filter" dialog to use modern widgets.
-    *   Improved layout and spacing for better usability.
-    *   Added a **Cancel** button and made the dialog **modal** to prevent state issues.
-
----
-
-### Version 1.2 (2025-11-28)
-
-**✨ New Feature Update**
-
-This release introduces a major usability feature for a more intuitive workflow.
-
-#### ✨ New Features
-
-*   **Drag and Drop to Open**: Users can now drag a log file (`.log`, `.txt`, etc.) directly onto the application window to open it.
-
----
-
-### Version 1.1 (2025-11-28)
-
-**🚀 Performance & Stability Update**
-
-This release focuses on optimizing user interaction speed and fixing regression bugs found in v1.0.
-
-#### ⚡ Performance & Logic
-
-* **Instant View Switching**: The "Show Filtered Only" (`Ctrl+H`) toggle is now instantaneous. View generation is decoupled from data processing, eliminating lag when switching modes.
-
-* **Smart Filter Toggling**:
-    * **Disabling** a filter now triggers an instant view refresh without rescanning the file.
-    * **Re-enabling** a previously calculated filter uses cached data for instant display.
-
-* **Incremental Scanning**: Enabling a new filter now only scans lines that haven't been matched by existing filters, significantly reducing processing time for large files.
-
-#### 🛠 Fixes & Changes
-
-* **Default Behavior**: "Show Filtered Only" is now **Disabled** by default to provide a full context view upon loading.
-
-* **Bug Fix**: Restored missing mouse wheel scrolling and zoom (`Ctrl + Wheel`) functionality that was affected in the previous threading refactor.
-
-* **Bug Fix**: Resolved `AttributeError` related to scrollbar event handling.
-
----
-
-### Version 1.0 (2025-11-27)
-
-**🎉 First Official Release!**
-
-This version marks a significant milestone for Log Analyzer, focusing on a complete overhaul of the user experience and extreme optimization of core performance.
-
-#### ✨ New Features
-
-* **New Menu Bar Design**: Refactored the crowded toolbar into standard File / Filter / Help menus for a cleaner interface.
-
-* **About Dialog**: Added a window to display version information.
-
-* **Improved Progress Feedback**: Added a bottom Progress Bar to provide clear visual feedback when processing large files.
-
-#### ⚡ Performance Improvements
-
-* **Multi-threaded Architecture Refactor**:
-
-  * Moved file I/O and filtering operations to a background Worker Thread.
-
-  * Resolved the issue of the window "freezing" (Not Responding) when processing large files.
-
-* **JIT Loop Unrolling Optimization**:
-
-  * Deeply optimized the filter calculation logic.
-
-  * Eliminated loop iteration overhead by dynamically generating Python code.
-
-  * **Performance Boost**: Reduced filtering time for 10 million log lines from **74 seconds** to **30 seconds**.
-
-#### 🐛 Bug Fixes
-
-* Fixed a crash (`tag "current_line" isn't defined`) that could occur when clicking the window before a file was loaded or filters initialized.
-
-* Fixed an issue where the Status Bar would fail to display Load Time / Filter Time in certain scenarios.
-
-* Removed trailing whitespace from the source code (Code Cleanup).
-
-## 6. System Requirements
-
-* **OS**: Windows / macOS / Linux
-
-* **Runtime**: Python 3.6+
-
-* **Dependencies**: Tkinter (Usually included with Python installation)
+*   **Keyboard Shortcuts**: View a list of available hotkeys.
+*   **About**: Version and developer information.
+
+### Shortcuts
+
+| Key Combination | Action |
+| :--- | :--- |
+| **Ctrl + O** | Open Log File |
+| **Ctrl + F** | Open Find Bar |
+| **F3 / F2** | Find Next / Previous |
+| **Ctrl + H** | Toggle "Show Filtered Only" |
+| **Ctrl + B** | Toggle Sidebar (if applicable) |
+| **Ctrl + Left/Right** | Navigate Filter Hits |
+| **Double-Click** (Log) | Create Filter from selected text |
+| **C** | Add / Edit Note for selected line |
+| **Space** (Filter List) | Toggle Filter Enabled/Disabled |
+| **Delete** (Filter List) | Remove Filter |
+
+## 4. Release Notes
+
+### Version 2.0 (2026-01-07)
+
+#### Major Architecture Overhaul
+*   **Qt (PySide6) Rewrite**: The application UI has been completely rewritten from Tkinter to Qt, offering a native, robust, and scalable interface.
+*   **Virtual Viewport Implementation**: Solved the performance bottleneck of rendering large lists. The UI now handles massive logs with zero lag.
+
+#### Key Improvements
+*   **Docking UI**: Filters and Notes are now movable, dockable panels, allowing for a personalized workspace layout.
+*   **Search Upgrade**: A completely redesigned search experience with modern toggle buttons, instant case-sensitivity updates, and reliable navigation across massive files.
+*   **Virtual Viewport**: The core rendering engine ensures stable performance regardless of file size.
+
+#### New Features & Enhancements
+*   **Notes System**: Fully ported with enhancements like JSON persistence, auto-loading, and text export.
+*   **Modern Theme**: A polished dark/light theme consistent across all dialogs.

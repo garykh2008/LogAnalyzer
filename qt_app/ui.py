@@ -345,6 +345,10 @@ class MainWindow(QMainWindow):
         shortcuts_action.triggered.connect(self.show_shortcuts)
         help_menu.addAction(shortcuts_action)
         
+        doc_action = QAction("Documentation", self)
+        doc_action.triggered.connect(self.open_documentation)
+        help_menu.addAction(doc_action)
+
         help_menu.addSeparator()
         
         about_action = QAction("About", self)
@@ -1419,3 +1423,15 @@ class MainWindow(QMainWindow):
               f"<p>A high-performance log analysis tool built with PySide6 and Rust extension.</p>" \
               f"<p>Developer: Gary Hsieh</p>"
         QMessageBox.about(self, "About", msg)
+
+    def open_documentation(self):
+        doc_filename = f"Log_Analyzer_{self.VERSION}_Docs_EN.html"
+        # Path logic: root/Doc/filename
+        doc_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "Doc", doc_filename))
+        
+        if not os.path.exists(doc_path):
+            QMessageBox.warning(self, "Error", f"Documentation file not found:\n{doc_path}")
+            return
+            
+        import webbrowser
+        webbrowser.open(f"file://{doc_path}")
