@@ -10,7 +10,7 @@ def main():
 
     app = QApplication(sys.argv)
 
-    # Set organization info for QSettings
+    # Set organization info for QSettings (if used later)
     app.setOrganizationName("LogAnalyzer")
     app.setApplicationName("Log Analyzer Qt")
 
