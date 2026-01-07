@@ -55,12 +55,16 @@ class LogDelegate(QStyledItemDelegate):
                 rect = option.rect.adjusted(4, 0, -4, 0)
 
                 # Search Highlight check
-                if self.search_query and self.search_query.lower() in text.lower():
+                # FIX: "ctrl+right highlight everything" implies search_query might be "" or handled wrong
+                # .find() with empty string returns 0, infinite loop potential if not careful,
+                # but we usually check if query is truthy.
+                if self.search_query and self.search_query.strip() and self.search_query.lower() in text.lower():
                     self._paint_highlighted_text(painter, rect, text, option)
                 else:
                     font_metrics = option.fontMetrics
                     elided_text = font_metrics.elidedText(text, Qt.ElideNone, rect.width())
-                    painter.drawText(rect, Qt.AlignLeft, elided_text)
+                    # Use AlignVCenter to ensure vertical centering
+                    painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, elided_text)
 
         finally:
             painter.restore()
@@ -72,8 +76,18 @@ class LogDelegate(QStyledItemDelegate):
 
         start = 0
         x = rect.left()
-        # AlignLeft usually draws at baseline derived from top + ascent
-        y = rect.top() + option.fontMetrics.ascent()
+
+        # Calculate Y for vertical centering
+        # drawText(x, y, string) uses baseline.
+        # But rect aligned drawing uses Flags.
+        # We are manually drawing parts.
+        # Option 1: Calculate baseline
+        # baseline = rect.top() + (rect.height() + option.fontMetrics.ascent() - option.fontMetrics.descent()) / 2
+        # Simple approximation: top + ascent (top aligned) -> adjust for center
+
+        # Better: use drawText with rect for segments if possible, but X varies.
+        # Let's align to font baseline:
+        y_baseline = rect.top() + (rect.height() - option.fontMetrics.height()) / 2 + option.fontMetrics.ascent()
 
         # Use current pen (set in paint method) as base text color
         base_pen = painter.pen()
@@ -83,13 +97,13 @@ class LogDelegate(QStyledItemDelegate):
             if idx == -1:
                 remaining = text[start:]
                 painter.setPen(base_pen)
-                painter.drawText(x, y, remaining)
+                painter.drawText(x, y_baseline, remaining)
                 break
 
             pre_text = text[start:idx]
             if pre_text:
                 painter.setPen(base_pen)
-                painter.drawText(x, y, pre_text)
+                painter.drawText(x, y_baseline, pre_text)
                 x += option.fontMetrics.horizontalAdvance(pre_text)
 
             match_text = text[idx:idx+len(query)]
@@ -99,11 +113,11 @@ class LogDelegate(QStyledItemDelegate):
             painter.fillRect(bg_rect, self.search_match_color)
 
             painter.setPen(self.search_match_text_color)
-            painter.drawText(x, y, match_text)
+            painter.drawText(x, y_baseline, match_text)
             x += match_width
 
             start = idx + len(query)
 
     def sizeHint(self, option, index):
-        height = option.fontMetrics.height()
-        return QSize(option.rect.width(), height)
+        # Ensure fast return
+        return QSize(option.rect.width(), option.fontMetrics.height())
