@@ -257,6 +257,9 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
 
+        self.recent_menu = file_menu.addMenu("Open Recent")
+        self.update_recent_menu()
+
         file_menu.addSeparator()
         load_filters_action = QAction("Load Filters...", self)
         load_filters_action.triggered.connect(self.import_filters)
@@ -618,6 +621,46 @@ class MainWindow(QMainWindow):
         filepath, _ = QFileDialog.getOpenFileName(self, "Open Log File", last_dir, "Log Files (*.log *.txt);;All Files (*)")
         if filepath: self.load_log(filepath)
 
+    def update_recent_menu(self):
+        self.recent_menu.clear()
+        recent_files = self.settings.value("recent_files", [], type=list)
+        # Ensure list consistency
+        recent_files = [str(f) for f in recent_files if f]
+        
+        has_items = False
+        for fp in recent_files:
+            if not os.path.exists(fp): continue
+            has_items = True
+            action = QAction(os.path.basename(fp), self)
+            action.setToolTip(fp)
+            action.triggered.connect(lambda checked=False, p=fp: self.load_log(p))
+            self.recent_menu.addAction(action)
+        
+        if not has_items:
+            self.recent_menu.setDisabled(True)
+            return
+            
+        self.recent_menu.setDisabled(False)
+        self.recent_menu.addSeparator()
+        clear_action = QAction("Clear List", self)
+        clear_action.triggered.connect(self.clear_recent_files)
+        self.recent_menu.addAction(clear_action)
+
+    def add_to_recent(self, filepath):
+        recent_files = self.settings.value("recent_files", [], type=list)
+        filepath = os.path.abspath(filepath)
+        
+        if filepath in recent_files:
+            recent_files.remove(filepath)
+        recent_files.insert(0, filepath)
+        
+        self.settings.setValue("recent_files", recent_files[:10])
+        self.update_recent_menu()
+
+    def clear_recent_files(self):
+        self.settings.setValue("recent_files", [])
+        self.update_recent_menu()
+
     def load_log(self, filepath):
         if self.notes_manager.has_unsaved_changes():
             reply = QMessageBox.question(self, "Save Notes?",
@@ -630,6 +673,7 @@ class MainWindow(QMainWindow):
             elif reply == QMessageBox.Cancel:
                 return
 
+        self.add_to_recent(filepath)
         self.update_status_bar(f"Loading {filepath}...")
         start_time = time.time()
         self.settings.setValue("last_dir", os.path.dirname(filepath))
@@ -640,6 +684,8 @@ class MainWindow(QMainWindow):
         end_time = time.time()
         duration = end_time - start_time
         count = self.current_engine.line_count()
+        
+        self.delegate.set_max_line_number(count)
 
         self.update_window_title()
 

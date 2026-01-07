@@ -96,6 +96,9 @@ class LogModel(QAbstractListModel):
         if self.filtered_indices is not None:
             raw_index = self.filtered_indices[real_row]
 
+        if role == Qt.UserRole + 1:
+            return raw_index
+
         if role == Qt.DisplayRole:
             return self.engine.get_line(raw_index)
 

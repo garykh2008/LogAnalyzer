@@ -10,9 +10,13 @@ class LogDelegate(QStyledItemDelegate):
         self.search_case_sensitive = False
         self.search_match_color = QColor("#653306")
         self.search_match_text_color = QColor("#ffffff")
+        self.max_line_number = 1000
 
     def set_hover_color(self, color):
         self.hover_color = QColor(color)
+
+    def set_max_line_number(self, count):
+        self.max_line_number = count
 
     def set_search_query(self, query, case_sensitive=False):
         self.search_query = query
@@ -40,6 +44,36 @@ class LogDelegate(QStyledItemDelegate):
             if bg_color:
                 painter.fillRect(option.rect, bg_color)
 
+            # --- Line Number ---
+            raw_index = index.data(Qt.UserRole + 1)
+            
+            # Calculate width based on max lines
+            digits = len(str(self.max_line_number))
+            char_w = option.fontMetrics.horizontalAdvance('8')
+            line_num_width = max(40, digits * char_w + 15)
+            
+            if raw_index is not None:
+                line_num_str = str(raw_index + 1)
+                
+                # Line Num Background
+                line_bg_rect = QRectF(option.rect.left(), option.rect.top(), line_num_width, option.rect.height())
+                # Calculate subtle bg based on base color
+                base_col = option.palette.color(QPalette.Base)
+                if base_col.lightness() > 128:
+                    num_bg = QColor(240, 240, 240) # Light theme
+                    num_fg = QColor(128, 128, 128)
+                else:
+                    num_bg = QColor(40, 40, 40) # Dark theme
+                    num_fg = QColor(100, 100, 100)
+                
+                painter.fillRect(line_bg_rect, num_bg)
+                
+                # Line Num Text
+                painter.save()
+                painter.setPen(num_fg)
+                painter.drawText(line_bg_rect.adjusted(0, 0, -5, 0), Qt.AlignRight | Qt.AlignVCenter, line_num_str)
+                painter.restore()
+
             # 2. Text
             text = index.data(Qt.DisplayRole)
             if text:
@@ -54,7 +88,7 @@ class LogDelegate(QStyledItemDelegate):
                     else:
                         painter.setPen(option.palette.text().color())
 
-                rect = option.rect.adjusted(4, 0, -4, 0)
+                rect = option.rect.adjusted(line_num_width + 8, 0, -4, 0)
 
                 # Search Highlight check
                 should_highlight = False
