@@ -100,13 +100,22 @@ class NotesManager(QObject):
         self.is_dark_mode = is_dark
         if self.dock.isFloating():
             set_windows_title_bar_color(self.dock.winId(), is_dark)
-        
+    
+    def has_unsaved_changes(self):
+        return self.notes_dirty
+
     def load_notes_for_file(self, log_filepath):
         """Automatically called when a log is loaded."""
         if not log_filepath: return
         
+        # Reset dirty flag on load
+        self.notes_dirty = False
+        
         base, _ = os.path.splitext(log_filepath)
         note_path = base + ".note"
+        
+        # Clear existing view
+        self.notes.clear() # Clear memory for single-file mode logic
         
         if os.path.exists(note_path):
             try:
@@ -122,6 +131,10 @@ class NotesManager(QObject):
                 self.notes_updated.emit()
             except Exception as e:
                 print(f"Error loading notes: {e}")
+        else:
+            # No note file, clear view
+            self.refresh_list()
+            self.notes_updated.emit()
 
     def quick_save(self):
         log_filepath = self.main_window.current_log_path
@@ -140,9 +153,38 @@ class NotesManager(QObject):
             with open(note_path, 'w', encoding='utf-8') as f:
                 json.dump(data_to_save, f, indent=4, sort_keys=True)
             self.notes_dirty = False
-            self.main_window.toast.show_message(f"Notes saved to {os.path.basename(note_path)}")
+            self.main_window.toast.show_message(f"Notes saved to {os.path.basename(note_path)}")   
         except Exception as e:
             QMessageBox.critical(self.main_window, "Error", f"Could not save notes: {e}")
+
+    def export_to_text(self, filepath):
+        current_fp = self.main_window.current_log_path
+        if not current_fp or not filepath: return
+
+        file_notes = []
+        for (fp, idx), content in self.notes.items():
+            if fp == current_fp:
+                file_notes.append((idx, content))
+        file_notes.sort(key=lambda x: x[0])
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                ts_pattern = re.compile(r'(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b)')
+                
+                for idx, content in file_notes:
+                    ts = ""
+                    if self.main_window.current_engine:
+                        line = self.main_window.current_engine.get_line(idx)
+                        if line:
+                            match = ts_pattern.search(line)
+                            if match: ts = match.group(1)
+                    
+                    clean_content = content.replace("\n", " ")
+                    f.write(f"{idx + 1}\t{ts}\t{clean_content}\n")
+            
+            self.main_window.toast.show_message(f"Exported to {os.path.basename(filepath)}")
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "Error", f"Export failed: {e}")
 
     def add_note(self, raw_index, timestamp, filepath):
         key = (filepath, raw_index)

@@ -282,6 +282,10 @@ class MainWindow(QMainWindow):
         toggle_notes_action = QAction("Toggle Notes", self)
         toggle_notes_action.triggered.connect(self.notes_manager.toggle_view)
         view_menu.addAction(toggle_notes_action)
+        
+        export_notes_action = QAction("Export Notes to Text...", self)
+        export_notes_action.triggered.connect(self.export_notes_to_text)
+        view_menu.addAction(export_notes_action)
 
         show_filtered_action = QAction("Show Filtered Only", self)
         show_filtered_action.setShortcut("Ctrl+H")
@@ -392,6 +396,19 @@ class MainWindow(QMainWindow):
                     return True
                  elif key == Qt.Key_Right:
                     self.navigate_filter_hit(reverse=False)
+                    return True
+
+            # 'C' key for Add/Edit Note
+            elif key == Qt.Key_C and mod == Qt.NoModifier:
+                idx = self.list_view.currentIndex()
+                if idx.isValid():
+                    view_abs_row = self.model.viewport_start + idx.row()
+                    raw_index = view_abs_row
+                    if self.show_filtered_only and self.model.filtered_indices:
+                        if view_abs_row < len(self.model.filtered_indices):
+                            raw_index = self.model.filtered_indices[view_abs_row]
+                    
+                    self.notes_manager.add_note(raw_index, "", self.current_log_path)
                     return True
 
         if hasattr(self, 'filter_tree') and obj == self.filter_tree and event.type() == QEvent.KeyPress:
@@ -602,6 +619,17 @@ class MainWindow(QMainWindow):
         if filepath: self.load_log(filepath)
 
     def load_log(self, filepath):
+        if self.notes_manager.has_unsaved_changes():
+            reply = QMessageBox.question(self, "Save Notes?",
+                                         "You have unsaved notes. Do you want to save them before loading a new log?",
+                                         QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                                         QMessageBox.Save)
+            if reply == QMessageBox.Save:
+                self.notes_manager.quick_save()
+                if self.notes_manager.has_unsaved_changes(): return
+            elif reply == QMessageBox.Cancel:
+                return
+
         self.update_status_bar(f"Loading {filepath}...")
         start_time = time.time()
         self.settings.setValue("last_dir", os.path.dirname(filepath))
@@ -960,6 +988,20 @@ class MainWindow(QMainWindow):
                     event.ignore()
                     return
 
+            if self.notes_manager.has_unsaved_changes():
+                reply = QMessageBox.question(self, "Save Notes?",
+                                             "You have unsaved notes. Do you want to save them?",
+                                             QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                                             QMessageBox.Save)
+                if reply == QMessageBox.Save:
+                    self.notes_manager.quick_save()
+                    if self.notes_manager.has_unsaved_changes():
+                         event.ignore()
+                         return
+                elif reply == QMessageBox.Cancel:
+                    event.ignore()
+                    return
+
             self.settings.setValue("window_geometry", self.saveGeometry())
             self.settings.setValue("window_state", self.saveState())
             super().closeEvent(event)
@@ -1030,6 +1072,13 @@ class MainWindow(QMainWindow):
                 self.toast.show_message("Filters saved")
         else:
             self.save_filters_as()
+
+    def export_notes_to_text(self):
+        last_dir = self.settings.value("last_note_export_dir", "")
+        filepath, _ = QFileDialog.getSaveFileName(self, "Export Notes", last_dir, "Text Files (*.txt);;All Files (*)")
+        if filepath:
+            self.settings.setValue("last_note_export_dir", os.path.dirname(filepath))
+            self.notes_manager.export_to_text(filepath)
 
     def save_filters_as(self):
         last_dir = self.settings.value("last_filter_dir", "")
