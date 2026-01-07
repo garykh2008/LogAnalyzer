@@ -37,6 +37,12 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{self.APP_NAME} (PySide6)")
+        
+        # Set App Icon
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "loganalyzer.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+
         self.resize(1200, 800)
 
         self.settings = QSettings("LogAnalyzer", "QtApp")
