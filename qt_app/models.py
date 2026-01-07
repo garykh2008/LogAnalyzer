@@ -8,21 +8,32 @@ class LogModel(QAbstractListModel):
         self.filtered_indices = None # None means show all
         self.tag_codes = None # List of ints
         self.filter_palette = {} # {code: (fg, bg)}
+        self.notes = {} # Reference to main window notes
+        self.current_filepath = None
+        self.note_bg_color = QColor("#3a3d41")
         self._total_line_count = 0
         
         # Virtual Viewport State
         self.viewport_start = 0
         self.viewport_size = 200 # Default buffer
 
-    def set_engine(self, engine):
+    def set_engine(self, engine, filepath=None):
         self.beginResetModel()
         self.engine = engine
+        self.current_filepath = filepath
         self.filtered_indices = None
         self.tag_codes = None
         self.filter_palette = {}
         self._total_line_count = self.engine.line_count() if self.engine else 0
         self.viewport_start = 0
         self.endResetModel()
+
+    def set_notes_ref(self, notes_dict):
+        self.notes = notes_dict
+
+    def set_theme_mode(self, is_dark):
+        self.note_bg_color = QColor("#3a3d41") if is_dark else QColor("#fffbdd")
+        self.layoutChanged.emit()
 
     def set_viewport(self, start, size):
         # Allow size to be slightly larger than visible to avoid flicker
@@ -90,6 +101,11 @@ class LogModel(QAbstractListModel):
 
         # Color Roles
         if role == Qt.ForegroundRole or role == Qt.BackgroundRole:
+            # 1. Note Highlight (Background only)
+            if role == Qt.BackgroundRole and self.current_filepath:
+                if (self.current_filepath, raw_index) in self.notes:
+                    return self.note_bg_color
+
             if self.tag_codes and raw_index < len(self.tag_codes):
                 code = self.tag_codes[raw_index]
                 if code in self.filter_palette:

@@ -10,6 +10,7 @@ from .engine_wrapper import get_engine
 from .toast import Toast
 from .delegates import LogDelegate
 from .filter_dialog import FilterDialog
+from .notes_manager import NotesManager
 from .utils import adjust_color_for_theme, load_tat_filters, save_tat_filters, set_windows_title_bar_color
 import os
 import time
@@ -55,6 +56,8 @@ class MainWindow(QMainWindow):
         self.cached_filter_results = None # Stores result of last engine.filter()
         self.is_scrolling = False
         
+        self.is_scrolling = False
+        
         self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
 
         self.list_view = QListView()
@@ -68,6 +71,12 @@ class MainWindow(QMainWindow):
         self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_view.customContextMenuRequested.connect(self.show_context_menu)
         self.list_view.doubleClicked.connect(self.on_log_double_clicked)
+
+        # Managers (Must be init after Model)
+        self.notes_manager = NotesManager(self)
+        self.model.set_notes_ref(self.notes_manager.notes)
+        self.notes_manager.notes_updated.connect(self.on_notes_updated)
+        self.notes_manager.navigation_requested.connect(self.jump_to_raw_index)
 
         self.list_view.setUniformItemSizes(True)
         # self.list_view.setLayoutMode(QListView.Batched) # Removed for virtual viewport optimization
@@ -269,6 +278,10 @@ class MainWindow(QMainWindow):
 
         view_menu = menu_bar.addMenu("&View")
         view_menu.addAction(self.filter_dock.toggleViewAction())
+        
+        toggle_notes_action = QAction("Toggle Notes", self)
+        toggle_notes_action.triggered.connect(self.notes_manager.toggle_view)
+        view_menu.addAction(toggle_notes_action)
 
         show_filtered_action = QAction("Show Filtered Only", self)
         show_filtered_action.setShortcut("Ctrl+H")
@@ -502,6 +515,9 @@ class MainWindow(QMainWindow):
                 set_windows_title_bar_color(widget.winId(), is_dark)
 
     def apply_theme(self):
+        self.notes_manager.set_theme(self.is_dark_mode)
+        self.model.set_theme_mode(self.is_dark_mode)
+
         # Set Global Style to affect Dialogs
         app = QApplication.instance()
 
@@ -586,8 +602,9 @@ class MainWindow(QMainWindow):
         start_time = time.time()
         self.settings.setValue("last_dir", os.path.dirname(filepath))
         self.current_engine = get_engine(filepath)
-        self.model.set_engine(self.current_engine)
+        self.model.set_engine(self.current_engine, filepath)
         self.current_log_path = filepath
+        self.notes_manager.load_notes_for_file(filepath)
         end_time = time.time()
         duration = end_time - start_time
         count = self.current_engine.line_count()
@@ -616,6 +633,24 @@ class MainWindow(QMainWindow):
         copy_action = QAction("Copy", self)
         copy_action.triggered.connect(self.copy_selection)
         menu.addAction(copy_action)
+        
+        menu.addSeparator()
+        
+        # Check if single line selected
+        indexes = self.list_view.selectionModel().selectedIndexes()
+        if len(indexes) == 1:
+            idx = indexes[0]
+            # Map to raw index
+            view_abs_row = self.model.viewport_start + idx.row()
+            raw_index = view_abs_row
+            if self.show_filtered_only and self.model.filtered_indices:
+                if view_abs_row < len(self.model.filtered_indices):
+                    raw_index = self.model.filtered_indices[view_abs_row]
+            
+            note_action = QAction("Add/Edit Note", self)
+            note_action.triggered.connect(lambda: self.notes_manager.add_note(raw_index, "", self.current_log_path))
+            menu.addAction(note_action)
+
         menu.exec_(self.list_view.mapToGlobal(pos))
 
     def copy_selection(self):
@@ -726,39 +761,30 @@ class MainWindow(QMainWindow):
         if results: self._jump_to_match(0)
         else: self.search_info_label.setText("No results"); self.toast.show_message("No results found", duration=2000)
 
-    def _jump_to_match(self, result_index):
-        if not self.search_results or result_index < 0 or result_index >= len(self.search_results): return
-        self.current_match_index = result_index
-        raw_row_idx = self.search_results[result_index]
-        
+    def on_notes_updated(self):
+        self.list_view.viewport().update()
+
+    def jump_to_raw_index(self, raw_index):
         # Determine visual absolute row
-        view_abs_row = raw_row_idx
+        view_abs_row = raw_index
         if self.show_filtered_only and self.model.filtered_indices:
-             # Find where this raw index is in the filtered list
-             idx = bisect.bisect_left(self.model.filtered_indices, raw_row_idx)
-             if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == raw_row_idx:
+             idx = bisect.bisect_left(self.model.filtered_indices, raw_index)
+             if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == raw_index:
                  view_abs_row = idx
              else:
-                 # Match exists in full log but hidden by filter
-                 self.toast.show_message("Match is hidden by current filter")
+                 self.toast.show_message("Line is hidden by filter")
                  return
 
-        # Calculate new viewport start to center the result
         vp_size = self.calculate_viewport_size()
         new_vp_start = max(0, view_abs_row - (vp_size // 2))
         
-        # Update Scrollbar (triggers model viewport update)
         self.v_scrollbar.setValue(new_vp_start)
         
-        # Force model update to ensure sync even if scrollbar value didn't change
-        # (e.g. target is already in view range but we want to be sure model covers it)
         actual_vp_start = self.v_scrollbar.value()
         self.model.set_viewport(actual_vp_start, vp_size)
         
-        # Ensure view processes the layout change before we try to select/scroll
         QApplication.processEvents()
 
-        # Calculate relative index in the new viewport
         relative_row = view_abs_row - actual_vp_start
         
         index = self.model.index(relative_row, 0)
@@ -770,6 +796,11 @@ class MainWindow(QMainWindow):
         else:
             self.toast.show_message(f"Nav Error: View {relative_row} invalid")
 
+    def _jump_to_match(self, result_index):
+        if not self.search_results or result_index < 0 or result_index >= len(self.search_results): return
+        self.current_match_index = result_index
+        raw_row_idx = self.search_results[result_index]
+        self.jump_to_raw_index(raw_row_idx)
         self.search_info_label.setText(f"{result_index + 1} / {len(self.search_results)}")
 
     # --- Filter Logic ---
