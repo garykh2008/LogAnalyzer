@@ -614,8 +614,8 @@ class MainWindow(QMainWindow):
         QHeaderView::section {{ background-color: {menu_bg}; color: {fg_color}; border: none; padding: 2px; }}
 
         /* Dialog specific */
-        QDialog {{ background-color: {dialog_bg}; color: {dialog_fg}; }}
-        QLabel, QCheckBox {{ color: {dialog_fg}; }}
+        QDialog, QMessageBox {{ background-color: {dialog_bg}; color: {dialog_fg}; }}
+        QLabel, QCheckBox, QMessageBox QLabel {{ color: {dialog_fg}; }}
         QLineEdit, QTextEdit, QPlainTextEdit {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid #555; }}
 
         #search_widget {{
@@ -1419,10 +1419,18 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def show_about(self):
-        msg = f"<h3>{self.APP_NAME} {self.VERSION}</h3>" \
-              f"<p>A high-performance log analysis tool built with PySide6 and Rust extension.</p>" \
-              f"<p>Developer: Gary Hsieh</p>"
-        QMessageBox.about(self, "About", msg)
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("About")
+        msg_box.setTextFormat(Qt.RichText)
+        msg_box.setText(f"<h3>{self.APP_NAME} {self.VERSION}</h3>"
+                        f"<p>A high-performance log analysis tool built with PySide6 and Rust extension.</p>"
+                        f"<p>Developer: Gary Hsieh</p>")
+        msg_box.setStandardButtons(QMessageBox.Ok)
+        
+        # Ensure title bar color matches theme
+        set_windows_title_bar_color(msg_box.winId(), self.is_dark_mode)
+        
+        msg_box.exec()
 
     def open_documentation(self):
         doc_filename = f"Log_Analyzer_{self.VERSION}_Docs_EN.html"
