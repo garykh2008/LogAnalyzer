@@ -566,17 +566,17 @@ class MainWindow(QMainWindow):
 
         cb_border = "#555555" if not self.is_dark_mode else float_border
         cb_style = """
-        QCheckBox {{ spacing: 8px; }}
-        QCheckBox::indicator, QTreeView::indicator {{ 
+        QCheckBox { spacing: 8px; }
+        QCheckBox::indicator, QTreeView::indicator { 
             width: 14px; height: 14px; border-radius: 3px; 
             border: 1px solid %s; background: %s; margin: 0px; padding: 0px;
-        }}
-        QTreeView::indicator {{ subcontrol-origin: padding; subcontrol-position: center; }}
-        QCheckBox::indicator:checked, QTreeView::indicator:checked {{ 
+        }
+        QTreeView::indicator { subcontrol-origin: padding; subcontrol-position: center; }
+        QCheckBox::indicator:checked, QTreeView::indicator:checked { 
             background: %s; 
             image: url("data:image/svg+xml,%%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%%3E%%3Cpolyline points='20 6 9 17 4 12'%%3E%%3C/polyline%%3E%%3C/svg%%3E");
-        }}
-        QCheckBox::indicator:hover, QTreeView::indicator:hover {{ border: 1px solid %s; }}
+        }
+        QCheckBox::indicator:hover, QTreeView::indicator:hover { border: 1px solid %s; }
         """ % (cb_border, input_bg, checkbox_active, menu_sel)
         
         style += cb_style

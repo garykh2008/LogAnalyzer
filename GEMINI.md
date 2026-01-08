@@ -1,6 +1,37 @@
 # LogAnalyzer Project Changes - Session Summary
 
+## Date: 2026年1月8日 (Current Work - To be resumed)
+
+### 1. Qt UI Modernization (qt_app)
+**Objective**: Transition the PySide6 implementation to a modern, VS Code-inspired professional interface.
+
+- **Activity Bar & Sidebar Architecture**:
+    - Implemented a fixed vertical **Activity Bar** (QToolBar) on the far left for quick navigation.
+    - Decoupled combined sidebar into independent, draggable **QDockWidgets** (FilterDock, NotesDock).
+    - **Smart Toggle Logic**: Activity Bar icons now support "Switching" (when tabbed/overlapped) and "Independent Toggle" (when tiled/separate).
+    - **Collapse Behavior**: Clicking an active tab icon now collapses the entire group (matches VS Code).
+
+- **Visual Design & Modernization**:
+    - **Tiered Backgrounds**: Replaced harsh separator lines with "color steps" (Activity Bar > Sidebar > Main View) for a cleaner, modern look.
+    - **SVG Icon System**: Introduced a centralized `resources.py` with Lucide-inspired SVG icons that dynamically re-color based on theme (Dark/Light).
+    - **Scrollbar Redesign**: Modern thin scrollbars without arrows, featuring transparent tracks and themed hover effects.
+    - **Dock Customization**: Hidden default float/close buttons on Dock headers via QSS to maintain a clean layout while preserving drag-to-float functionality.
+
+- **Log View & Interaction Enhancements**:
+    - **Sticky Line Numbers**: Line numbers now stay fixed on the left during horizontal scrolling (using `painter.setClipRect`).
+    - **Improved Horizontal Scroll**: Fixed `sizeHint` logic in `LogDelegate` to correctly calculate the full width of log lines.
+    - **Filter List UI**: Compact "En" column (25px), centered checkboxes, and tiered hover/selection overlays that preserve individual filter background colors.
+    - **Global Event Filtering**: Refactored `eventFilter` to allow filter hit navigation (`Ctrl + Left/Right`) to work regardless of whether focus is on the log view or the filter list.
+
+### 2. Issues to Address / Pending Fixes
+*Note: The user has reverted some broken changes; these need careful re-implementation.*
+- **Light Mode Refinement**: Ensure `activity_bg` (#f0f0f0), `sidebar_bg` (#f8f8f8), and scrollbar handles (#dddddd) are correctly applied.
+- **Checkbox Visibility**: Ensure the white checkmark SVG is properly encoded (URL-encoded) in the QSS to be visible against the blue background.
+- **Title Bar Sync**: Floating docks must have their Windows title bar color synced immediately on `topLevelChanged` and during theme toggles.
+- **Code Integrity**: Ensure all core methods (navigation, notes, search) are preserved during UI refactoring.
+
 ## Date: 2025年12月26日
+
 
 ### 1. Command-Line Interface (CLI) Support
 - **Features**:
