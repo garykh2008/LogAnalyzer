@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
 
         self.settings = QSettings("LogAnalyzer", "QtApp")
         self.is_dark_mode = self.settings.value("dark_mode", True, type=bool)
+        self.setAcceptDrops(True) # Enable Drag & Drop
         self.last_status_message = "Ready"
         self.current_filter_file = None
 
@@ -539,6 +540,17 @@ class MainWindow(QMainWindow):
             y = 0
             self.search_widget.move(x, y)
         super().resizeEvent(event)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        if urls:
+            filepath = urls[0].toLocalFile()
+            if os.path.exists(filepath):
+                self.load_log(filepath)
 
     def _animate_search_opacity(self, target):
         pass
