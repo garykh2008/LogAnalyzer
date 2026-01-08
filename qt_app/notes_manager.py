@@ -100,6 +100,9 @@ class NotesManager(QObject):
         self.is_dark_mode = is_dark
         if self.dock.isFloating():
             set_windows_title_bar_color(self.dock.winId(), is_dark)
+        # Force a style refresh on internal widgets
+        self.tree.viewport().update()
+
     
     def has_unsaved_changes(self):
         return self.notes_dirty
