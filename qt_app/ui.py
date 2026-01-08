@@ -11,6 +11,7 @@ from .toast import Toast
 from .delegates import LogDelegate
 from .filter_dialog import FilterDialog
 from .notes_manager import NotesManager
+from .resources import get_svg_icon
 from .utils import adjust_color_for_theme, load_tat_filters, save_tat_filters, set_windows_title_bar_color
 import os
 import time
@@ -186,14 +187,11 @@ class MainWindow(QMainWindow):
         self.shortcut_enter_num.activated.connect(self.find_next)
 
         self.btn_prev = QToolButton()
-        self.btn_prev.setText("▲")
         self.btn_prev.setFixedSize(26, 24)
         self.btn_next = QToolButton()
-        self.btn_next.setText("▼")
         self.btn_next.setFixedSize(26, 24)
         
         self.chk_case = QToolButton()
-        self.chk_case.setText("Aa")
         self.chk_case.setCheckable(True)
         self.chk_case.setFixedSize(26, 24)
         self.chk_case.setToolTip("Match Case")
@@ -201,7 +199,6 @@ class MainWindow(QMainWindow):
         self.chk_case.toggled.connect(self.on_search_case_changed)
 
         self.chk_wrap = QToolButton()
-        self.chk_wrap.setText("W")
         self.chk_wrap.setToolTip("Wrap Search")
         self.chk_wrap.setCheckable(True)
         self.chk_wrap.setFixedSize(26, 24)
@@ -209,7 +206,6 @@ class MainWindow(QMainWindow):
         self.chk_wrap.setChecked(True)
 
         self.btn_close_search = QToolButton()
-        self.btn_close_search.setText("X")
         self.btn_close_search.clicked.connect(self.hide_search_bar)
 
         self.search_info_label = QLabel("")
@@ -790,6 +786,14 @@ class MainWindow(QMainWindow):
         QCheckBox::indicator:checked {{ background: {menu_sel}; }}
         """
         app.setStyleSheet(style)
+
+        # Refresh SVG Icons with current theme color
+        icon_color = fg_color
+        self.btn_prev.setIcon(get_svg_icon("chevron-up", icon_color))
+        self.btn_next.setIcon(get_svg_icon("chevron-down", icon_color))
+        self.chk_case.setIcon(get_svg_icon("case-sensitive", icon_color))
+        self.chk_wrap.setIcon(get_svg_icon("wrap", icon_color))
+        self.btn_close_search.setIcon(get_svg_icon("x-close", icon_color))
 
     # ... [Open/Load Log, Copy Selection, Resize Event, Search Logic - Same as before] ...
     def open_file_dialog(self):
