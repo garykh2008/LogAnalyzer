@@ -564,6 +564,7 @@ class MainWindow(QMainWindow):
         style += cb_style
         app.setStyleSheet(style)
 
+        # Refresh SVG Icons with current theme color
         icon_color = fg_color
         self.btn_side_filter.setIcon(get_svg_icon("filter", icon_color))
         self.btn_side_notes.setIcon(get_svg_icon("book-open", icon_color))
@@ -572,22 +573,28 @@ class MainWindow(QMainWindow):
         self.chk_case.setIcon(get_svg_icon("case-sensitive", icon_color))
         self.chk_wrap.setIcon(get_svg_icon("wrap", icon_color))
         self.btn_close_search.setIcon(get_svg_icon("x-close", icon_color))
+        
         self.open_action.setIcon(get_svg_icon("file-text", icon_color))
         self.recent_menu.setIcon(get_svg_icon("folder", icon_color))
         self.load_filters_action.setIcon(get_svg_icon("filter", icon_color))
         self.save_filters_action.setIcon(get_svg_icon("save", icon_color))
         self.save_filters_as_action.setIcon(get_svg_icon("save", icon_color))
         self.exit_action.setIcon(get_svg_icon("log-out", icon_color))
+        
         self.copy_action.setIcon(get_svg_icon("copy", icon_color))
         self.find_action.setIcon(get_svg_icon("search", icon_color))
         self.goto_action.setIcon(get_svg_icon("hash", icon_color))
+        
         self.toggle_filter_sidebar_action.setIcon(get_svg_icon("filter", icon_color))
         self.toggle_notes_sidebar_action.setIcon(get_svg_icon("book-open", icon_color))
+        self.show_filtered_action.setIcon(get_svg_icon("eye", icon_color))
         self.toggle_theme_action.setIcon(get_svg_icon("sun-moon", icon_color))
+        
         self.add_note_action.setIcon(get_svg_icon("plus", icon_color))
         self.remove_note_action.setIcon(get_svg_icon("trash", icon_color))
         self.save_notes_action.setIcon(get_svg_icon("save", icon_color))
         self.export_notes_action.setIcon(get_svg_icon("external-link", icon_color))
+        
         self.shortcuts_action.setIcon(get_svg_icon("keyboard", icon_color))
         self.doc_action.setIcon(get_svg_icon("external-link", icon_color))
         self.about_action.setIcon(get_svg_icon("info", icon_color))

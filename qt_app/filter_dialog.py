@@ -3,8 +3,10 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineE
 from PySide6.QtGui import QColor
 from PySide6.QtCore import Qt
 from .utils import set_windows_title_bar_color, adjust_color_for_theme
+from .resources import get_svg_icon
 
 class FilterDialog(QDialog):
+
     def __init__(self, parent=None, filter_data=None):
         super().__init__(parent)
         self.setWindowTitle("Edit Filter" if filter_data else "Add Filter")
@@ -33,8 +35,9 @@ class FilterDialog(QDialog):
 
         # Colors
         color_layout = QHBoxLayout()
-        self.btn_fg = QPushButton("Text Color")
-        self.btn_bg = QPushButton("Background")
+        self.btn_fg = QPushButton(get_svg_icon("search"), "Text Color")
+        self.btn_bg = QPushButton(get_svg_icon("activity"), "Background")
+
 
         # Default colors
         self.fg_color = self.filter_data.get("fg_color", "#000000")
