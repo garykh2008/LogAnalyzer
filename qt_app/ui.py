@@ -517,12 +517,12 @@ class MainWindow(QMainWindow):
         style = f"""
         * {{ font-family: "Inter", "Segoe UI", "Microsoft JhengHei UI", sans-serif; }}
         QMainWindow, QDialog, QMessageBox, QDockWidget {{ background-color: {bg_color}; color: {fg_color}; }}
-        QWidget {{ color: {fg_color}; }}
+        QWidget {{ color: {fg_color}; font-size: 12px; }}
         #activity_bar {{ background-color: {activity_bg}; border: none; spacing: 10px; padding-top: 5px; }}
         #activity_bar QToolButton {{ background-color: transparent; border: none; border-left: 3px solid transparent; border-radius: 0px; margin: 0px; }}
         #activity_bar QToolButton:hover {{ background-color: {hover_bg}; }}
         #activity_bar QToolButton:checked {{ border-left: 3px solid {bar_bg}; background-color: {hover_bg}; }}
-        QDockWidget#FilterDock, QDockWidget#NotesDock {{ color: {fg_color}; font-weight: bold; titlebar-close-icon: none; titlebar-normal-icon: none; }}
+        QDockWidget#FilterDock, QDockWidget#NotesDock {{ color: {fg_color}; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; titlebar-close-icon: none; titlebar-normal-icon: none; }}
         QDockWidget#FilterDock::title, QDockWidget#NotesDock::title {{ background: {sidebar_bg}; padding: 10px; border: none; }}
         #FilterDock QWidget, #NotesDock QWidget {{ background-color: {sidebar_bg}; }}
         #FilterDock QTreeWidget, #NotesDock QTreeWidget {{ background-color: {sidebar_bg}; border: none; }}
@@ -536,7 +536,7 @@ class MainWindow(QMainWindow):
         QListView {{ background-color: {bg_color}; color: {fg_color}; border: none; outline: 0; font-size: 11pt; font-family: "JetBrains Mono", "Consolas", monospace; }}
         QListView::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
                 QTreeWidget {{ background-color: {tree_bg}; border: none; color: {fg_color}; outline: 0; }}
-                QHeaderView::section {{ background-color: {dock_title_bg}; color: {fg_color}; border: none; border-right: 1px solid {float_border}; border-bottom: 1px solid {float_border}; padding: 2px 4px; font-weight: bold; }}
+                QHeaderView::section {{ background-color: {dock_title_bg}; color: {fg_color}; border: none; border-right: 1px solid {float_border}; border-bottom: 1px solid {float_border}; padding: 2px 4px; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; }}
         
         QHeaderView::section:first {{ padding: 0px; border-right: none; }}
         QTabBar {{ height: 0px; width: 0px; background: transparent; }}

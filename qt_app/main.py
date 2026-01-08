@@ -2,13 +2,34 @@ import sys
 import os
 import signal
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtCore import Qt
 from qt_app.ui import MainWindow
+from qt_app.utils import load_custom_fonts
 
 def main():
     # Allow Ctrl+C to terminate the app from console
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
+    # 1. High DPI Scaling is enabled by default in Qt 6 / PySide6.
+    # No need to set AA_EnableHighDpiScaling or AA_UseHighDpiPixmaps.
+
     app = QApplication(sys.argv)
+
+    # 2. Load Custom Fonts (Inter)
+    load_custom_fonts()
+
+    # 3. Set Application-wide Font Strategy
+    # Priority: Inter -> Segoe UI -> System Default
+    font = QFont("Inter")
+    font.setStyleStrategy(QFont.PreferAntialias)
+    # Fallback to system fonts if Inter isn't installed/loaded
+    if "Inter" not in QFontDatabase.families():
+        font.setFamily("Segoe UI") 
+    
+    # Set default size (point size 9 is usually good for desktop apps ~12px)
+    font.setPointSize(9) 
+    app.setFont(font)
 
     # Set organization info for QSettings
     app.setOrganizationName("LogAnalyzer")
