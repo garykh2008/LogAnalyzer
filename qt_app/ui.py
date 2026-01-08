@@ -9,8 +9,9 @@ from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPr
 from .models import LogModel
 from .engine_wrapper import get_engine
 from .toast import Toast
-from .delegates import LogDelegate
+from .delegates import LogDelegate, FilterDelegate
 from .filter_dialog import FilterDialog
+
 from .notes_manager import NotesManager
 from .resources import get_svg_icon
 from .utils import adjust_color_for_theme, load_tat_filters, save_tat_filters, set_windows_title_bar_color
@@ -118,7 +119,9 @@ class MainWindow(QMainWindow):
         self.filter_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
         
         self.filter_tree = FilterTreeWidget(on_drop_callback=self.on_filter_tree_reordered)
+        self.filter_tree.setItemDelegate(FilterDelegate(self.filter_tree))
         self.filter_tree.setIndentation(0)
+
         self.filter_tree.setHeaderLabels(["En", "Pattern", "Hits"])
         
         header = self.filter_tree.header()
@@ -138,7 +141,9 @@ class MainWindow(QMainWindow):
         self.filter_tree.itemDoubleClicked.connect(self.edit_selected_filter)
         self.filter_tree.itemChanged.connect(self.on_filter_item_changed)
         self.filter_tree.itemClicked.connect(self.on_filter_item_clicked)
+        self.filter_tree.currentItemChanged.connect(lambda curr, prev: self.on_filter_item_clicked(curr, 0))
         self.filter_tree.installEventFilter(self)
+
 
         self.filter_dock.setWidget(self.filter_tree)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.filter_dock)
@@ -430,38 +435,51 @@ class MainWindow(QMainWindow):
             delta = event.angleDelta().y()
             self.v_scrollbar.setValue(self.v_scrollbar.value() + (-delta / 40))
             return True
-        if obj == self.list_view and event.type() == QEvent.KeyPress:
+        
+        # Handle key events for both Log View and Filter Tree
+        if event.type() == QEvent.KeyPress:
             key = event.key()
             mod = event.modifiers()
-            if key == Qt.Key_Down:
-                idx = self.list_view.currentIndex()
-                if idx.isValid() and idx.row() >= self.model.rowCount() - 1:
-                    self.v_scrollbar.setValue(self.v_scrollbar.value() + 1)
+            
+            if (mod & Qt.ControlModifier):
+                if key == Qt.Key_Left:
+                    self.navigate_filter_hit(reverse=True)
                     return True
-            elif key == Qt.Key_Up:
-                idx = self.list_view.currentIndex()
-                if idx.isValid() and idx.row() <= 0:
-                    self.v_scrollbar.setValue(self.v_scrollbar.value() - 1)
+                elif key == Qt.Key_Right:
+                    self.navigate_filter_hit(reverse=False)
                     return True
-            elif key == Qt.Key_PageDown:
-                self.v_scrollbar.setValue(self.v_scrollbar.value() + self.v_scrollbar.pageStep())
-                return True
-            elif key == Qt.Key_PageUp:
-                self.v_scrollbar.setValue(self.v_scrollbar.value() - self.v_scrollbar.pageStep())
-                return True
-            elif key == Qt.Key_Home:
-                self.v_scrollbar.setValue(0)
-                self.list_view.setCurrentIndex(self.model.index(0, 0))
-                return True
-            elif key == Qt.Key_End:
-                self.v_scrollbar.setValue(self.v_scrollbar.maximum())
-                last = self.model.rowCount() - 1
-                if last >= 0: self.list_view.setCurrentIndex(self.model.index(last, 0))
-                return True
-            elif key == Qt.Key_C and mod == Qt.NoModifier:
-                self.add_note_at_current()
-                return True
+
+            if obj == self.list_view:
+                if key == Qt.Key_Down:
+                    idx = self.list_view.currentIndex()
+                    if idx.isValid() and idx.row() >= self.model.rowCount() - 1:
+                        self.v_scrollbar.setValue(self.v_scrollbar.value() + 1)
+                        return True
+                elif key == Qt.Key_Up:
+                    idx = self.list_view.currentIndex()
+                    if idx.isValid() and idx.row() <= 0:
+                        self.v_scrollbar.setValue(self.v_scrollbar.value() - 1)
+                        return True
+                elif key == Qt.Key_PageDown:
+                    self.v_scrollbar.setValue(self.v_scrollbar.value() + self.v_scrollbar.pageStep())
+                    return True
+                elif key == Qt.Key_PageUp:
+                    self.v_scrollbar.setValue(self.v_scrollbar.value() - self.v_scrollbar.pageStep())
+                    return True
+                elif key == Qt.Key_Home:
+                    self.v_scrollbar.setValue(0)
+                    self.list_view.setCurrentIndex(self.model.index(0, 0))
+                    return True
+                elif key == Qt.Key_End:
+                    self.v_scrollbar.setValue(self.v_scrollbar.maximum())
+                    last = self.model.rowCount() - 1
+                    if last >= 0: self.list_view.setCurrentIndex(self.model.index(last, 0))
+                    return True
+                elif key == Qt.Key_C and mod == Qt.NoModifier:
+                    self.add_note_at_current()
+                    return True
         return super().eventFilter(obj, event)
+
 
     def apply_theme(self):
         self.notes_manager.set_theme(self.is_dark_mode)
@@ -517,9 +535,9 @@ class MainWindow(QMainWindow):
         QMenu::separator {{ height: 1px; background: {float_border}; margin: 4px 8px; }}
         QListView {{ background-color: {bg_color}; color: {fg_color}; border: none; outline: 0; font-size: 11pt; font-family: "JetBrains Mono", "Consolas", monospace; }}
         QListView::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
-        QTreeWidget {{ background-color: {tree_bg}; border: none; color: {fg_color}; outline: 0; }}
-        QTreeWidget::item {{ padding: 0px; margin: 0px; }}
-        QHeaderView::section {{ background-color: {dock_title_bg}; color: {fg_color}; border: none; border-right: 1px solid {float_border}; border-bottom: 1px solid {float_border}; padding: 2px 4px; font-weight: bold; }}
+                QTreeWidget {{ background-color: {tree_bg}; border: none; color: {fg_color}; outline: 0; }}
+                QHeaderView::section {{ background-color: {dock_title_bg}; color: {fg_color}; border: none; border-right: 1px solid {float_border}; border-bottom: 1px solid {float_border}; padding: 2px 4px; font-weight: bold; }}
+        
         QHeaderView::section:first {{ padding: 0px; border-right: none; }}
         QTabBar {{ height: 0px; width: 0px; background: transparent; }}
         QTabBar::tab {{ height: 0px; width: 0px; padding: 0px; margin: 0px; border: none; }}
@@ -910,10 +928,38 @@ class MainWindow(QMainWindow):
         p.append(f"{self.APP_NAME} {self.VERSION}")
         self.setWindowTitle(" - ".join(p))
 
+    def calculate_viewport_size(self):
+        h = self.list_view.viewport().height(); rh = QFontMetrics(self.list_view.font()).height()
+        return (h // (rh if rh > 0 else 20)) + 100
+
+    def on_view_selection_changed(self, curr, prev):
+        if self.is_scrolling or not curr.isValid(): return
+        abs_row = self.model.viewport_start + curr.row()
+        raw = abs_row
+        if self.show_filtered_only and self.model.filtered_indices:
+            if abs_row < len(self.model.filtered_indices): raw = self.model.filtered_indices[abs_row]
+        self.selected_raw_index = raw
+
+    def update_scrollbar_range(self):
+        if not self.current_engine: return
+        total = len(self.model.filtered_indices) if self.show_filtered_only else self.current_engine.line_count()
+        vp = self.calculate_viewport_size()
+        self.v_scrollbar.setRange(0, max(0, total - vp)); self.v_scrollbar.setPageStep(vp)
+        self.on_scrollbar_value_changed(self.v_scrollbar.value())
+
     def navigate_filter_hit(self, reverse=False):
         if not self.current_engine or not self.model.tag_codes: return
+        
+        # Ensure we have a selected filter index, fallback to current tree item if needed
+        if self.selected_filter_index < 0:
+            item = self.filter_tree.currentItem()
+            if item:
+                self.selected_filter_index = item.data(0, Qt.UserRole)
+        
         if self.selected_filter_index < 0: return
+        
         target_code = -1; curr_j = 0
+
         for i, f in enumerate(self.filters):
             if f["enabled"]:
                 if i == self.selected_filter_index: target_code = curr_j + 2; break
@@ -983,36 +1029,27 @@ class MainWindow(QMainWindow):
 
     def on_scrollbar_value_changed(self, value):
         self.is_scrolling = True
-        try: self.model.set_viewport(value, self.calculate_viewport_size())
-        finally: self.is_scrolling = False
-
-    def on_view_selection_changed(self, curr, prev):
-        if self.is_scrolling or not curr.isValid(): return
-        abs_row = self.model.viewport_start + curr.row()
-        raw = abs_row
-        if self.show_filtered_only and self.model.filtered_indices:
-            if abs_row < len(self.model.filtered_indices): raw = self.model.filtered_indices[abs_row]
-        self.selected_raw_index = raw
-
-    def calculate_viewport_size(self):
-        h = self.list_view.viewport().height(); rh = QFontMetrics(self.list_view.font()).height()
-        return (h // (rh if rh > 0 else 20)) + 100
-
-    def update_scrollbar_range(self):
-        if not self.current_engine: return
-        total = len(self.model.filtered_indices) if self.show_filtered_only else self.current_engine.line_count()
-        vp = self.calculate_viewport_size()
-        self.v_scrollbar.setRange(0, max(0, total - vp)); self.v_scrollbar.setPageStep(vp)
-        self.on_scrollbar_value_changed(self.v_scrollbar.value())
+        try:
+            self.model.set_viewport(value, self.calculate_viewport_size())
+        finally:
+            self.is_scrolling = False
 
     def toggle_theme(self):
-        self.is_dark_mode = not self.is_dark_mode; self.settings.setValue("dark_mode", self.is_dark_mode)
-        self.apply_theme(); self.refresh_filter_tree()
-        if self.current_engine and self.filters: self.recalc_filters(True)
+        self.is_dark_mode = not self.is_dark_mode
+        self.settings.setValue("dark_mode", self.is_dark_mode)
+        self.apply_theme()
+        self.refresh_filter_tree()
+        if self.current_engine and self.filters:
+            self.recalc_filters(True)
 
-    def update_status_bar(self, m): self.status_label.setText(m)
+    def update_status_bar(self, message):
+        self.status_label.setText(message)
 
-    def _set_windows_title_bar_color(self, d):
-        if sys.platform == "win32": set_windows_title_bar_color(self.winId(), d)
+    def _set_windows_title_bar_color(self, is_dark):
+        if sys.platform == "win32":
+            set_windows_title_bar_color(self.winId(), is_dark)
 
-    def close_app(self): self.close()
+    def close_app(self):
+        self.close()
+
+

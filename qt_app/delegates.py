@@ -164,3 +164,39 @@ class LogDelegate(QStyledItemDelegate):
         text_width = option.fontMetrics.horizontalAdvance(text)
         return QSize(line_num_width + 8 + text_width + 20, option.fontMetrics.height())
 
+class FilterDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        painter.save()
+        try:
+            # 1. Draw base background from item data
+            brush = index.data(Qt.BackgroundRole)
+            bg_color = None
+            if brush and hasattr(brush, 'color'):
+                bg_color = brush.color()
+            
+            if bg_color and bg_color.isValid():
+                painter.fillRect(option.rect, bg_color)
+            
+            # 2. Draw Hover/Selection Overlay
+            # Use specific color or fall back to theme base color to determine lightness
+            effective_bg = bg_color if (bg_color and bg_color.isValid()) else option.palette.color(QPalette.Base)
+            is_dark_bg = effective_bg.lightness() < 128
+            
+            if option.state & QStyle.State_Selected:
+                painter.fillRect(option.rect, QColor(0, 122, 204, 80))
+            elif option.state & QStyle.State_MouseOver:
+                # If background is dark, make it lighter. If light, make it darker.
+                overlay = QColor(255, 255, 255, 60) if is_dark_bg else QColor(0, 0, 0, 40)
+                painter.fillRect(option.rect, overlay)
+
+
+
+
+            
+            # 3. Draw default content
+            super().paint(painter, option, index)
+        finally:
+            painter.restore()
+
+
+
