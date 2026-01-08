@@ -508,6 +508,7 @@ class MainWindow(QMainWindow):
             bg_color, fg_color, selection_bg, selection_fg = "#1e1e1e", "#d4d4d4", "#264f78", "#ffffff"
             hover_bg, scrollbar_bg, scrollbar_handle = "#2a2d2e", "#1e1e1e", "#424242"
             scrollbar_hover, menu_bg, menu_fg, menu_sel = "#4f4f4f", "#252526", "#cccccc", "#094771"
+            menu_sel_fg = "#ffffff"
             bar_bg, bar_fg, input_bg, input_fg = "#007acc", "#ffffff", "#3c3c3c", "#cccccc"
             float_bg, float_border, dock_title_bg, tree_bg = "#252526", "#3c3c3c", "#2d2d2d", "#252526"
             tab_bg, tab_fg, tab_sel_bg = "#2d2d2d", "#858585", "#1e1e1e"
@@ -517,7 +518,8 @@ class MainWindow(QMainWindow):
         else:
             bg_color, fg_color, selection_bg, selection_fg = "#ffffff", "#000000", "#add6ff", "#000000"
             hover_bg, scrollbar_bg, scrollbar_handle = "#e8e8e8", "#f3f3f3", "#c1c1c1"
-            scrollbar_hover, menu_bg, menu_fg, menu_sel = "#a8a8a8", "#f3f3f3", "#333333", "#0060c0"
+            scrollbar_hover, menu_bg, menu_fg, menu_sel = "#a8a8a8", "#f3f3f3", "#333333", "#add6ff"
+            menu_sel_fg = "#000000"
             bar_bg, bar_fg, input_bg, input_fg = "#007acc", "#ffffff", "#ffffff", "#000000"
             float_bg, float_border, dock_title_bg, tree_bg = "#f3f3f3", "#bbbbbb", "#e1e1e1", "#f3f3f3"
             tab_bg, tab_fg, tab_sel_bg = "#e1e1e1", "#666666", "#ffffff"
@@ -533,11 +535,11 @@ class MainWindow(QMainWindow):
         self.update_status_bar(self.last_status_message)
 
         style = f"""
-        * {{ font-family: "Inter", "Segoe UI", "Microsoft JhengHei UI", sans-serif; }}
+        QWidget {{ font-family: "Inter", "Segoe UI", "Microsoft JhengHei UI", sans-serif; }}
         QMainWindow, QDialog, QMessageBox, QDockWidget {{ background-color: {bg_color}; color: {fg_color}; }}
         QWidget {{ color: {fg_color}; font-size: 12px; }}
         #activity_bar {{ background-color: {activity_bg}; border: none; spacing: 10px; padding-top: 5px; }}
-        #activity_bar QToolButton {{ background-color: transparent; border: none; border-left: 3px solid transparent; border-radius: 0px; margin: 0px; }}
+        #activity_bar QToolButton {{ background-color: transparent; border: none; border-left: 3px solid transparent; border-radius: 0px; margin: 0px; font-size: 12px; }}
         #activity_bar QToolButton:hover {{ background-color: {hover_bg}; }}
         #activity_bar QToolButton:checked {{ border-left: 3px solid {bar_bg}; background-color: {hover_bg}; }}
         QDockWidget#FilterDock, QDockWidget#NotesDock {{ color: {fg_color}; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; titlebar-close-icon: none; titlebar-normal-icon: none; }}
@@ -549,7 +551,7 @@ class MainWindow(QMainWindow):
         QMenuBar::item:selected {{ background-color: {hover_bg}; color: {selection_fg}; }}
         QMenu {{ background-color: {menu_bg}; color: {menu_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px; }}
         QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; }}
-        QMenu::item:selected {{ background-color: {menu_sel}; color: #ffffff; }}
+        QMenu::item:selected {{ background-color: {menu_sel}; color: {menu_sel_fg}; }}
         QMenu::separator {{ height: 1px; background: {float_border}; margin: 4px 8px; }}
         QListView {{ background-color: {bg_color}; color: {fg_color}; border: none; outline: 0; font-size: 11pt; font-family: "JetBrains Mono", "Consolas", monospace; }}
         QListView::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
