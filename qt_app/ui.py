@@ -903,6 +903,41 @@ class MainWindow(QMainWindow):
                 self.filters = loaded; self.filters_modified = False; self.filters_dirty_cache = True
                 self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
 
+    def closeEvent(self, event):
+        if self.filters_modified:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Unsaved Changes")
+            msg_box.setText("Filters have been modified. Do you want to save changes?")
+            msg_box.setIcon(QMessageBox.Question)
+            msg_box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
+            msg_box.setDefaultButton(QMessageBox.Save)
+            
+            # Apply Title Bar Theme
+            msg_box.create() # Create handle
+            set_windows_title_bar_color(msg_box.winId(), self.is_dark_mode)
+
+            reply = msg_box.exec()
+
+            if reply == QMessageBox.Save:
+                if self.current_filter_file:
+                    if save_tat_filters(self.current_filter_file, self.filters):
+                        self.filters_modified = False
+                        event.accept()
+                    else:
+                        event.ignore() # Failed to save
+                else:
+                    self.save_filters_as()
+                    if not self.filters_modified: # Saved successfully
+                        event.accept()
+                    else:
+                        event.ignore() # Cancelled save or failed
+            elif reply == QMessageBox.Discard:
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
+
     def quick_save_filters(self):
         if self.current_filter_file:
             if save_tat_filters(self.current_filter_file, self.filters):
