@@ -904,39 +904,53 @@ class MainWindow(QMainWindow):
                 self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
 
     def closeEvent(self, event):
-        if self.filters_modified:
+        # Helper to prompt user
+        def prompt_save_changes(title, text):
             msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("Unsaved Changes")
-            msg_box.setText("Filters have been modified. Do you want to save changes?")
+            msg_box.setWindowTitle(title)
+            msg_box.setText(text)
             msg_box.setIcon(QMessageBox.Question)
             msg_box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
             msg_box.setDefaultButton(QMessageBox.Save)
             
-            # Apply Title Bar Theme
-            msg_box.create() # Create handle
+            msg_box.create()
             set_windows_title_bar_color(msg_box.winId(), self.is_dark_mode)
+            return msg_box.exec()
 
-            reply = msg_box.exec()
-
+        # 1. Check Filters
+        if self.filters_modified:
+            reply = prompt_save_changes("Unsaved Changes", "Filters have been modified. Do you want to save changes?")
             if reply == QMessageBox.Save:
+                saved = False
                 if self.current_filter_file:
-                    if save_tat_filters(self.current_filter_file, self.filters):
-                        self.filters_modified = False
-                        event.accept()
-                    else:
-                        event.ignore() # Failed to save
+                    saved = save_tat_filters(self.current_filter_file, self.filters)
                 else:
                     self.save_filters_as()
-                    if not self.filters_modified: # Saved successfully
-                        event.accept()
-                    else:
-                        event.ignore() # Cancelled save or failed
+                    saved = not self.filters_modified # Check flag to verify save success
+
+                if saved:
+                    self.filters_modified = False
+                else:
+                    event.ignore(); return
             elif reply == QMessageBox.Discard:
-                event.accept()
+                pass # Proceed
             else:
-                event.ignore()
-        else:
-            event.accept()
+                event.ignore(); return # Cancel
+
+        # 2. Check Notes
+        if self.notes_manager.has_unsaved_changes():
+            reply = prompt_save_changes("Unsaved Notes", "Notes have been modified. Do you want to save them?")
+            if reply == QMessageBox.Save:
+                self.notes_manager.quick_save()
+                # quick_save handles its own errors and sets dirty=False on success
+                if self.notes_manager.has_unsaved_changes(): # Still dirty means save failed or cancelled
+                     event.ignore(); return
+            elif reply == QMessageBox.Discard:
+                pass
+            else:
+                event.ignore(); return
+
+        event.accept()
 
     def quick_save_filters(self):
         if self.current_filter_file:
