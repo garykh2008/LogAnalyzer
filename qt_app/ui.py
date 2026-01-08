@@ -84,7 +84,8 @@ class MainWindow(QMainWindow):
         self.notes_manager.notes_updated.connect(self.on_notes_updated)
         self.notes_manager.navigation_requested.connect(self.jump_to_raw_index)
 
-        self.list_view.setUniformItemSizes(True)
+        self.list_view.setUniformItemSizes(False) # Allow variable widths for horizontal scrolling
+
 
         # --- Activity Bar ---
         self.activity_bar = self.addToolBar("Activity Bar")
@@ -531,11 +532,17 @@ class MainWindow(QMainWindow):
         QStatusBar {{ background-color: {menu_bg}; color: {menu_fg}; border-top: 1px solid {float_border}; }}
         QScrollBar:vertical {{ border: none; background: transparent; width: 10px; margin: 0px; }}
         QScrollBar::handle:vertical {{ background: {scrollbar_handle}; min-height: 20px; border-radius: 5px; }}
+        QScrollBar::handle:vertical:hover {{ background: {scrollbar_hover}; }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; background: transparent; }}
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
         QScrollBar:horizontal {{ border: none; background: transparent; height: 10px; margin: 0px; }}
         QScrollBar::handle:horizontal {{ background: {scrollbar_handle}; min-width: 20px; border-radius: 5px; }}
+        QScrollBar::handle:horizontal:hover {{ background: {scrollbar_hover}; }}
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0px; background: transparent; }}
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: none; }}
+        QAbstractScrollArea::corner {{ background: transparent; border: none; }}
         #search_widget {{ background-color: {float_bg}; border: 1px solid {float_border}; border-top: none; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }}
+
         #search_widget QLabel {{ color: {input_fg}; background-color: transparent; }}
         """
 

@@ -25,18 +25,18 @@ class LogDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         painter.save()
         try:
+            # Get horizontal scroll offset to keep line numbers fixed
+            scroll_x = option.widget.horizontalScrollBar().value() if option.widget else 0
+            
             # 1. Background
             bg_color = None
             state = option.state
-
-            # Priority: Selection > Hover > Filter Color
 
             if state & QStyle.State_Selected:
                 bg_color = option.palette.highlight()
             elif state & QStyle.State_MouseOver:
                  bg_color = self.hover_color
             else:
-                # Check model for background color (Filter)
                 model_bg = index.data(Qt.BackgroundRole)
                 if model_bg and isinstance(model_bg, QColor):
                     bg_color = model_bg
@@ -44,53 +44,53 @@ class LogDelegate(QStyledItemDelegate):
             if bg_color:
                 painter.fillRect(option.rect, bg_color)
 
-            # --- Line Number ---
+            # --- Fixed Line Number Column ---
             raw_index = index.data(Qt.UserRole + 1)
-            
-            # Calculate width based on max lines
             digits = len(str(self.max_line_number))
             char_w = option.fontMetrics.horizontalAdvance('8')
             line_num_width = max(40, digits * char_w + 15)
             
+            # The line number column rect should be shifted by scroll_x to stay on the left
+            line_bg_rect = QRectF(option.rect.left() + scroll_x, option.rect.top(), line_num_width, option.rect.height())
+            
             if raw_index is not None:
                 line_num_str = str(raw_index + 1)
                 
-                # Line Num Background
-                line_bg_rect = QRectF(option.rect.left(), option.rect.top(), line_num_width, option.rect.height())
-                # Calculate subtle bg based on base color
+                # Draw Line Num Column Background
                 base_col = option.palette.color(QPalette.Base)
                 if base_col.lightness() > 128:
-                    num_bg = QColor(240, 240, 240) # Light theme
+                    num_bg = QColor(240, 240, 240)
                     num_fg = QColor(128, 128, 128)
                 else:
-                    num_bg = QColor(40, 40, 40) # Dark theme
+                    num_bg = QColor(40, 40, 40)
                     num_fg = QColor(100, 100, 100)
                 
                 painter.fillRect(line_bg_rect, num_bg)
                 
-                # Line Num Text
+                # Draw Line Num Text
                 painter.save()
                 painter.setPen(num_fg)
-                painter.drawText(line_bg_rect.adjusted(0, 0, -5, 0), Qt.AlignRight | Qt.AlignVCenter, line_num_str)
+                painter.drawText(line_bg_rect.adjusted(0, 0, -5, 0), Qt.AlignRight, line_num_str)
                 painter.restore()
 
-            # 2. Text
+            # 2. Text (Scrolls with the content)
             text = index.data(Qt.DisplayRole)
             if text:
-                # Setup Pen
                 if state & QStyle.State_Selected:
                     painter.setPen(option.palette.highlightedText().color())
                 else:
-                    # Check model for foreground (Filter)
                     model_fg = index.data(Qt.ForegroundRole)
                     if model_fg and isinstance(model_fg, QColor):
                         painter.setPen(model_fg)
                     else:
                         painter.setPen(option.palette.text().color())
 
-                rect = option.rect.adjusted(line_num_width + 8, 0, -4, 0)
+                # The text area remains relative to option.rect
+                text_rect = option.rect.adjusted(line_num_width + 8, 0, -4, 0)
 
-                # Search Highlight check
+                # Set clipping to prevent text from overlapping the fixed line number column when scrolling
+                painter.setClipRect(option.rect.adjusted(line_num_width + scroll_x, 0, 0, 0))
+
                 should_highlight = False
                 if self.search_query and self.search_query.strip():
                     if self.search_case_sensitive:
@@ -99,11 +99,10 @@ class LogDelegate(QStyledItemDelegate):
                         if self.search_query.lower() in text.lower(): should_highlight = True
                 
                 if should_highlight:
-                    self._paint_highlighted_text(painter, rect, text, option)
+                    self._paint_highlighted_text(painter, text_rect, text, option)
                 else:
-                    font_metrics = option.fontMetrics
-                    elided_text = font_metrics.elidedText(text, Qt.ElideNone, rect.width())
-                    painter.drawText(rect, Qt.AlignLeft, elided_text)
+                    painter.drawText(text_rect, Qt.AlignLeft, text)
+
 
         finally:
             painter.restore()
@@ -152,5 +151,16 @@ class LogDelegate(QStyledItemDelegate):
             start = idx + len(query)
 
     def sizeHint(self, option, index):
-        # Ensure fast return
-        return QSize(option.rect.width(), option.fontMetrics.height())
+        text = index.data(Qt.DisplayRole)
+        if not text:
+            return QSize(option.rect.width(), option.fontMetrics.height())
+        
+        # Calculate line number column width
+        digits = len(str(self.max_line_number))
+        char_w = option.fontMetrics.horizontalAdvance('8')
+        line_num_width = max(40, digits * char_w + 15)
+        
+        # Total width = line number column + text width + margins
+        text_width = option.fontMetrics.horizontalAdvance(text)
+        return QSize(line_num_width + 8 + text_width + 20, option.fontMetrics.height())
+
