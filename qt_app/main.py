@@ -3,11 +3,26 @@ import os
 import signal
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont, QFontDatabase
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, qInstallMessageHandler, QtMsgType
 from qt_app.ui import MainWindow
 from qt_app.utils import load_custom_fonts
 
+def qt_message_handler(mode, context, message):
+    if "Point size <= 0" in message:
+        return # Suppress this specific known benign warning
+    
+    # Simple default printing for other messages
+    if mode == QtMsgType.QtInfoMsg: mode_str = "Info"
+    elif mode == QtMsgType.QtWarningMsg: mode_str = "Warning"
+    elif mode == QtMsgType.QtCriticalMsg: mode_str = "Critical"
+    elif mode == QtMsgType.QtFatalMsg: mode_str = "Fatal"
+    else: mode_str = "Debug"
+    print(f"[{mode_str}] {message}")
+
 def main():
+    # Install custom message handler
+    qInstallMessageHandler(qt_message_handler)
+
     # Allow Ctrl+C to terminate the app from console
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
