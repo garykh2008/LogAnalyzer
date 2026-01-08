@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
                                QGraphicsOpacityEffect, QCheckBox, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView,
                                QDialog, QMessageBox, QScrollBar, QPushButton, QStackedLayout, QInputDialog)
-from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics
+from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics, QFontInfo
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation
 from .models import LogModel
 from .engine_wrapper import get_engine
@@ -111,7 +111,9 @@ class MainWindow(QMainWindow):
         # Page 0: Welcome
         self.welcome_label = QLabel("Drag & Drop Log File Here\nor use File > Open Log", central_widget)
         self.welcome_label.setAlignment(Qt.AlignCenter)
-        font_welcome = QFont("Consolas", 14)
+        font_welcome = QFont("Inter", 14)
+        if not QFontInfo(font_welcome).exactMatch() and QFontInfo(font_welcome).family() != "Inter":
+            font_welcome = QFont("Segoe UI", 14)
         self.welcome_label.setFont(font_welcome)
         self.welcome_label.setStyleSheet("color: #888888;")
         self.central_stack.addWidget(self.welcome_label)
@@ -263,6 +265,15 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(self.settings.value("window_geometry"))
         if self.settings.value("window_state"):
             self.restoreState(self.settings.value("window_state"))
+
+        # Global Font Setup (UI)
+        font_ui = QFont("Inter")
+        info = QFontInfo(font_ui)
+        if not info.exactMatch() and info.family() != "Inter":
+            font_ui = QFont("Segoe UI") # Fallback
+        
+        font_ui.setPointSize(10)
+        QApplication.setFont(font_ui)
 
         self.apply_theme()
 
@@ -643,7 +654,8 @@ class MainWindow(QMainWindow):
             hover_bg, scrollbar_bg, scrollbar_handle = "#2a2d2e", "#1e1e1e", "#424242"
             scrollbar_hover, menu_bg, menu_fg, menu_sel = "#4f4f4f", "#252526", "#cccccc", "#094771"
             bar_bg, bar_fg, input_bg, input_fg = "#007acc", "#ffffff", "#3c3c3c", "#cccccc"
-            float_bg, float_border, dock_title_bg, tree_bg = "#252526", "#454545", "#252526", "#252526"
+            float_bg, float_border, dock_title_bg, tree_bg = "#252526", "#3c3c3c", "#2d2d2d", "#1e1e1e"
+            tab_bg, tab_fg, tab_sel_bg = "#2d2d2d", "#858585", "#1e1e1e"
             # Dialog colors
             dialog_bg, dialog_fg = "#252526", "#cccccc"
         else:
@@ -651,7 +663,8 @@ class MainWindow(QMainWindow):
             hover_bg, scrollbar_bg, scrollbar_handle = "#e8e8e8", "#f3f3f3", "#c1c1c1"
             scrollbar_hover, menu_bg, menu_fg, menu_sel = "#a8a8a8", "#f3f3f3", "#333333", "#0060c0"
             bar_bg, bar_fg, input_bg, input_fg = "#007acc", "#ffffff", "#ffffff", "#000000"
-            float_bg, float_border, dock_title_bg, tree_bg = "#f3f3f3", "#cecece", "#f3f3f3", "#f3f3f3"
+            float_bg, float_border, dock_title_bg, tree_bg = "#f3f3f3", "#bbbbbb", "#e1e1e1", "#ffffff"
+            tab_bg, tab_fg, tab_sel_bg = "#e1e1e1", "#666666", "#ffffff"
             dialog_bg, dialog_fg = "#f3f3f3", "#000000"
 
         self.delegate.set_hover_color(hover_bg)
@@ -660,55 +673,121 @@ class MainWindow(QMainWindow):
         self.update_status_bar(self.last_status_message)
 
         style = f"""
-        QMainWindow, QDialog {{ background-color: {bg_color}; color: {fg_color}; }}
+        /* Global Base */
+        * {{ font-family: "Inter", "Segoe UI", "Microsoft JhengHei UI", sans-serif; }}
+        QMainWindow, QDialog, QMessageBox {{ background-color: {bg_color}; color: {fg_color}; }}
         QWidget {{ color: {fg_color}; }}
-        QMenuBar {{ background-color: {menu_bg}; color: {menu_fg}; }}
-        QMenuBar::item {{ background-color: transparent; padding: 4px 8px; }}
-        QMenuBar::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
-        QMenu {{ background-color: {menu_bg}; color: {menu_fg}; border: 1px solid #454545; }}
-        QMenu::item {{ padding: 5px 30px 5px 20px; background-color: transparent; }}
+        
+        /* Menu Bar */
+        QMenuBar {{ background-color: {menu_bg}; color: {menu_fg}; border-bottom: 1px solid {float_border}; padding: 2px; }}
+        QMenuBar::item {{ background-color: transparent; padding: 4px 10px; border-radius: 4px; }}
+        QMenuBar::item:selected {{ background-color: {hover_bg}; color: {selection_fg}; }}
+        
+        /* Menu */
+        QMenu {{ background-color: {menu_bg}; color: {menu_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px; }}
+        QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; }}
         QMenu::item:selected {{ background-color: {menu_sel}; color: #ffffff; }}
-        QListView {{ background-color: {bg_color}; color: {fg_color}; border: none; outline: 0; }}
-        QListView::item {{ padding: 0px 4px; border-bottom: 0px solid transparent; }}
+        QMenu::separator {{ height: 1px; background: {float_border}; margin: 4px 8px; }}
+
+        /* Monospace for Log View */
+        QListView {{ background-color: {bg_color}; color: {fg_color}; border: none; outline: 0; font-size: 11pt; font-family: "JetBrains Mono", "Consolas", monospace; }}
+        QListView::item {{ padding: 2px 4px; border-radius: 2px; }}
         QListView::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
-        QStatusBar {{ background-color: {bar_bg}; color: {bar_fg}; }}
+        
+        QTreeWidget {{ background-color: {tree_bg}; border: none; color: {fg_color}; outline: 0; }}
+        /* QTreeWidget::item styling removed to allow individual item background colors */
+        
+        QHeaderView::section {{ 
+            background-color: {dock_title_bg}; 
+            color: {fg_color}; 
+            border: none; 
+            border-right: 1px solid {float_border};
+            border-bottom: 1px solid {float_border};
+            padding: 4px;
+            font-weight: bold;
+        }}
+
+        /* Dock Widgets & Tabs */
+        QDockWidget {{ color: {fg_color}; font-weight: bold; titlebar-close-icon: url(close.png); titlebar-normal-icon: url(float.png); }}
+        QDockWidget::title {{ background: {dock_title_bg}; padding: 6px; border-top: 1px solid {float_border}; border-bottom: 1px solid {float_border}; }}
+        
+        QTabBar::tab {{
+            background: {tab_bg};
+            color: {tab_fg};
+            padding: 6px 12px;
+            border: 1px solid {float_border};
+            border-bottom: none;
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+            margin-right: 2px;
+        }}
+        QTabBar::tab:selected {{
+            background: {tab_sel_bg};
+            color: {fg_color};
+            border-bottom: 2px solid {menu_sel};
+        }}
+        QTabBar::tab:hover:!selected {{
+            background: {hover_bg};
+        }}
+
+        /* Input Fields */
+        QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{ 
+            background-color: {input_bg}; 
+            color: {input_fg}; 
+            border: 1px solid {float_border}; 
+            border-radius: 4px; 
+            padding: 4px 8px; 
+            selection-background-color: {selection_bg};
+        }}
+        QComboBox::drop-down {{ border: none; width: 20px; }}
+        QComboBox QAbstractItemView {{ background-color: {menu_bg}; border: 1px solid {float_border}; selection-background-color: {menu_sel}; }}
+
+        /* Buttons */
+        QPushButton {{ 
+            background-color: {menu_bg}; 
+            color: {fg_color}; 
+            border: 1px solid {float_border}; 
+            padding: 6px 16px; 
+            border-radius: 4px; 
+            min-width: 60px;
+        }}
+        QPushButton:hover {{ background-color: {hover_bg}; border: 1px solid {menu_sel}; }}
+        QPushButton:pressed {{ background-color: {selection_bg}; color: {selection_fg}; }}
+        
+        QToolButton {{ background-color: transparent; color: {input_fg}; border: 1px solid transparent; border-radius: 4px; padding: 2px; font-weight: bold; }}
+        QToolButton:hover {{ background-color: {hover_bg}; border: 1px solid {float_border}; }}
+        QToolButton:checked {{ background-color: {selection_bg}; color: {selection_fg}; border: 1px solid {menu_sel}; }}
+
+        /* Status Bar */
+        QStatusBar {{ background-color: {menu_bg}; color: {menu_fg}; border-top: 1px solid {float_border}; }}
         QStatusBar::item {{ border: none; }}
-        QStatusBar QLabel {{ color: {bar_fg}; background-color: transparent; }}
-        QScrollBar:vertical {{ border: none; background: {scrollbar_bg}; width: 14px; margin: 0px; }}
-        QScrollBar::handle:vertical {{ background: {scrollbar_handle}; min-height: 20px; }}
+        QStatusBar QLabel {{ background-color: transparent; padding: 0 4px; }}
+
+        /* ScrollBar Modernization */
+        QScrollBar:vertical {{ border: none; background: transparent; width: 10px; margin: 0px; }}
+        QScrollBar::handle:vertical {{ background: {scrollbar_handle}; min-height: 20px; border-radius: 5px; }}
         QScrollBar::handle:vertical:hover {{ background: {scrollbar_hover}; }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
 
-        QDockWidget {{ color: {fg_color}; titlebar-close-icon: url(close.png); titlebar-normal-icon: url(float.png); }}
-        QDockWidget::title {{ background: {dock_title_bg}; padding-left: 5px; }}
-        QTreeWidget {{ background-color: {tree_bg}; border: none; color: {fg_color}; }}
-        QHeaderView::section {{ background-color: {menu_bg}; color: {fg_color}; border: none; padding: 2px; }}
-
-        /* Dialog specific */
-        QDialog, QMessageBox, QInputDialog {{ background-color: {dialog_bg}; color: {dialog_fg}; }}
-        QLabel, QCheckBox, QMessageBox QLabel, QInputDialog QLabel {{ color: {dialog_fg}; }}
-        QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid #555; }}
-
+        QScrollBar:horizontal {{ border: none; background: transparent; height: 10px; margin: 0px; }}
+        QScrollBar::handle:horizontal {{ background: {scrollbar_handle}; min-width: 20px; border-radius: 5px; }}
+        QScrollBar::handle:horizontal:hover {{ background: {scrollbar_hover}; }}
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0px; }}
+        
+        /* Search Widget Overlay Styling */
         #search_widget {{
             background-color: {float_bg};
             border: 1px solid {float_border};
             border-top: none;
-            border-bottom-left-radius: 5px;
-            border-bottom-right-radius: 5px;
+            border-bottom-left-radius: 6px;
+            border-bottom-right-radius: 6px;
         }}
-        QComboBox {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid #555; padding: 2px; }}
-        QComboBox QAbstractItemView {{ background-color: {menu_bg}; color: {menu_fg}; selection-background-color: {menu_sel}; }}
-        QToolButton {{ background-color: transparent; color: {input_fg}; border: none; font-weight: bold; }}
-        QToolButton:hover {{ background-color: {hover_bg}; border-radius: 3px; }}
-        QToolButton:checked {{ background-color: {selection_bg}; color: {selection_fg}; border-radius: 3px; }}
+        #search_widget QLabel {{ color: {input_fg}; background-color: transparent; }}
 
-        QCheckBox {{ spacing: 5px; }}
-        QCheckBox::indicator {{ width: 13px; height: 13px; }}
-
-        QPushButton {{ background-color: {menu_bg}; color: {fg_color}; border: 1px solid {float_border}; padding: 4px 12px; border-radius: 3px; }}
-        QPushButton:hover {{ background-color: {hover_bg}; }}
-        QPushButton:pressed {{ background-color: {selection_bg}; color: {selection_fg}; }}
+        QCheckBox {{ spacing: 8px; }}
+        QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 3px; border: 1px solid {float_border}; background: {input_bg}; }}
+        QCheckBox::indicator:checked {{ background: {menu_sel}; }}
         """
         app.setStyleSheet(style)
 
