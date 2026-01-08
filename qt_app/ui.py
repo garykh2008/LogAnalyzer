@@ -722,6 +722,27 @@ class MainWindow(QMainWindow):
             for fp in filepaths:
                 self.load_log(fp, is_multiple=True)
 
+    def load_tat_filter_from_cli(self, path):
+        """Internal helper for CLI to load filters without GUI interaction."""
+        loaded = load_tat_filters(path)
+        if loaded:
+            self.current_filter_file = path
+            self.filters = loaded
+            self.filters_modified = False
+            self.filters_dirty_cache = True
+            # Note: UI refresh happens when logs are loaded, 
+            # or if logs already exist, we need to refresh here.
+            self.update_window_title()
+            self.refresh_filter_tree()
+
+    def load_logs_from_cli(self, file_list):
+        """Internal helper for CLI to load multiple logs at once."""
+        if not file_list: return
+        self._clear_all_logs()
+        for fp in file_list:
+            if os.path.exists(fp):
+                self.load_log(fp, is_multiple=True)
+
     def _clear_all_logs(self):
         self.loaded_logs.clear()
         self.log_order.clear()

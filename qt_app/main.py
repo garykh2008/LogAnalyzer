@@ -1,6 +1,8 @@
 import sys
 import os
 import signal
+import argparse
+import glob
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtCore import Qt, qInstallMessageHandler, QtMsgType
@@ -20,6 +22,14 @@ def qt_message_handler(mode, context, message):
     print(f"[{mode_str}] {message}")
 
 def main():
+    # Parse CLI Arguments
+    parser = argparse.ArgumentParser(description="Log Analyzer Qt")
+    parser.add_argument("logs", nargs="*", help="Log files to open (supports wildcards like *.log)")
+    parser.add_argument("-f", "--filter", help="Load a .tat filter file on startup")
+    
+    # Handle @filelist for long argument lists
+    args = parser.parse_args()
+
     # Install custom message handler
     qInstallMessageHandler(qt_message_handler)
 
@@ -27,23 +37,18 @@ def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     # 1. High DPI Scaling is enabled by default in Qt 6 / PySide6.
-    # No need to set AA_EnableHighDpiScaling or AA_UseHighDpiPixmaps.
-
     app = QApplication(sys.argv)
 
     # 2. Load Custom Fonts (Inter)
     load_custom_fonts()
 
     # 3. Set Application-wide Font Strategy
-    # Priority: Inter -> Segoe UI -> System Default
     font = QFont("Inter")
     font.setStyleStrategy(QFont.PreferAntialias)
-    # Fallback to system fonts if Inter isn't installed/loaded
     if "Inter" not in QFontDatabase.families():
         font.setFamily("Segoe UI") 
     
-    # Set default size (point size 9 is usually good for desktop apps ~12px)
-    font.setPointSize(9) 
+    font.setPixelSize(12)
     app.setFont(font)
 
     # Set organization info for QSettings
@@ -52,11 +57,21 @@ def main():
 
     window = MainWindow()
 
-    # Check command line args for file
-    if len(sys.argv) > 1:
-        filepath = sys.argv[1]
-        if os.path.exists(filepath):
-            window.load_log(filepath)
+    # Process CLI Filter
+    if args.filter and os.path.exists(args.filter):
+        window.load_tat_filter_from_cli(args.filter)
+
+    # Process CLI Logs (with Wildcard Expansion)
+    expanded_logs = []
+    for pattern in args.logs:
+        matches = glob.glob(pattern)
+        if matches:
+            expanded_logs.extend(matches)
+        else:
+            expanded_logs.append(pattern) # Fallback to original if no glob match
+
+    if expanded_logs:
+        window.load_logs_from_cli(expanded_logs)
 
     window.show()
     sys.exit(app.exec())
