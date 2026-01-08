@@ -108,23 +108,23 @@ class NotesManager(QObject):
         return self.notes_dirty
 
     def load_notes_for_file(self, log_filepath):
-        """Automatically called when a log is loaded."""
+        """Automatically called when a log is loaded for the first time."""
         if not log_filepath: return
         
-        # Reset dirty flag on load
-        self.notes_dirty = False
-        
+        # If we already have notes for this file in memory, don't reload from disk
+        # to avoid overwriting unsaved changes.
+        for (fp, _) in self.notes.keys():
+            if fp == log_filepath:
+                self.refresh_list()
+                return
+
         base, _ = os.path.splitext(log_filepath)
         note_path = base + ".note"
-        
-        # Clear existing view
-        self.notes.clear() # Clear memory for single-file mode logic
         
         if os.path.exists(note_path):
             try:
                 with open(note_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    # Note file format: {"index": "content"}
                     for str_idx, content in data.items():
                         try:
                             idx = int(str_idx)
@@ -135,30 +135,62 @@ class NotesManager(QObject):
             except Exception as e:
                 print(f"Error loading notes: {e}")
         else:
-            # No note file, clear view
+            # No note file, just refresh view
             self.refresh_list()
             self.notes_updated.emit()
 
     def quick_save(self):
+        """Saves notes for the current active file only."""
         log_filepath = self.main_window.current_log_path
         if not log_filepath: return
+        self._save_file_notes(log_filepath)
+        self.main_window.toast.show_message(f"Notes saved for current file")
+
+    def save_all_notes(self):
+        """Saves all unsaved notes for all loaded files."""
+        if not self.notes: 
+            self.notes_dirty = False
+            return True
+            
+        # Get set of all files that have notes
+        files_to_save = set(fp for (fp, idx) in self.notes.keys())
         
+        success = True
+        for fp in files_to_save:
+            if not self._save_file_notes(fp):
+                success = False
+        
+        if success:
+            self.notes_dirty = False
+            self.main_window.toast.show_message("All notes saved")
+        return success
+
+    def _save_file_notes(self, log_filepath):
+        """Internal helper to save notes for a specific filepath."""
         base, _ = os.path.splitext(log_filepath)
         note_path = base + ".note"
         
-        # Filter notes for this file
         data_to_save = {}
         for (fp, idx), content in self.notes.items():
             if fp == log_filepath:
                 data_to_save[str(idx)] = content
         
         try:
+            # If no notes for this file and .note exists, maybe delete it? 
+            # Reference behavior usually keeps empty files or we can skip.
+            if not data_to_save:
+                if os.path.exists(note_path):
+                    # For now, just save an empty dict or keep existing.
+                    # Standard behavior: save empty list.
+                    pass
+                else: return True
+
             with open(note_path, 'w', encoding='utf-8') as f:
                 json.dump(data_to_save, f, indent=4, sort_keys=True)
-            self.notes_dirty = False
-            self.main_window.toast.show_message(f"Notes saved to {os.path.basename(note_path)}")   
+            return True
         except Exception as e:
-            QMessageBox.critical(self.main_window, "Error", f"Could not save notes: {e}")
+            print(f"Error saving notes for {log_filepath}: {e}")
+            return False
 
     def export_to_text(self, filepath):
         current_fp = self.main_window.current_log_path

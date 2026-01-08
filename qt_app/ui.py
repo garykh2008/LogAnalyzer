@@ -51,6 +51,11 @@ class MainWindow(QMainWindow):
         self.last_status_message = "Ready"
         self.current_filter_file = None
 
+        # --- Multi-Log Management ---
+        self.loaded_logs = {} # {path: engine}
+        self.log_order = [] # Ordered paths
+        self.current_active_log = None # Selected path or MERGED_VIEW_ID
+
         self.current_engine = None
         self.search_results = []
         self.current_match_index = -1
@@ -97,6 +102,12 @@ class MainWindow(QMainWindow):
         self.activity_bar.setIconSize(QSize(28, 28))
         self.addToolBar(Qt.LeftToolBarArea, self.activity_bar)
 
+        self.btn_side_loglist = QToolButton()
+        self.btn_side_loglist.setCheckable(True)
+        self.btn_side_loglist.setFixedSize(48, 48)
+        self.btn_side_loglist.setToolTip("Log Files (Ctrl+Shift+L)")
+        self.btn_side_loglist.clicked.connect(lambda: self.toggle_sidebar(2))
+
         self.btn_side_filter = QToolButton()
         self.btn_side_filter.setCheckable(True)
         self.btn_side_filter.setFixedSize(48, 48)
@@ -109,8 +120,29 @@ class MainWindow(QMainWindow):
         self.btn_side_notes.setToolTip("Notes (Ctrl+Shift+N)")
         self.btn_side_notes.clicked.connect(lambda: self.toggle_sidebar(1))
 
+        self.activity_bar.addWidget(self.btn_side_loglist)
         self.activity_bar.addWidget(self.btn_side_filter)
         self.activity_bar.addWidget(self.btn_side_notes)
+
+        # --- Log List Dock ---
+        self.log_list_dock = QDockWidget("LOG FILES", self)
+        self.log_list_dock.setObjectName("LogListDock")
+        self.log_list_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.log_list_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
+        
+        self.log_tree = QTreeWidget()
+        self.log_tree.setHeaderLabels(["File"])
+        self.log_tree.setRootIsDecorated(False)
+        self.log_tree.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.log_tree.itemClicked.connect(self.on_log_tree_clicked)
+        self.log_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.log_tree.customContextMenuRequested.connect(self.show_log_list_context_menu)
+        
+        self.log_list_dock.setWidget(self.log_tree)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.log_list_dock)
+        self.log_list_dock.visibilityChanged.connect(lambda visible: self.btn_side_loglist.setChecked(visible))
+        self.log_list_dock.topLevelChanged.connect(lambda floating: set_windows_title_bar_color(self.log_list_dock.winId(), self.is_dark_mode))
+        self.log_list_dock.hide()
 
         # --- Filter Dock ---
         self.filter_dock = QDockWidget("FILTERS", self)
@@ -157,6 +189,7 @@ class MainWindow(QMainWindow):
         self.notes_dock.setObjectName("NotesDock")
         self.notes_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
         self.notes_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.notes_dock)
         self.notes_dock.visibilityChanged.connect(lambda visible: self.btn_side_notes.setChecked(visible))
         self.notes_dock.topLevelChanged.connect(lambda floating: set_windows_title_bar_color(self.notes_dock.winId(), self.is_dark_mode))
         self.notes_dock.hide()
@@ -265,14 +298,26 @@ class MainWindow(QMainWindow):
         self.toast = Toast(self)
         self._create_menu()
 
+        # 1. Restore saved geometry and layout state (remembers positions)
+        has_saved_state = False
         if self.settings.value("window_geometry"):
             self.restoreGeometry(self.settings.value("window_geometry"))
         if self.settings.value("window_state"):
-            self.restoreState(self.settings.value("window_state"))
+            has_saved_state = self.restoreState(self.settings.value("window_state"))
+
+        # 2. Set default Tabify relationship ONLY if no saved state exists
+        if not has_saved_state:
+            self.tabifyDockWidget(self.log_list_dock, self.filter_dock)
+            self.tabifyDockWidget(self.filter_dock, self.notes_dock)
 
         self.apply_theme()
         self.btn_prev.clicked.connect(self.find_previous)
         self.btn_next.clicked.connect(self.find_next)
+        
+        # 3. Force all docks hidden on startup (overrides visibility from restoreState)
+        self.log_list_dock.hide()
+        self.filter_dock.hide()
+        self.notes_dock.hide()
 
     def _create_menu(self):
         menu_bar = self.menuBar()
@@ -324,6 +369,11 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.goto_action)
 
         view_menu = menu_bar.addMenu("&View")
+        self.toggle_log_sidebar_action = QAction("Log Files", self)
+        self.toggle_log_sidebar_action.setShortcut("Ctrl+Shift+L")
+        self.toggle_log_sidebar_action.triggered.connect(lambda: self.toggle_sidebar(2))
+        view_menu.addAction(self.toggle_log_sidebar_action)
+
         self.toggle_filter_sidebar_action = QAction("Filters", self)
         self.toggle_filter_sidebar_action.setShortcut("Ctrl+Shift+F")
         self.toggle_filter_sidebar_action.triggered.connect(lambda: self.toggle_sidebar(0))
@@ -417,24 +467,32 @@ class MainWindow(QMainWindow):
             self._perform_search(query)
 
     def toggle_sidebar(self, index):
-        target = self.filter_dock if index == 0 else self.notes_dock
-        other = self.notes_dock if index == 0 else self.filter_dock
-        tabs = self.tabifiedDockWidgets(target)
-        is_tabified = other in tabs or target in self.tabifiedDockWidgets(other)
-
-        if is_tabified:
-            if target.isVisible() and not target.visibleRegion().isEmpty():
+        docks = [self.filter_dock, self.notes_dock, self.log_list_dock]
+        if index < 0 or index >= len(docks): return
+        
+        target = docks[index]
+        peers = self.tabifiedDockWidgets(target)
+        
+        # Check if target is the currently active/visible tab in its area
+        is_active = target.isVisible() and not target.visibleRegion().isEmpty()
+        
+        if peers:
+            # Case: Tabbed/Overlapped
+            if is_active:
+                # Collapse the whole group
                 target.hide()
-                for d in tabs: d.hide()
+                for p in peers: p.hide()
             else:
+                # Switch to this tab
                 target.show()
                 target.raise_()
         else:
-            if target.isHidden():
+            # Case: Separate/Tiled or Single
+            if target.isVisible():
+                target.hide()
+            else:
                 target.show()
                 target.raise_()
-            else:
-                target.hide()
 
     def eventFilter(self, obj, event):
         if obj == self.list_view and event.type() == QEvent.Resize:
@@ -544,10 +602,10 @@ class MainWindow(QMainWindow):
         #activity_bar QToolButton {{ background-color: transparent; border: none; border-left: 3px solid transparent; border-radius: 0px; margin: 0px; font-size: 12px; }}
         #activity_bar QToolButton:hover {{ background-color: {hover_bg}; }}
         #activity_bar QToolButton:checked {{ border-left: 3px solid {bar_bg}; background-color: {hover_bg}; }}
-        QDockWidget#FilterDock, QDockWidget#NotesDock {{ color: {fg_color}; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; titlebar-close-icon: none; titlebar-normal-icon: none; }}
-        QDockWidget#FilterDock::title, QDockWidget#NotesDock::title {{ background: {sidebar_bg}; padding: 10px; border: none; }}
-        #FilterDock QWidget, #NotesDock QWidget {{ background-color: {sidebar_bg}; }}
-        #FilterDock QTreeWidget, #NotesDock QTreeWidget {{ background-color: {sidebar_bg}; border: none; }}
+        QDockWidget#FilterDock, QDockWidget#NotesDock, QDockWidget#LogListDock {{ color: {fg_color}; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; titlebar-close-icon: none; titlebar-normal-icon: none; }}
+        QDockWidget#FilterDock::title, QDockWidget#NotesDock::title, QDockWidget#LogListDock::title {{ background: {sidebar_bg}; padding: 10px; border: none; }}
+        #FilterDock QWidget, #NotesDock QWidget, #LogListDock QWidget {{ background-color: {sidebar_bg}; }}
+        #FilterDock QTreeWidget, #NotesDock QTreeWidget, #LogListDock QTreeWidget {{ background-color: {sidebar_bg}; border: none; }}
         QMenuBar {{ background-color: {menu_bg}; color: {menu_fg}; border-bottom: 1px solid {float_border}; padding: 2px; }}
         QMenuBar::item {{ background-color: transparent; padding: 4px 10px; border-radius: 4px; }}
         QMenuBar::item:selected {{ background-color: {hover_bg}; color: {selection_fg}; }}
@@ -558,6 +616,10 @@ class MainWindow(QMainWindow):
         QListView {{ background-color: {bg_color}; color: {fg_color}; border: none; outline: 0; font-size: 11pt; font-family: "JetBrains Mono", "Consolas", monospace; }}
         QListView::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
                 QTreeWidget {{ background-color: {tree_bg}; border: none; color: {fg_color}; outline: 0; }}
+                QTreeWidget::item {{ padding: 4px; border: none; }}
+                QTreeWidget::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
+                QTreeWidget::item:hover {{ background-color: {hover_bg}; color: {fg_color}; }}
+                
                 QHeaderView {{ background-color: {header_bg}; border: none; border-bottom: 1px solid {float_border}; }}
                 QHeaderView::section {{ background-color: {header_bg}; color: {fg_color}; border: none; border-right: none; padding: 6px 8px; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; text-align: left; }}
                 QHeaderView::section:first {{ padding-left: 0px; padding-right: 0px; text-align: center; }}
@@ -609,6 +671,7 @@ class MainWindow(QMainWindow):
 
         # Refresh SVG Icons with current theme color
         icon_color = fg_color
+        self.btn_side_loglist.setIcon(get_svg_icon("file-text", icon_color))
         self.btn_side_filter.setIcon(get_svg_icon("filter", icon_color))
         self.btn_side_notes.setIcon(get_svg_icon("book-open", icon_color))
         self.btn_prev.setIcon(get_svg_icon("chevron-up", icon_color))
@@ -628,6 +691,7 @@ class MainWindow(QMainWindow):
         self.find_action.setIcon(get_svg_icon("search", icon_color))
         self.goto_action.setIcon(get_svg_icon("hash", icon_color))
         
+        self.toggle_log_sidebar_action.setIcon(get_svg_icon("file-text", icon_color))
         self.toggle_filter_sidebar_action.setIcon(get_svg_icon("filter", icon_color))
         self.toggle_notes_sidebar_action.setIcon(get_svg_icon("book-open", icon_color))
         self.show_filtered_action.setIcon(get_svg_icon("eye", icon_color))
@@ -644,8 +708,22 @@ class MainWindow(QMainWindow):
 
     def open_file_dialog(self):
         last_dir = self.settings.value("last_dir", "")
-        filepath, _ = QFileDialog.getOpenFileName(self, "Open Log File", last_dir, "Log Files (*.log *.txt);;All Files (*)")
-        if filepath: self.load_log(filepath)
+        filepaths, _ = QFileDialog.getOpenFileNames(self, "Open Log Files", last_dir, "Log Files (*.log *.txt);;All Files (*)")
+        if filepaths: 
+            self._clear_all_logs()
+            for fp in filepaths:
+                self.load_log(fp, is_multiple=True)
+
+    def _clear_all_logs(self):
+        self.loaded_logs.clear()
+        self.log_order.clear()
+        self.update_log_tree()
+        self.current_engine = None
+        self.current_log_path = None
+        self.model.set_engine(None)
+        self.welcome_label.show()
+        self.central_stack.setCurrentIndex(0)
+        self.update_window_title()
 
     def update_recent_menu(self):
         self.recent_menu.clear()
@@ -679,34 +757,105 @@ class MainWindow(QMainWindow):
         self.settings.setValue("recent_files", [])
         self.update_recent_menu()
 
-    def load_log(self, filepath):
-        if self.notes_manager.has_unsaved_changes():
-            reply = QMessageBox.question(self, "Save Notes?", "You have unsaved notes. Save them?", QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Save)
-            if reply == QMessageBox.Save:
-                self.notes_manager.quick_save()
-                if self.notes_manager.has_unsaved_changes(): return
-            elif reply == QMessageBox.Cancel: return
+    def load_log(self, filepath, is_multiple=False):
+        if not filepath or not os.path.exists(filepath): return
+        
+        # Check for unsaved notes before loading/switching if needed (optional)
+        
+        filepath = os.path.abspath(filepath)
+        if filepath in self.loaded_logs:
+            # Just switch if already loaded
+            self._switch_to_log(filepath)
+            return
+
         self.add_to_recent(filepath)
         self.central_stack.setCurrentIndex(1)
+        self.welcome_label.hide()
+        
         self.update_status_bar(f"Loading {filepath}...")
         start_time = time.time()
         self.settings.setValue("last_dir", os.path.dirname(filepath))
-        self.current_engine = get_engine(filepath)
-        self.model.set_engine(self.current_engine, filepath)
+        
+        engine = get_engine(filepath)
+        self.loaded_logs[filepath] = engine
+        self.log_order.append(filepath)
+        
+        self.update_log_tree()
+        self._switch_to_log(filepath)
+        
+        count = engine.line_count()
+        self.toast.show_message(f"Loaded {count:,} lines in {time.time()-start_time:.3f}s", duration=4000)
+
+    def _switch_to_log(self, filepath):
+        if filepath not in self.loaded_logs: return
+        
         self.current_log_path = filepath
+        self.current_engine = self.loaded_logs[filepath]
+        self.model.set_engine(self.current_engine, filepath)
+        
         self.notes_manager.load_notes_for_file(filepath)
         count = self.current_engine.line_count()
         self.delegate.set_max_line_number(count)
         self.update_window_title()
         self.update_status_bar(f"Shows {count:,} lines")
-        self.toast.show_message(f"Loaded {count:,} lines in {time.time()-start_time:.3f}s", duration=4000)
+        
         self.search_results = []
         self.current_match_index = -1
         self.update_scrollbar_range()
         self.v_scrollbar.setValue(0)
         self.filters_dirty_cache = True
+        
+        # Select in tree
+        items = self.log_tree.findItems(os.path.basename(filepath), Qt.MatchExactly)
+        for item in items:
+            if item.data(0, Qt.UserRole) == filepath:
+                self.log_tree.setCurrentItem(item)
+                break
+
         if self.filters: self.recalc_filters()
         else: self.refresh_filter_tree()
+
+    def update_log_tree(self):
+        self.log_tree.clear()
+        
+        for fp in self.log_order:
+            item = QTreeWidgetItem(self.log_tree)
+            item.setText(0, os.path.basename(fp))
+            item.setToolTip(0, fp)
+            item.setData(0, Qt.UserRole, fp)
+            
+        if len(self.loaded_logs) > 1:
+            self.log_list_dock.show()
+            self.log_list_dock.raise_()
+
+    def on_log_tree_clicked(self, item, column):
+        path = item.data(0, Qt.UserRole)
+        self._switch_to_log(path)
+
+    def show_log_list_context_menu(self, pos):
+        item = self.log_tree.itemAt(pos)
+        menu = QMenu(self)
+        ic = "#d4d4d4" if self.is_dark_mode else "#333333"
+        
+        if item:
+            path = item.data(0, Qt.UserRole)
+            if path != self.MERGED_VIEW_ID:
+                rem_action = menu.addAction(get_svg_icon("trash", ic), "Remove File")
+                rem_action.triggered.connect(lambda: self._remove_log_file(path))
+                menu.addSeparator()
+        
+        clear_action = menu.addAction(get_svg_icon("x-circle", ic), "Clear All")
+        clear_action.triggered.connect(self._clear_all_logs)
+        menu.exec_(self.log_tree.mapToGlobal(pos))
+
+    def _remove_log_file(self, filepath):
+        if filepath in self.loaded_logs:
+            del self.loaded_logs[filepath]
+            self.log_order.remove(filepath)
+            self.update_log_tree()
+            if self.current_log_path == filepath:
+                if self.log_order: self._switch_to_log(self.log_order[0])
+                else: self._clear_all_logs()
 
     def show_context_menu(self, pos):
         menu = QMenu(self)
@@ -975,8 +1124,17 @@ class MainWindow(QMainWindow):
                 self.current_filter_file = path  # Update current filter file path
                 self.filters = loaded; self.filters_modified = False; self.filters_dirty_cache = True
                 self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
+                
+                # Auto-show Filter Panel when filters are loaded
+                if self.filter_dock.isHidden():
+                    self.filter_dock.show()
+                    self.filter_dock.raise_()
 
     def closeEvent(self, event):
+        # Save window state and geometry
+        self.settings.setValue("window_geometry", self.saveGeometry())
+        self.settings.setValue("window_state", self.saveState())
+
         # Helper to prompt user
         def prompt_save_changes(title, text):
             msg_box = QMessageBox(self)
@@ -1012,10 +1170,10 @@ class MainWindow(QMainWindow):
 
         # 2. Check Notes
         if self.notes_manager.has_unsaved_changes():
-            reply = prompt_save_changes("Unsaved Notes", "Notes have been modified. Do you want to save them?")
+            reply = prompt_save_changes("Unsaved Notes", "Notes have been modified. Do you want to save them for all files?")
             if reply == QMessageBox.Save:
-                self.notes_manager.quick_save()
-                # quick_save handles its own errors and sets dirty=False on success
+                self.notes_manager.save_all_notes()
+                # save_all_notes handles its own errors and sets dirty=False on success
                 if self.notes_manager.has_unsaved_changes(): # Still dirty means save failed or cancelled
                      event.ignore(); return
             elif reply == QMessageBox.Discard:
@@ -1065,7 +1223,12 @@ class MainWindow(QMainWindow):
 
     def update_scrollbar_range(self):
         if not self.current_engine: return
-        total = len(self.model.filtered_indices) if self.show_filtered_only else self.current_engine.line_count()
+        total = 0
+        if self.show_filtered_only:
+            total = len(self.model.filtered_indices) if self.model.filtered_indices is not None else 0
+        else:
+            total = self.current_engine.line_count()
+            
         vp = self.calculate_viewport_size()
         self.v_scrollbar.setRange(0, max(0, total - vp)); self.v_scrollbar.setPageStep(vp)
         self.on_scrollbar_value_changed(self.v_scrollbar.value())
