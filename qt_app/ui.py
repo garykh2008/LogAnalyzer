@@ -122,7 +122,7 @@ class MainWindow(QMainWindow):
         self.filter_tree.setItemDelegate(FilterDelegate(self.filter_tree))
         self.filter_tree.setIndentation(0)
 
-        self.filter_tree.setHeaderLabels(["En", "Pattern", "Hits"])
+        self.filter_tree.setHeaderLabels(["", "Pattern", "Hits  "])
         
         header = self.filter_tree.header()
         header.setMinimumSectionSize(0)
@@ -513,6 +513,7 @@ class MainWindow(QMainWindow):
             float_bg, float_border, dock_title_bg, tree_bg = "#252526", "#3c3c3c", "#2d2d2d", "#252526"
             tab_bg, tab_fg, tab_sel_bg = "#2d2d2d", "#858585", "#1e1e1e"
             activity_bg, sidebar_bg = "#333333", "#252526"
+            header_bg = "#1e1e1e"
             dialog_bg, dialog_fg = "#252526", "#cccccc"
             checkbox_active = "#007acc"
         else:
@@ -524,6 +525,7 @@ class MainWindow(QMainWindow):
             float_bg, float_border, dock_title_bg, tree_bg = "#f3f3f3", "#bbbbbb", "#e1e1e1", "#f3f3f3"
             tab_bg, tab_fg, tab_sel_bg = "#e1e1e1", "#666666", "#ffffff"
             activity_bg, sidebar_bg = "#f0f0f0", "#f8f8f8"
+            header_bg = "#e5e5e5"
             dialog_bg, dialog_fg = "#f3f3f3", "#000000"
             checkbox_active = "#40a9ff"
 
@@ -556,9 +558,12 @@ class MainWindow(QMainWindow):
         QListView {{ background-color: {bg_color}; color: {fg_color}; border: none; outline: 0; font-size: 11pt; font-family: "JetBrains Mono", "Consolas", monospace; }}
         QListView::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
                 QTreeWidget {{ background-color: {tree_bg}; border: none; color: {fg_color}; outline: 0; }}
-                QHeaderView::section {{ background-color: {dock_title_bg}; color: {fg_color}; border: none; border-right: 1px solid {float_border}; border-bottom: 1px solid {float_border}; padding: 2px 4px; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; }}
+                QHeaderView {{ background-color: {header_bg}; border: none; border-bottom: 1px solid {float_border}; }}
+                QHeaderView::section {{ background-color: {header_bg}; color: {fg_color}; border: none; border-right: none; padding: 6px 8px; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; text-align: left; }}
+                QHeaderView::section:first {{ padding-left: 0px; padding-right: 0px; text-align: center; }}
+                QHeaderView::section:last {{ padding-right: 4px; }}
+                QHeaderView::section:horizontal {{ border-right: 1px solid transparent; }} /* Fix for some qt styles needing a border property to reset */
         
-        QHeaderView::section:first {{ padding: 0px; border-right: none; }}
         QTabBar {{ height: 0px; width: 0px; background: transparent; }}
         QTabBar::tab {{ height: 0px; width: 0px; padding: 0px; margin: 0px; border: none; }}
         QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px 8px; }}

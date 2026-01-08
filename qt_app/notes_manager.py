@@ -65,7 +65,7 @@ class NotesManager(QObject):
         layout.setSpacing(0)
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Line", "Timestamp", "Content"])
+        self.tree.setHeaderLabels(["Line", "Timestamp  ", "Content"])
         self.tree.setRootIsDecorated(False)
         self.tree.setAlternatingRowColors(True)
         
