@@ -130,14 +130,22 @@ class MainWindow(QMainWindow):
         self.log_list_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
         self.log_list_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
         
-        self.log_tree = QTreeWidget()
-        self.log_tree.setHeaderLabels(["File"])
+        self.log_tree = FilterTreeWidget(on_drop_callback=self.on_log_reordered)
+        self.log_tree.setHeaderHidden(True) # Hide "File" header
         self.log_tree.setRootIsDecorated(False)
+        self.log_tree.setDragDropMode(QAbstractItemView.InternalMove)
+        self.log_tree.setDefaultDropAction(Qt.MoveAction)
+        self.log_tree.setDropIndicatorShown(True)
         self.log_tree.setSelectionMode(QAbstractItemView.SingleSelection)
         self.log_tree.itemClicked.connect(self.on_log_tree_clicked)
         self.log_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.log_tree.customContextMenuRequested.connect(self.show_log_list_context_menu)
         
+        from .delegates import LogListDelegate
+        self.log_list_delegate = LogListDelegate(self.log_tree)
+        self.log_list_delegate.close_requested.connect(self._remove_log_file)
+        self.log_tree.setItemDelegate(self.log_list_delegate)
+
         self.log_list_dock.setWidget(self.log_tree)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.log_list_dock)
         self.log_list_dock.visibilityChanged.connect(lambda visible: self.btn_side_loglist.setChecked(visible))
@@ -721,6 +729,11 @@ class MainWindow(QMainWindow):
         self.current_engine = None
         self.current_log_path = None
         self.model.set_engine(None)
+        
+        # Clear notes and refresh notes view
+        self.notes_manager.notes.clear()
+        self.notes_manager.refresh_list()
+        
         self.welcome_label.show()
         self.central_stack.setCurrentIndex(0)
         self.update_window_title()
@@ -823,14 +836,26 @@ class MainWindow(QMainWindow):
             item.setText(0, os.path.basename(fp))
             item.setToolTip(0, fp)
             item.setData(0, Qt.UserRole, fp)
+            # Enable dragging, but disable dropping ONTO this item (reordering only)
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled)
             
         if len(self.loaded_logs) > 1:
             self.log_list_dock.show()
             self.log_list_dock.raise_()
 
+    def on_log_reordered(self):
+        new_order = []
+        root = self.log_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            item = root.child(i)
+            new_order.append(item.data(0, Qt.UserRole))
+        self.log_order = new_order
+
     def on_log_tree_clicked(self, item, column):
+        if not item: return
         path = item.data(0, Qt.UserRole)
-        self._switch_to_log(path)
+        if path:
+            self._switch_to_log(path)
 
     def show_log_list_context_menu(self, pos):
         item = self.log_tree.itemAt(pos)
@@ -839,10 +864,9 @@ class MainWindow(QMainWindow):
         
         if item:
             path = item.data(0, Qt.UserRole)
-            if path != self.MERGED_VIEW_ID:
-                rem_action = menu.addAction(get_svg_icon("trash", ic), "Remove File")
-                rem_action.triggered.connect(lambda: self._remove_log_file(path))
-                menu.addSeparator()
+            rem_action = menu.addAction(get_svg_icon("trash", ic), "Remove File")
+            rem_action.triggered.connect(lambda: self._remove_log_file(path))
+            menu.addSeparator()
         
         clear_action = menu.addAction(get_svg_icon("x-circle", ic), "Clear All")
         clear_action.triggered.connect(self._clear_all_logs)
@@ -850,6 +874,23 @@ class MainWindow(QMainWindow):
 
     def _remove_log_file(self, filepath):
         if filepath in self.loaded_logs:
+            # Check for unsaved notes for THIS specific file
+            file_notes = {k: v for (fp, k), v in self.notes_manager.notes.items() if fp == filepath}
+            if file_notes and self.notes_manager.has_unsaved_changes():
+                msg_box = QMessageBox(self)
+                msg_box.setWindowTitle("Unsaved Notes")
+                msg_box.setText(f"File '{os.path.basename(filepath)}' has unsaved notes. Save them before removing?")
+                msg_box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
+                msg_box.setDefaultButton(QMessageBox.Save)
+                msg_box.create(); set_windows_title_bar_color(msg_box.winId(), self.is_dark_mode)
+                
+                res = msg_box.exec()
+                if res == QMessageBox.Save:
+                    # Save only this file's notes
+                    self.notes_manager._save_file_notes(filepath)
+                elif res == QMessageBox.Cancel:
+                    return
+
             del self.loaded_logs[filepath]
             self.log_order.remove(filepath)
             self.update_log_tree()

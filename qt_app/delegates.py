@@ -1,6 +1,75 @@
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
-from PySide6.QtGui import QTextDocument, QAbstractTextDocumentLayout, QPalette, QColor
-from PySide6.QtCore import QSize, QRectF, Qt
+from PySide6.QtGui import QTextDocument, QAbstractTextDocumentLayout, QPalette, QColor, QIcon, QPainter
+from PySide6.QtCore import QSize, QRectF, Qt, QRect, Signal, QPoint, QEvent
+from .resources import get_svg_icon
+
+class LogListDelegate(QStyledItemDelegate):
+    close_requested = Signal(str) # Emits filepath
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.close_btn_rects = {} # Map index to rect
+
+    def paint(self, painter, option, index):
+        painter.save()
+        try:
+            # Draw standard background and hover/selection
+            state = option.state
+            bg_color = None
+            if state & QStyle.State_Selected:
+                bg_color = option.palette.highlight().color()
+                bg_color.setAlpha(80) # Semi-transparent selection
+            elif state & QStyle.State_MouseOver:
+                bg_color = QColor(0, 0, 0, 20) if option.palette.base().color().lightness() > 128 else QColor(255, 255, 255, 20)
+            
+            if bg_color:
+                painter.fillRect(option.rect, bg_color)
+
+            # Define Close Button Area (Far Left, 24px wide)
+            close_rect = QRect(option.rect.left(), option.rect.top(), 24, option.rect.height())
+            self.close_btn_rects[index.row()] = close_rect
+
+            # Draw SVG 'X' only on hover
+            if state & QStyle.State_MouseOver:
+                painter.setRenderHint(QPainter.Antialiasing)
+                
+                # Get SVG icon with current text color
+                icon_color = option.palette.text().color().name()
+                icon = get_svg_icon("x-close", icon_color)
+                
+                # Draw icon centered in close_rect
+                icon_size = 14
+                target_rect = QRect(
+                    close_rect.left() + (close_rect.width() - icon_size) // 2,
+                    close_rect.top() + (close_rect.height() - icon_size) // 2,
+                    icon_size, icon_size
+                )
+                icon.paint(painter, target_rect)
+
+            # Draw Filename (offset by the close button space)
+            text_rect = option.rect.adjusted(24, 0, 0, 0)
+            text = index.data(Qt.DisplayRole)
+            painter.setPen(option.palette.text().color())
+            painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, text)
+
+        finally:
+            painter.restore()
+
+    def editorEvent(self, event, model, option, index):
+        # Handle mouse click on the 'X' button
+        if event.type() == QEvent.MouseButtonRelease:
+            if event.button() == Qt.LeftButton:
+                pos = event.pos()
+                if index.row() in self.close_btn_rects:
+                    if self.close_btn_rects[index.row()].contains(pos):
+                        filepath = index.data(Qt.UserRole)
+                        self.close_requested.emit(filepath)
+                        return True
+        return super().editorEvent(event, model, option, index)
+
+    def sizeHint(self, option, index):
+        s = super().sizeHint(option, index)
+        return QSize(s.width() + 24, max(28, s.height()))
 
 class LogDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
@@ -189,14 +258,7 @@ class FilterDelegate(QStyledItemDelegate):
                 overlay = QColor(255, 255, 255, 60) if is_dark_bg else QColor(0, 0, 0, 40)
                 painter.fillRect(option.rect, overlay)
 
-
-
-
-            
             # 3. Draw default content
             super().paint(painter, option, index)
         finally:
             painter.restore()
-
-
-
