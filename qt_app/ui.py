@@ -899,6 +899,7 @@ class MainWindow(QMainWindow):
             self.settings.setValue("last_filter_dir", os.path.dirname(path))
             loaded = load_tat_filters(path)
             if loaded:
+                self.current_filter_file = path  # Update current filter file path
                 self.filters = loaded; self.filters_modified = False; self.filters_dirty_cache = True
                 self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
 
