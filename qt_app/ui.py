@@ -272,6 +272,8 @@ class MainWindow(QMainWindow):
 
     def _create_menu(self):
         menu_bar = self.menuBar()
+        
+        # --- File Menu ---
         file_menu = menu_bar.addMenu("&File")
         open_action = QAction("&Open Log...", self)
         open_action.setShortcut("Ctrl+O")
@@ -300,17 +302,38 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close_app)
         file_menu.addAction(exit_action)
 
+        # --- Edit Menu ---
+        edit_menu = menu_bar.addMenu("&Edit")
+        copy_action = QAction("&Copy", self)
+        copy_action.setShortcut(QKeySequence.Copy)
+        copy_action.triggered.connect(self.copy_selection)
+        edit_menu.addAction(copy_action)
+        self.list_view.addAction(copy_action) # Add to list view for context
+
+        edit_menu.addSeparator()
+        
+        find_action = QAction("&Find...", self)
+        find_action.setShortcut(QKeySequence.Find)
+        find_action.triggered.connect(self.show_search_bar)
+        edit_menu.addAction(find_action)
+        self.addAction(find_action) # Shortcut works globally
+
+        goto_action = QAction("Go to Line...", self)
+        goto_action.setShortcut("Ctrl+G")
+        goto_action.triggered.connect(self.show_goto_dialog)
+        edit_menu.addAction(goto_action)
+        self.addAction(goto_action)
+
+        # --- View Menu ---
         view_menu = menu_bar.addMenu("&View")
         view_menu.addAction(self.filter_dock.toggleViewAction())
         
-        toggle_notes_action = QAction("Toggle Notes", self)
-        toggle_notes_action.triggered.connect(self.notes_manager.toggle_view)
-        view_menu.addAction(toggle_notes_action)
-        
-        export_notes_action = QAction("Export Notes to Text...", self)
-        export_notes_action.triggered.connect(self.export_notes_to_text)
-        view_menu.addAction(export_notes_action)
+        notes_toggle_action = self.notes_manager.dock.toggleViewAction()
+        notes_toggle_action.setText("Notes")
+        view_menu.addAction(notes_toggle_action)
 
+        view_menu.addSeparator()
+        
         show_filtered_action = QAction("Show Filtered Only", self)
         show_filtered_action.setShortcut("Ctrl+H")
         show_filtered_action.setCheckable(True)
@@ -323,40 +346,45 @@ class MainWindow(QMainWindow):
         toggle_theme_action.triggered.connect(self.toggle_theme)
         view_menu.addAction(toggle_theme_action)
 
-        find_action = QAction("&Find...", self)
-        find_action.setShortcut(QKeySequence.Find)
-        find_action.triggered.connect(self.show_search_bar)
-        self.addAction(find_action)
-        view_menu.addAction(find_action)
+        # --- Notes Menu ---
+        notes_menu = menu_bar.addMenu("&Notes")
+        
+        add_note_action = QAction("Add/Edit Note", self)
+        add_note_action.setShortcut("C")
+        add_note_action.triggered.connect(self.add_note_at_current)
+        notes_menu.addAction(add_note_action)
+        
+        remove_note_action = QAction("Remove Note", self)
+        remove_note_action.triggered.connect(self.remove_note_at_current)
+        notes_menu.addAction(remove_note_action)
+        
+        notes_menu.addSeparator()
+        
+        save_notes_action = QAction("Save Notes", self)
+        save_notes_action.triggered.connect(self.notes_manager.quick_save)
+        notes_menu.addAction(save_notes_action)
+        
+        export_notes_action = QAction("Export Notes to Text...", self)
+        export_notes_action.triggered.connect(self.export_notes_to_text)
+        notes_menu.addAction(export_notes_action)
 
-        goto_action = QAction("Go to Line...", self)
-        goto_action.setShortcut("Ctrl+G")
-        goto_action.triggered.connect(self.show_goto_dialog)
-        self.addAction(goto_action)
-        view_menu.addAction(goto_action)
-
+        # Navigation shortcuts
         next_action = QAction("Find Next", self)
         next_action.setShortcut("F3")
         next_action.triggered.connect(self.find_next)
         self.addAction(next_action)
+        
         prev_action = QAction("Find Previous", self)
         prev_action.setShortcut("F2")
         prev_action.triggered.connect(self.find_previous)
         self.addAction(prev_action)
+        
         escape_action = QAction("Clear Search", self)
         escape_action.setShortcut("Esc")
         escape_action.triggered.connect(self.hide_search_bar)
         self.addAction(escape_action)
 
-        copy_action = QAction("&Copy", self)
-        copy_action.setShortcut(QKeySequence.Copy)
-        copy_action.triggered.connect(self.copy_selection)
-        self.addAction(copy_action)
-        self.list_view.addAction(copy_action)
-
-        edit_menu = menu_bar.addMenu("&Edit")
-        edit_menu.addAction(copy_action)
-
+        # --- Help Menu ---
         help_menu = menu_bar.addMenu("&Help")
         
         shortcuts_action = QAction("Keyboard Shortcuts", self)
@@ -372,6 +400,26 @@ class MainWindow(QMainWindow):
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
+
+    def add_note_at_current(self):
+        idx = self.list_view.currentIndex()
+        if idx.isValid():
+            view_abs_row = self.model.viewport_start + idx.row()
+            raw_index = view_abs_row
+            if self.show_filtered_only and self.model.filtered_indices:
+                if view_abs_row < len(self.model.filtered_indices):
+                    raw_index = self.model.filtered_indices[view_abs_row]
+            self.notes_manager.add_note(raw_index, "", self.current_log_path)
+
+    def remove_note_at_current(self):
+        idx = self.list_view.currentIndex()
+        if idx.isValid():
+            view_abs_row = self.model.viewport_start + idx.row()
+            raw_index = view_abs_row
+            if self.show_filtered_only and self.model.filtered_indices:
+                if view_abs_row < len(self.model.filtered_indices):
+                    raw_index = self.model.filtered_indices[view_abs_row]
+            self.notes_manager.delete_note(raw_index, self.current_log_path)
 
     def toggle_show_filtered_only(self):
         self.show_filtered_only = self.show_filtered_action.isChecked()
