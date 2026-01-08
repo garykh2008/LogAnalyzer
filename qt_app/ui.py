@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication,
                                QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
                                QGraphicsOpacityEffect, QCheckBox, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView,
-                               QDialog, QMessageBox, QScrollBar, QPushButton, QStackedLayout)
+                               QDialog, QMessageBox, QScrollBar, QPushButton, QStackedLayout, QInputDialog)
 from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation
 from .models import LogModel
@@ -329,6 +329,12 @@ class MainWindow(QMainWindow):
         self.addAction(find_action)
         view_menu.addAction(find_action)
 
+        goto_action = QAction("Go to Line...", self)
+        goto_action.setShortcut("Ctrl+G")
+        goto_action.triggered.connect(self.show_goto_dialog)
+        self.addAction(goto_action)
+        view_menu.addAction(goto_action)
+
         next_action = QAction("Find Next", self)
         next_action.setShortcut("F3")
         next_action.triggered.connect(self.find_next)
@@ -638,9 +644,9 @@ class MainWindow(QMainWindow):
         QHeaderView::section {{ background-color: {menu_bg}; color: {fg_color}; border: none; padding: 2px; }}
 
         /* Dialog specific */
-        QDialog, QMessageBox {{ background-color: {dialog_bg}; color: {dialog_fg}; }}
-        QLabel, QCheckBox, QMessageBox QLabel {{ color: {dialog_fg}; }}
-        QLineEdit, QTextEdit, QPlainTextEdit {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid #555; }}
+        QDialog, QMessageBox, QInputDialog {{ background-color: {dialog_bg}; color: {dialog_fg}; }}
+        QLabel, QCheckBox, QMessageBox QLabel, QInputDialog QLabel {{ color: {dialog_fg}; }}
+        QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid #555; }}
 
         #search_widget {{
             background-color: {float_bg};
@@ -1379,6 +1385,38 @@ class MainWindow(QMainWindow):
                     self.update_status_bar(f"Filtered: {len(indices_to_set):,} lines (Total {total_lines:,})")
                 else:
                     self.update_status_bar(f"Shows {total_lines:,} lines")
+
+    def show_goto_dialog(self):
+        if not self.current_engine: return
+        
+        # Calculate total lines in CURRENT view
+        if self.show_filtered_only and self.model.filtered_indices:
+             total = len(self.model.filtered_indices)
+        else:
+             total = self.current_engine.line_count()
+             
+        if total <= 0: return
+
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Go to Line")
+        dialog.setLabelText(f"Enter line number (1-{total}):")
+        dialog.setInputMode(QInputDialog.IntInput)
+        dialog.setIntRange(1, total)
+        dialog.setIntValue(1)
+        
+        # Ensure title bar color matches theme
+        set_windows_title_bar_color(dialog.winId(), self.is_dark_mode)
+
+        if dialog.exec():
+            line_num = dialog.intValue()
+            view_abs_row = line_num - 1
+            raw_index = view_abs_row
+            
+            # Map view index to raw index if filtered
+            if self.show_filtered_only and self.model.filtered_indices:
+                raw_index = self.model.filtered_indices[view_abs_row]
+            
+            self.jump_to_raw_index(raw_index)
 
     def show_shortcuts(self):
         shortcuts = [

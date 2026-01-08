@@ -75,6 +75,7 @@ Designed for developers and system administrators who demand speed and flexibili
 #### View
 *   **Toggle Notes**: Show or hide the Notes docking panel.
 *   **Export Notes to Text...**: Save all current notes to a `.txt` file.
+*   **Go to Line... (Ctrl+G)**: Instantly jump to a specific line number in the current view.
 *   **Show Filtered Only (Ctrl+H)**: Toggle between showing all lines (with highlights) and showing only lines that match enabled filters.
 *   **Toggle Dark/Light Mode**: Switch the application theme.
 *   **Find... (Ctrl+F)**: Open the search bar.
@@ -99,6 +100,7 @@ Designed for developers and system administrators who demand speed and flexibili
 | :--- | :--- |
 | **Ctrl + O** | Open Log File |
 | **Ctrl + F** | Open Find Bar |
+| **Ctrl + G** | Go to Line |
 | **F3 / F2** | Find Next / Previous |
 | **Ctrl + H** | Toggle "Show Filtered Only" |
 | **Ctrl + B** | Toggle Sidebar (if applicable) |
