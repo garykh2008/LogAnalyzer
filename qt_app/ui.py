@@ -217,6 +217,10 @@ class MainWindow(QMainWindow):
         self.search_input.setPlaceholderText("Find...")
         self.search_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.search_input.lineEdit().returnPressed.connect(self.find_next)
+        
+        # Install event filter for Esc key handling
+        self.search_input.installEventFilter(self)
+        self.search_input.lineEdit().installEventFilter(self)
 
         self.btn_prev = QToolButton()
         self.btn_prev.setFixedSize(26, 24)
@@ -406,6 +410,11 @@ class MainWindow(QMainWindow):
     def toggle_show_filtered_only(self):
         self.show_filtered_only = self.show_filtered_action.isChecked()
         self.recalc_filters()
+        
+        # Trigger re-search to update results count and matches for visibility change
+        query = self.search_input.currentText()
+        if query and not self.search_widget.isHidden():
+            self._perform_search(query)
 
     def toggle_sidebar(self, index):
         target = self.filter_dock if index == 0 else self.notes_dock
@@ -441,6 +450,11 @@ class MainWindow(QMainWindow):
             key = event.key()
             mod = event.modifiers()
             
+            # Global Esc to close search bar
+            if key == Qt.Key_Escape and not self.search_widget.isHidden():
+                self.hide_search_bar()
+                return True
+
             if (mod & Qt.ControlModifier):
                 if key == Qt.Key_Left:
                     self.navigate_filter_hit(reverse=True)
@@ -450,7 +464,11 @@ class MainWindow(QMainWindow):
                     return True
 
             if obj == self.list_view:
-                if key == Qt.Key_Down:
+                if key == Qt.Key_Return or key == Qt.Key_Enter:
+                    if not self.search_widget.isHidden():
+                        self.find_next()
+                        return True
+                elif key == Qt.Key_Down:
                     idx = self.list_view.currentIndex()
                     if idx.isValid() and idx.row() >= self.model.rowCount() - 1:
                         self.v_scrollbar.setValue(self.v_scrollbar.value() + 1)
@@ -724,39 +742,77 @@ class MainWindow(QMainWindow):
         else: self.search_input.setFocus()
 
     def hide_search_bar(self):
-        self.search_widget.hide(); self.delegate.set_search_query(None, False); self.list_view.viewport().update(); self.list_view.setFocus()
+        self.search_widget.hide()
+        self.delegate.set_search_query(None, False)
+        self.search_results = []
+        self.search_info_label.setText("")
+        self.list_view.viewport().update()
+        self.list_view.setFocus()
 
     def find_next(self):
         query = self.search_input.currentText()
         if not query: return
-        if self.delegate.search_query != query or not self.search_results: self._perform_search(query); return
+        if self.delegate.search_query != query or not self.search_results:
+            # If search bar is hidden and results are cleared, don't auto-start search on F3
+            if self.search_widget.isHidden(): return
+            self._perform_search(query)
+            return
         curr_raw = self.selected_raw_index
         idx = bisect.bisect_right(self.search_results, curr_raw)
         if idx >= len(self.search_results):
             if self.chk_wrap.isChecked(): idx = 0; self.toast.show_message("Wrapped to top")
             else: return
-        self._jump_to_match(idx)
+        
+        # Keep focus in search input if it's already there (e.g. Enter pressed)
+        keep_focus = self.search_input.lineEdit().hasFocus() or self.search_input.hasFocus()
+        self._jump_to_match(idx, focus_list=not keep_focus)
 
     def find_previous(self):
         query = self.search_input.currentText()
         if not query: return
-        if self.delegate.search_query != query or not self.search_results: self._perform_search(query); return
+        if self.delegate.search_query != query or not self.search_results:
+            if self.search_widget.isHidden(): return
+            self._perform_search(query)
+            return
         curr_raw = self.selected_raw_index
         idx = bisect.bisect_left(self.search_results, curr_raw) - 1
         if idx < 0:
             if self.chk_wrap.isChecked(): idx = len(self.search_results)-1; self.toast.show_message("Wrapped to bottom")
             else: return
-        self._jump_to_match(idx)
+
+        # Keep focus in search input if it's already there
+        keep_focus = self.search_input.lineEdit().hasFocus() or self.search_input.hasFocus()
+        self._jump_to_match(idx, focus_list=not keep_focus)
 
     def _perform_search(self, query):
         if not query or not self.current_engine: return
         is_case = self.chk_case.isChecked()
         results = self.current_engine.search(query, False, is_case)
+        
+        # Filter results if viewing filtered only
+        if self.show_filtered_only and self.model.filtered_indices:
+            visible_set = set(self.model.filtered_indices)
+            results = [r for r in results if r in visible_set]
+            
         self.search_results = results
         self.delegate.set_search_query(query, is_case)
         self.list_view.viewport().update()
-        if results: self._jump_to_match(0)
-        else: self.search_info_label.setText("No results")
+        
+        if results: 
+            # Determine start index based on current selection
+            curr_raw = self.selected_raw_index
+            # Find the first match that is >= curr_raw (inclusive if we are exactly on a match? usually next means after)
+            # Actually, for initial search (e.g. typing), usually we want the first match *visible* or *after cursor*.
+            # If we are already on a line, let's search forward from there.
+            idx = bisect.bisect_left(results, curr_raw)
+            if idx >= len(results): 
+                idx = 0 # Wrap to start if no matches after cursor
+            
+            # Check focus before jumping
+            keep_focus = self.search_input.lineEdit().hasFocus() or self.search_input.hasFocus()
+            self._jump_to_match(idx, focus_list=not keep_focus)
+        else: 
+            self.search_info_label.setText("No results")
 
     def on_search_case_changed(self):
         query = self.search_input.currentText()
@@ -764,25 +820,35 @@ class MainWindow(QMainWindow):
 
     def on_notes_updated(self): self.list_view.viewport().update()
 
-    def jump_to_raw_index(self, raw_index):
+    def jump_to_raw_index(self, raw_index, focus_list=True):
         view_row = raw_index
         if self.show_filtered_only and self.model.filtered_indices:
              idx = bisect.bisect_left(self.model.filtered_indices, raw_index)
              if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == raw_index: view_row = idx
-             else: return
+             else: return # Target not visible
+             
         vp_size = self.calculate_viewport_size()
-        self.v_scrollbar.setValue(max(0, view_row - (vp_size // 2)))
+        target_scroll = max(0, view_row - (vp_size // 2))
+        self.v_scrollbar.setValue(target_scroll)
+        
+        # Force immediate update of model viewport
+        self.on_scrollbar_value_changed(target_scroll)
         QApplication.processEvents()
-        index = self.model.index(view_row - self.v_scrollbar.value(), 0)
-        if index.isValid():
-            self.list_view.setCurrentIndex(index)
-            self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
-            self.list_view.setFocus()
+        
+        # Calculate relative index in the current viewport
+        rel_row = view_row - target_scroll
+        if 0 <= rel_row < self.model.rowCount():
+            index = self.model.index(rel_row, 0)
+            if index.isValid():
+                self.list_view.setCurrentIndex(index)
+                self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
+                if focus_list: self.list_view.setFocus()
+                self.selected_raw_index = raw_index # Ensure state is synced
 
-    def _jump_to_match(self, result_index):
+    def _jump_to_match(self, result_index, focus_list=True):
         if not self.search_results or result_index < 0 or result_index >= len(self.search_results): return
         raw_row = self.search_results[result_index]
-        self.jump_to_raw_index(raw_row)
+        self.jump_to_raw_index(raw_row, focus_list)
         self.search_info_label.setText(f"{result_index + 1} / {len(self.search_results)}")
 
     def on_filter_tree_reordered(self):
