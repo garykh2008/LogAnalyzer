@@ -61,11 +61,10 @@ class MainWindow(QMainWindow):
         # State tracking
         self.filters_modified = False
         self.selected_filter_index = -1
+        self.selected_raw_index = -1
         self.current_log_path = None
         self.filters_dirty_cache = True # Indicates if backend needs to re-run filter
         self.cached_filter_results = None # Stores result of last engine.filter()
-        self.is_scrolling = False
-        
         self.is_scrolling = False
         
         self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
@@ -106,11 +105,11 @@ class MainWindow(QMainWindow):
         self.list_view.setFont(font)
 
 
-        central_widget = QWidget()
+        central_widget = QWidget(self)
         self.central_stack = QStackedLayout(central_widget)
         
         # Page 0: Welcome
-        self.welcome_label = QLabel("Drag & Drop Log File Here\nor use File > Open Log")
+        self.welcome_label = QLabel("Drag & Drop Log File Here\nor use File > Open Log", central_widget)
         self.welcome_label.setAlignment(Qt.AlignCenter)
         font_welcome = QFont("Consolas", 14)
         self.welcome_label.setFont(font_welcome)
@@ -118,7 +117,7 @@ class MainWindow(QMainWindow):
         self.central_stack.addWidget(self.welcome_label)
 
         # Page 1: List View Container
-        list_container = QWidget()
+        list_container = QWidget(central_widget)
         list_layout = QHBoxLayout(list_container)
         list_layout.setContentsMargins(0, 0, 0, 0)
         list_layout.setSpacing(0)
@@ -259,7 +258,7 @@ class MainWindow(QMainWindow):
         self.toast = Toast(self)
         self._create_menu()
 
-        # Restore Dock State
+        # Restore window state and geometry
         if self.settings.value("window_geometry"):
             self.restoreGeometry(self.settings.value("window_geometry"))
         if self.settings.value("window_state"):
@@ -585,14 +584,7 @@ class MainWindow(QMainWindow):
         
         if not self.toast.isHidden():
              txt = self.toast.label.text()
-             txt = self.toast.label.text()
              self.toast.show_message(txt, duration=self.toast.timer.remainingTime())
-        if not self.search_widget.isHidden():
-            cw = self.centralWidget()
-            sw_w = self.search_widget.width()
-            x = cw.width() - sw_w - 20
-            y = 0
-            self.search_widget.move(x, y)
         super().resizeEvent(event)
 
     def dragEnterEvent(self, event):
@@ -630,6 +622,8 @@ class MainWindow(QMainWindow):
         self.status_label.setText(message)
 
     def _set_windows_title_bar_color(self, is_dark):
+        if sys.platform != "win32": return
+        
         set_windows_title_bar_color(self.winId(), is_dark)
 
         # Attempt to set for all top-level widgets (Dialogs, Floating Docks)
