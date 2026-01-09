@@ -3,8 +3,8 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
                                QGraphicsOpacityEffect, QCheckBox, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView,
                                QDialog, QMessageBox, QScrollBar, QPushButton, QStackedLayout, QInputDialog, QFrame,
-                               QSplitter, QSpinBox)
-from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics, QFontInfo
+                               QSplitter, QSpinBox, QSizeGrip, QStyleOption, QStyle)
+from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics, QFontInfo, QPixmap, QPainter
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation, QSize, QItemSelectionModel
 from .models import LogModel
 from .engine_wrapper import get_engine
@@ -30,6 +30,98 @@ class FilterTreeWidget(QTreeWidget):
         super().dropEvent(event)
         if self.on_drop_callback:
             self.on_drop_callback()
+
+class CustomTitleBar(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(40)
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(10, 0, 0, 0)
+        self.layout.setSpacing(5)
+
+        # 1. App Icon
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(20, 20)
+        self.icon_label.setScaledContents(True)
+        
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "loganalyzer.ico")
+        if os.path.exists(icon_path):
+             self.icon_label.setPixmap(QIcon(icon_path).pixmap(24, 24))
+        else:
+             self.icon_label.setPixmap(get_svg_icon("activity", "#888888").pixmap(24, 24))
+        
+        self.layout.addWidget(self.icon_label)
+        
+        # 2. Menu Bar Area (Menu will be inserted at index 1)
+        
+        # 3. Title (We want it ABSOLUTELY centered, so we don't put it in the layout)
+        self.title_label = QLabel("Log Analyzer", self)
+        self.title_label.setAlignment(Qt.AlignCenter)
+        font = QFont("Inter", 11)
+        font.setBold(True)
+        self.title_label.setFont(font)
+        # Note: We don't add title_label to self.layout
+
+        self.layout.addStretch()
+
+        # 4. Window Controls
+        self.btn_min = QToolButton()
+        self.btn_max = QToolButton()
+        self.btn_close = QToolButton()
+        
+        for btn in [self.btn_min, self.btn_max, self.btn_close]:
+            btn.setFixedSize(46, 40)
+            btn.setFocusPolicy(Qt.NoFocus)
+
+        self.btn_min.clicked.connect(self.minimize_window)
+        self.btn_max.clicked.connect(self.toggle_max_restore)
+        self.btn_close.clicked.connect(self.close_window)
+
+        self.layout.addWidget(self.btn_min)
+        self.layout.addWidget(self.btn_max)
+        self.layout.addWidget(self.btn_close)
+
+    def paintEvent(self, event):
+        # Mandatory for custom QWidget to support QSS background-color
+        opt = QStyleOption()
+        opt.initFrom(self)
+        p = QPainter(self)
+        self.style().drawPrimitive(QStyle.PE_Widget, opt, p, self)
+        p.end()
+
+    def resizeEvent(self, event):
+        # Force title to be in the exact center of the bar
+        bar_width = self.width()
+        title_width = 600 # Assume a safe maximum width
+        self.title_label.setGeometry((bar_width - title_width) // 2, 0, title_width, self.height())
+        super().resizeEvent(event)
+
+    def minimize_window(self):
+        if self.window(): self.window().showMinimized()
+
+    def close_window(self):
+        if self.window(): self.window().close()
+
+    def toggle_max_restore(self):
+        win = self.window()
+        if not win: return
+        if win.isMaximized():
+            win.showNormal()
+        else:
+            win.showMaximized()
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and event.y() < self.height():
+            win = self.window()
+            if win:
+                win.windowHandle().startSystemMove()
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.toggle_max_restore()
+
+
 
 class GoToLineDialog(QDialog):
     def __init__(self, parent=None, max_line=1):
@@ -82,6 +174,9 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         
+        # Frameless Window Setup
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        
         icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "loganalyzer.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
@@ -95,6 +190,22 @@ class MainWindow(QMainWindow):
         self.current_filter_file = None
         self.current_log_path = None
         self.filters_modified = False
+
+        # --- Custom Title Bar Integration ---
+        # 1. Force creation/retrieval of the native QMenuBar first
+        # We store it in self.custom_menu_bar to prevent _create_menu from calling self.menuBar() again
+        # (which would create a NEW one and replace our custom title bar as the menu widget)
+        self.custom_menu_bar = self.menuBar()
+        
+        # 2. Create Custom Title Bar
+        self.title_bar = CustomTitleBar(self)
+        self.title_bar.setObjectName("title_bar")
+        
+        # 3. Inject native QMenuBar into Custom Title Bar
+        self.title_bar.layout.insertWidget(1, self.custom_menu_bar, 0, Qt.AlignVCenter)
+        
+        # 4. Set Custom Title Bar as the MainWindow's Menu Widget
+        self.setMenuWidget(self.title_bar)
 
         self.update_window_title()
 
@@ -419,6 +530,10 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_label = QLabel("Ready")
         self.status_bar.addWidget(self.status_label, 1)
+        
+        # Add Resize Grip for Frameless Window
+        self.size_grip = QSizeGrip(self)
+        self.status_bar.addPermanentWidget(self.size_grip)
 
         self.toast = Toast(self)
         self._create_menu()
@@ -445,7 +560,8 @@ class MainWindow(QMainWindow):
         self.notes_dock.hide()
 
     def _create_menu(self):
-        menu_bar = self.menuBar()
+        # Use the menu bar we already embedded in the custom title bar
+        menu_bar = self.custom_menu_bar
         
         file_menu = menu_bar.addMenu("&File")
         self.open_action = QAction("&Open Log...", self)
@@ -710,6 +826,12 @@ class MainWindow(QMainWindow):
             header_bg = "#1e1e1e"
             dialog_bg, dialog_fg = "#252526", "#cccccc"
             checkbox_active = "#007acc"
+            
+            # Custom Title Bar Colors (Dark)
+            titlebar_bg = "#181818"
+            titlebar_fg = "#cccccc"
+            titlebar_hover = "#333333"
+            close_hover = "#c42b1c"
         else:
             bg_color, fg_color, selection_bg, selection_fg = "#ffffff", "#000000", "#add6ff", "#000000"
             hover_qcolor = QColor(0, 0, 0, 20)
@@ -724,6 +846,12 @@ class MainWindow(QMainWindow):
             header_bg = "#e5e5e5"
             dialog_bg, dialog_fg = "#f3f3f3", "#000000"
             checkbox_active = "#40a9ff"
+            
+            # Custom Title Bar Colors (Light)
+            titlebar_bg = "#e8e8e8"
+            titlebar_fg = "#333333"
+            titlebar_hover = "#d0d0d0"
+            close_hover = "#c42b1c"
 
         # Log View Gutter Theme (Match VS Code: Same as content but with border)
         log_gutter_bg = None # Transparent, shows content bg
@@ -734,6 +862,37 @@ class MainWindow(QMainWindow):
         self.delegate.set_theme_config(log_gutter_bg, log_gutter_fg, log_border)
         
         self.list_view.viewport().update()
+        
+        # Update Window Controls Icons
+        icon_c = titlebar_fg
+        self.title_bar.btn_min.setIcon(get_svg_icon("window-minimize", icon_c))
+        self.title_bar.btn_max.setIcon(get_svg_icon("window-maximize", icon_c))
+        self.title_bar.btn_close.setIcon(get_svg_icon("x-close", icon_c))
+        
+        # Style Custom Title Bar
+        self.title_bar.setStyleSheet(f"""
+            #title_bar {{ background-color: {titlebar_bg}; border-bottom: 1px solid {float_border}; }}
+            #title_bar QLabel {{ color: {titlebar_fg}; }}
+            QToolButton {{ background-color: transparent; border: none; border-radius: 0px; }}
+            QToolButton:hover {{ background-color: {titlebar_hover}; }}
+        """)
+        # Specific hover for close button
+        self.title_bar.btn_close.setStyleSheet(f"""
+            QToolButton {{ background-color: transparent; border: none; border-radius: 0px; }}
+            QToolButton:hover {{ background-color: {close_hover}; }}
+        """)
+        
+        # Fix MenuBar in Custom Title Bar
+        menu_style = f"""
+        QMenuBar {{ background-color: transparent; color: {titlebar_fg}; border: none; padding: 0px; }}
+        QMenuBar::item {{ background-color: transparent; padding: 5px 10px; border-radius: 4px; }}
+        QMenuBar::item:selected {{ background-color: {titlebar_hover}; }}
+        QMenu {{ background-color: {menu_bg}; color: {menu_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px; }}
+        QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; }}
+        QMenu::item:selected {{ background-color: {menu_sel}; color: {menu_sel_fg}; }}
+        QMenu::separator {{ height: 1px; background: {float_border}; margin: 4px 8px; }}
+        """
+        
         self._set_windows_title_bar_color(self.is_dark_mode)
         for widget in QApplication.topLevelWidgets():
             if widget.isWindow(): set_windows_title_bar_color(widget.winId(), self.is_dark_mode)
@@ -754,13 +913,7 @@ class MainWindow(QMainWindow):
         QDockWidget#FilterDock::title, QDockWidget#NotesDock::title, QDockWidget#LogListDock::title {{ background: {sidebar_bg}; padding: 10px; border: none; }}
         #FilterDock QWidget, #NotesDock QWidget, #LogListDock QWidget {{ background-color: {sidebar_bg}; }}
         #FilterDock QTreeWidget, #NotesDock QTreeWidget, #LogListDock QTreeWidget {{ background-color: {sidebar_bg}; border: none; }}
-        QMenuBar {{ background-color: {menu_bg}; color: {menu_fg}; border-bottom: 1px solid {float_border}; padding: 2px; }}
-        QMenuBar::item {{ background-color: transparent; padding: 4px 10px; border-radius: 4px; }}
-        QMenuBar::item:selected {{ background-color: {hover_bg}; }}
-        QMenu {{ background-color: {menu_bg}; color: {menu_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px; }}
-        QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; }}
-        QMenu::item:selected {{ background-color: {menu_sel}; color: {menu_sel_fg}; }}
-        QMenu::separator {{ height: 1px; background: {float_border}; margin: 4px 8px; }}
+        {menu_style}
         QListView {{ background-color: {bg_color}; color: {fg_color}; border: none; outline: 0; font-size: 11pt; font-family: "JetBrains Mono", "Consolas", monospace; }}
         QListView::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
                 QTreeWidget {{ background-color: {tree_bg}; border: none; color: {fg_color}; outline: 0; }}
@@ -1541,7 +1694,9 @@ class MainWindow(QMainWindow):
         if self.current_filter_file: p.append(("*" if self.filters_modified else "") + os.path.basename(self.current_filter_file))
         elif self.filters_modified: p.append("*Unsaved")
         p.append(f"{self.APP_NAME} {self.VERSION}")
-        self.setWindowTitle(" - ".join(p))
+        title = " - ".join(p)
+        self.setWindowTitle(title)
+        self.title_bar.title_label.setText(title)
 
     def calculate_viewport_size(self):
         h = self.list_view.viewport().height(); rh = QFontMetrics(self.list_view.font()).height()
