@@ -175,6 +175,36 @@ class MainWindow(QMainWindow):
         self.log_list_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
         self.log_list_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
         
+        # Custom Title Bar
+        self.log_title_bar = QWidget()
+        log_title_layout = QHBoxLayout(self.log_title_bar)
+        log_title_layout.setContentsMargins(10, 4, 4, 4)
+        log_title_layout.setSpacing(4)
+        
+        self.log_title_label = QLabel("LOG FILES")
+        font = QFont("Inter SemiBold")
+        if not QFontInfo(font).exactMatch() and QFontInfo(font).family() != "Inter":
+             font.setFamily("Segoe UI")
+        font.setBold(True)
+        self.log_title_label.setFont(font)
+        
+        self.btn_open_log = QToolButton()
+        self.btn_open_log.setToolTip("Open Log Files (Ctrl+O)")
+        self.btn_open_log.setFixedSize(26, 26)
+        self.btn_open_log.clicked.connect(self.open_file_dialog)
+
+        self.btn_clear_logs = QToolButton()
+        self.btn_clear_logs.setToolTip("Clear All Logs")
+        self.btn_clear_logs.setFixedSize(26, 26)
+        self.btn_clear_logs.clicked.connect(self._clear_all_logs)
+        
+        log_title_layout.addWidget(self.log_title_label)
+        log_title_layout.addStretch()
+        log_title_layout.addWidget(self.btn_open_log)
+        log_title_layout.addWidget(self.btn_clear_logs)
+        
+        self.log_list_dock.setTitleBarWidget(self.log_title_bar)
+
         self.log_tree = FilterTreeWidget(on_drop_callback=self.on_log_reordered)
         self.log_tree.setHeaderHidden(True) # Hide "File" header
         self.log_tree.setRootIsDecorated(False)
@@ -805,6 +835,27 @@ class MainWindow(QMainWindow):
         self.filter_delegate.set_theme_config(filter_border)
         self.btn_add_filter.setIcon(get_svg_icon("plus", icon_color))
         
+        # Colors for Log List Dock (Sync with others)
+        log_header_bg = "#2d2d2d" if self.is_dark_mode else "#e1e1e1"
+        log_content_bg = "#252526" if self.is_dark_mode else "#f3f3f3"
+        log_list_border = "#404040" if self.is_dark_mode else "#e5e5e5"
+        
+        self.log_title_bar.setStyleSheet(f"background-color: {log_header_bg};")
+        self.log_tree.setStyleSheet(f"""
+            QTreeWidget {{ background-color: {log_content_bg}; border: none; }}
+            QTreeWidget::item {{ padding: 4px; border: none; }}
+            QTreeWidget::item:selected {{ background-color: #264f78; color: #ffffff; }}
+            QTreeWidget::item:hover {{ background-color: #2a2d2e; }}
+        """ if self.is_dark_mode else f"""
+            QTreeWidget {{ background-color: {log_content_bg}; border: none; }}
+            QTreeWidget::item {{ padding: 4px; border: none; }}
+            QTreeWidget::item:selected {{ background-color: #add6ff; color: #000000; }}
+            QTreeWidget::item:hover {{ background-color: #e8e8e8; }}
+        """)
+        self.log_list_delegate.set_theme_config(log_list_border)
+        self.btn_open_log.setIcon(get_svg_icon("file-text", icon_color))
+        self.btn_clear_logs.setIcon(get_svg_icon("x-circle", icon_color))
+
         self.btn_side_loglist.setIcon(get_svg_icon("file-text", icon_color))
         self.btn_side_filter.setIcon(get_svg_icon("filter", icon_color))
         self.btn_side_notes.setIcon(get_svg_icon("book-open", icon_color))
@@ -881,6 +932,24 @@ class MainWindow(QMainWindow):
                 self.load_log(fp, is_multiple=True)
 
     def _clear_all_logs(self):
+        # 1. Check for unsaved notes before clearing everything
+        if self.notes_manager.has_unsaved_changes():
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Unsaved Notes")
+            msg_box.setText("There are unsaved notes. Save them for all files before clearing?")
+            msg_box.setIcon(QMessageBox.Question)
+            msg_box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
+            msg_box.setDefaultButton(QMessageBox.Save)
+            msg_box.create(); set_windows_title_bar_color(msg_box.winId(), self.is_dark_mode)
+            
+            res = msg_box.exec()
+            if res == QMessageBox.Save:
+                if not self.notes_manager.save_all_notes():
+                    return # Save failed or cancelled inside save_all_notes
+            elif res == QMessageBox.Cancel:
+                return
+
+        # 2. Proceed with clearing
         self.loaded_logs.clear()
         self.log_order.clear()
         self.log_states.clear()
@@ -891,6 +960,7 @@ class MainWindow(QMainWindow):
         
         # Clear notes and refresh notes view
         self.notes_manager.notes.clear()
+        self.notes_manager.dirty_files.clear() # Reset dirty state
         self.notes_manager.refresh_list()
         
         self.welcome_widget.show()

@@ -9,6 +9,10 @@ class LogListDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.close_btn_rects = {} # Map index to rect
+        self.border_color = QColor("#3c3c3c")
+
+    def set_theme_config(self, border_color):
+        self.border_color = QColor(border_color)
 
     def paint(self, painter, option, index):
         painter.save()
@@ -51,6 +55,10 @@ class LogListDelegate(QStyledItemDelegate):
             text = index.data(Qt.DisplayRole)
             painter.setPen(option.palette.text().color())
             painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, text)
+
+            # Draw Bottom Border
+            painter.setPen(self.border_color)
+            painter.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
 
         finally:
             painter.restore()
