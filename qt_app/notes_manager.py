@@ -1,9 +1,10 @@
 from PySide6.QtWidgets import (QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView, 
                                QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QDialog, 
-                               QTextEdit, QLabel, QMessageBox, QMenu)
-from PySide6.QtCore import Qt, Signal, QObject
-from PySide6.QtGui import QColor, QAction
+                               QTextEdit, QLabel, QMessageBox, QMenu, QToolButton)
+from PySide6.QtCore import Qt, Signal, QObject, QSize
+from PySide6.QtGui import QColor, QAction, QFont, QFontInfo
 from .utils import adjust_color_for_theme, set_windows_title_bar_color
+from .resources import get_svg_icon
 import os
 import re
 import json
@@ -19,8 +20,15 @@ class NoteDialog(QDialog):
         layout = QVBoxLayout(self)
         
         self.text_edit = QTextEdit()
+        
+        # Set consistent font
+        font = QFont("Inter")
+        if not QFontInfo(font).exactMatch() and QFontInfo(font).family() != "Inter":
+             font.setFamily("Segoe UI")
+        font.setPixelSize(14)
+        self.text_edit.setFont(font)
+        
         self.text_edit.setPlainText(initial_text)
-        self.text_edit.setFontPointSize(11)
         layout.addWidget(self.text_edit)
 
         btn_layout = QHBoxLayout()
@@ -50,7 +58,7 @@ class NotesManager(QObject):
         self.main_window = main_window
         self.notes = {} # {(filepath, raw_index): content}
         self.is_dark_mode = True
-        self.notes_dirty = False
+        self.dirty_files = set()
         
         self.setup_ui()
 
@@ -63,6 +71,27 @@ class NotesManager(QObject):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        # Top Toolbar
+        toolbar = QWidget()
+        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(10, 5, 10, 5)
+        toolbar_layout.setSpacing(5)
+        
+        self.btn_save = QToolButton()
+        self.btn_save.setToolTip("Save Notes (Ctrl+S)")
+        self.btn_save.setFixedSize(28, 28)
+        self.btn_save.clicked.connect(self.quick_save)
+        
+        self.btn_export = QToolButton()
+        self.btn_export.setToolTip("Export Notes to Text...")
+        self.btn_export.setFixedSize(28, 28)
+        self.btn_export.clicked.connect(lambda: self.main_window.export_notes_to_text())
+        
+        toolbar_layout.addStretch()
+        toolbar_layout.addWidget(self.btn_save)
+        toolbar_layout.addWidget(self.btn_export)
+        layout.addWidget(toolbar)
 
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Line", "Timestamp  ", "Content"])
@@ -80,18 +109,6 @@ class NotesManager(QObject):
 
         layout.addWidget(self.tree)
 
-        # Bottom Bar for Actions
-        btn_bar = QWidget()
-        btn_layout = QHBoxLayout(btn_bar)
-        btn_layout.setContentsMargins(5, 5, 5, 5)
-        
-        self.btn_save = QPushButton("Save Notes")
-        self.btn_save.clicked.connect(self.quick_save)
-        btn_layout.addStretch()
-        btn_layout.addWidget(self.btn_save)
-        
-        layout.addWidget(btn_bar)
-
         self.dock.setWidget(container)
         self.main_window.addDockWidget(Qt.RightDockWidgetArea, self.dock)
         self.dock.hide()
@@ -100,12 +117,18 @@ class NotesManager(QObject):
         self.is_dark_mode = is_dark
         if self.dock.isFloating():
             set_windows_title_bar_color(self.dock.winId(), is_dark)
+        
+        # Update Icons
+        icon_color = "#d4d4d4" if is_dark else "#333333"
+        self.btn_save.setIcon(get_svg_icon("save", icon_color))
+        self.btn_export.setIcon(get_svg_icon("external-link", icon_color))
+        
         # Force a style refresh on internal widgets
         self.tree.viewport().update()
 
     
     def has_unsaved_changes(self):
-        return self.notes_dirty
+        return len(self.dirty_files) > 0
 
     def load_notes_for_file(self, log_filepath):
         """Automatically called when a log is loaded for the first time."""
@@ -148,12 +171,11 @@ class NotesManager(QObject):
 
     def save_all_notes(self):
         """Saves all unsaved notes for all loaded files."""
-        if not self.notes: 
-            self.notes_dirty = False
+        if not self.dirty_files:
             return True
             
-        # Get set of all files that have notes
-        files_to_save = set(fp for (fp, idx) in self.notes.keys())
+        # Create a copy since we might modify the set during iteration
+        files_to_save = list(self.dirty_files)
         
         success = True
         for fp in files_to_save:
@@ -161,7 +183,6 @@ class NotesManager(QObject):
                 success = False
         
         if success:
-            self.notes_dirty = False
             self.main_window.toast.show_message("All notes saved")
         return success
 
@@ -183,10 +204,16 @@ class NotesManager(QObject):
                     # For now, just save an empty dict or keep existing.
                     # Standard behavior: save empty list.
                     pass
-                else: return True
+                else: 
+                    if log_filepath in self.dirty_files:
+                        self.dirty_files.remove(log_filepath)
+                    return True
 
             with open(note_path, 'w', encoding='utf-8') as f:
                 json.dump(data_to_save, f, indent=4, sort_keys=True)
+            
+            if log_filepath in self.dirty_files:
+                self.dirty_files.remove(log_filepath)
             return True
         except Exception as e:
             print(f"Error saving notes for {log_filepath}: {e}")
@@ -238,6 +265,7 @@ class NotesManager(QObject):
                     del self.notes[key]
             
             self.notes_dirty = True
+            self.dirty_files.add(filepath)
             self.refresh_list()
             self.notes_updated.emit()
 
@@ -246,6 +274,7 @@ class NotesManager(QObject):
         if key in self.notes:
             del self.notes[key]
             self.notes_dirty = True
+            self.dirty_files.add(filepath)
             self.refresh_list()
             self.notes_updated.emit()
 

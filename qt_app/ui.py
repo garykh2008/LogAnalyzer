@@ -59,6 +59,10 @@ class GoToLineDialog(QDialog):
         
         self.btn_ok = QPushButton("Go")
         self.btn_ok.setDefault(True)
+        # Assuming we are in dark mode by default or we can check parent.is_dark_mode if passed
+        # For simplicity, we use white for primary button icon as per CSS
+        self.btn_ok.setIcon(get_svg_icon("arrow-right", "#ffffff"))
+        self.btn_ok.setLayoutDirection(Qt.RightToLeft) # Icon on the right
         self.btn_ok.clicked.connect(self.accept)
         
         btn_layout.addWidget(self.btn_cancel)
@@ -698,8 +702,13 @@ class MainWindow(QMainWindow):
         QTabBar {{ height: 0px; width: 0px; background: transparent; }}
         QTabBar::tab {{ height: 0px; width: 0px; padding: 0px; margin: 0px; border: none; }}
         QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px 8px; }}
+        
         QPushButton {{ background-color: {menu_bg}; color: {fg_color}; border: 1px solid {float_border}; padding: 6px 16px; border-radius: 4px; }}
-        QPushButton:hover {{ background-color: {hover_bg}; border: 1px solid {menu_sel}; }}
+        QPushButton:hover {{ background-color: {hover_bg}; }}
+        QPushButton:pressed {{ background-color: {selection_bg}; }}
+        QPushButton:default {{ background-color: {bar_bg}; color: {bar_fg}; border: 1px solid {bar_bg}; font-weight: bold; }}
+        QPushButton:default:hover {{ background-color: {checkbox_active}; border: 1px solid {checkbox_active}; }}
+        
         QToolButton {{ background-color: transparent; color: {input_fg}; border: 1px solid transparent; border-radius: 4px; padding: 2px; }}
         QToolButton:hover {{ background-color: {hover_bg}; border: 1px solid {float_border}; }}
         QToolButton:checked {{ background-color: {selection_bg}; color: {selection_fg}; border: 1px solid {menu_sel}; }}
