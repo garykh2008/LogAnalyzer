@@ -54,6 +54,7 @@ class MainWindow(QMainWindow):
         # --- Multi-Log Management ---
         self.loaded_logs = {} # {path: engine}
         self.log_order = [] # Ordered paths
+        self.log_states = {} # {path: {"scroll": val, "selected_raw": idx}}
         self.current_active_log = None # Selected path or MERGED_VIEW_ID
 
         self.current_engine = None
@@ -772,6 +773,7 @@ class MainWindow(QMainWindow):
     def _clear_all_logs(self):
         self.loaded_logs.clear()
         self.log_order.clear()
+        self.log_states.clear()
         self.update_log_tree()
         self.current_engine = None
         self.current_log_path = None
@@ -849,6 +851,13 @@ class MainWindow(QMainWindow):
     def _switch_to_log(self, filepath):
         if filepath not in self.loaded_logs: return
         
+        # Save current state before switching
+        if self.current_log_path and self.current_log_path in self.loaded_logs:
+            self.log_states[self.current_log_path] = {
+                "scroll": self.v_scrollbar.value(),
+                "selected_raw": self.selected_raw_index
+            }
+
         self.current_log_path = filepath
         self.current_engine = self.loaded_logs[filepath]
         self.model.set_engine(self.current_engine, filepath)
@@ -862,8 +871,10 @@ class MainWindow(QMainWindow):
         self.search_results = []
         self.current_match_index = -1
         self.update_scrollbar_range()
-        self.v_scrollbar.setValue(0)
+        
+        # Reset filter cache for the new file
         self.filters_dirty_cache = True
+        self.cached_filter_results = None
         
         # Select in tree
         items = self.log_tree.findItems(os.path.basename(filepath), Qt.MatchExactly)
@@ -874,6 +885,29 @@ class MainWindow(QMainWindow):
 
         if self.filters: self.recalc_filters()
         else: self.refresh_filter_tree()
+
+        # Restore State
+        state = self.log_states.get(filepath, {"scroll": 0, "selected_raw": -1})
+        self.v_scrollbar.setValue(state["scroll"])
+        if state["selected_raw"] != -1:
+            # We use a slight delay or direct call to ensure model has updated viewport
+            self.selected_raw_index = state["selected_raw"]
+            self._restore_selection_ui(state["selected_raw"])
+
+    def _restore_selection_ui(self, raw_index):
+        """Internal helper to set the selection highlight without necessarily re-centering."""
+        view_row = raw_index
+        if self.show_filtered_only and self.model.filtered_indices:
+             import bisect
+             idx = bisect.bisect_left(self.model.filtered_indices, raw_index)
+             if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == raw_index:
+                 view_row = idx
+             else: return # Not visible
+             
+        rel_row = view_row - self.model.viewport_start
+        if 0 <= rel_row < self.model.rowCount():
+            model_idx = self.model.index(rel_row, 0)
+            self.list_view.setCurrentIndex(model_idx)
 
     def update_log_tree(self):
         self.log_tree.clear()
@@ -940,6 +974,7 @@ class MainWindow(QMainWindow):
 
             del self.loaded_logs[filepath]
             self.log_order.remove(filepath)
+            if filepath in self.log_states: del self.log_states[filepath]
             self.update_log_tree()
             if self.current_log_path == filepath:
                 if self.log_order: self._switch_to_log(self.log_order[0])
