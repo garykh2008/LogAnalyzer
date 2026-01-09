@@ -226,14 +226,26 @@ class MainWindow(QMainWindow):
         self.central_layout.addWidget(self.central_area)
         
         # Page 0: Welcome
-        self.welcome_label = QLabel("Drag & Drop Log File Here\nor use File > Open Log", self.central_area)
+        self.welcome_widget = QWidget()
+        welcome_layout = QVBoxLayout(self.welcome_widget)
+        welcome_layout.setAlignment(Qt.AlignCenter)
+        welcome_layout.setSpacing(20)
+
+        self.welcome_icon = QLabel()
+        self.welcome_icon.setFixedSize(80, 80)
+        self.welcome_icon.setAlignment(Qt.AlignCenter)
+        welcome_layout.addWidget(self.welcome_icon, 0, Qt.AlignCenter)
+
+        self.welcome_label = QLabel("Drag & Drop Log File Here\nor use File > Open Log")
         self.welcome_label.setAlignment(Qt.AlignCenter)
         font_welcome = QFont("Inter", 14)
         if not QFontInfo(font_welcome).exactMatch() and QFontInfo(font_welcome).family() != "Inter":
             font_welcome = QFont("Segoe UI", 14)
         self.welcome_label.setFont(font_welcome)
         self.welcome_label.setStyleSheet("color: #888888;")
-        self.central_stack.addWidget(self.welcome_label)
+        welcome_layout.addWidget(self.welcome_label, 0, Qt.AlignCenter)
+        
+        self.central_stack.addWidget(self.welcome_widget)
 
         # Page 1: List View Container
         list_container = QWidget(self.central_area)
@@ -679,6 +691,9 @@ class MainWindow(QMainWindow):
 
         # Refresh SVG Icons with current theme color
         icon_color = fg_color
+        welcome_icon_color = "#888888" # Subdued color for welcome screen
+        self.welcome_icon.setPixmap(get_svg_icon("activity", welcome_icon_color, size=80).pixmap(80, 80))
+        
         self.btn_side_loglist.setIcon(get_svg_icon("file-text", icon_color))
         self.btn_side_filter.setIcon(get_svg_icon("filter", icon_color))
         self.btn_side_notes.setIcon(get_svg_icon("book-open", icon_color))
@@ -766,7 +781,7 @@ class MainWindow(QMainWindow):
         self.notes_manager.notes.clear()
         self.notes_manager.refresh_list()
         
-        self.welcome_label.show()
+        self.welcome_widget.show()
         self.central_stack.setCurrentIndex(0)
         self.update_window_title()
 
@@ -815,7 +830,7 @@ class MainWindow(QMainWindow):
 
         self.add_to_recent(filepath)
         self.central_stack.setCurrentIndex(1)
-        self.welcome_label.hide()
+        self.welcome_widget.hide()
         
         self.update_status_bar(f"Loading {filepath}...")
         start_time = time.time()
