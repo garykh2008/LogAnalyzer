@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
                                QGraphicsOpacityEffect, QCheckBox, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView,
                                QDialog, QMessageBox, QScrollBar, QPushButton, QStackedLayout, QInputDialog, QFrame,
-                               QSplitter)
+                               QSplitter, QSpinBox)
 from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics, QFontInfo
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation, QSize
 from .models import LogModel
@@ -30,6 +30,46 @@ class FilterTreeWidget(QTreeWidget):
         super().dropEvent(event)
         if self.on_drop_callback:
             self.on_drop_callback()
+
+class GoToLineDialog(QDialog):
+    def __init__(self, parent=None, max_line=1):
+        super().__init__(parent)
+        self.setWindowTitle("Go to Line")
+        self.setFixedWidth(300)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        label = QLabel(f"Enter line number (1 - {max_line:,}):")
+        layout.addWidget(label)
+        
+        self.spin_box = QSpinBox()
+        self.spin_box.setRange(1, max_line)
+        self.spin_box.setValue(1)
+        self.spin_box.setButtonSymbols(QSpinBox.NoButtons)
+        self.spin_box.setFixedHeight(32)
+        layout.addWidget(self.spin_box)
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.clicked.connect(self.reject)
+        
+        self.btn_ok = QPushButton("Go")
+        self.btn_ok.setDefault(True)
+        self.btn_ok.clicked.connect(self.accept)
+        
+        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(self.btn_ok)
+        layout.addLayout(btn_layout)
+        
+        self.spin_box.setFocus()
+        self.spin_box.selectAll()
+
+    def get_line(self):
+        return self.spin_box.value()
 
 class MainWindow(QMainWindow):
     VERSION = "V2.0"
@@ -1454,8 +1494,12 @@ class MainWindow(QMainWindow):
     def show_goto_dialog(self):
         total = len(self.model.filtered_indices) if self.show_filtered_only else self.current_engine.line_count()
         if total <= 0: return
-        val, ok = QInputDialog.getInt(self, "Go to Line", f"Line (1-{total}):", 1, 1, total)
-        if ok:
+        
+        dialog = GoToLineDialog(self, total)
+        set_windows_title_bar_color(dialog.winId(), self.is_dark_mode)
+        
+        if dialog.exec():
+            val = dialog.get_line()
             raw = self.model.filtered_indices[val-1] if self.show_filtered_only else val-1
             self.jump_to_raw_index(raw)
 
