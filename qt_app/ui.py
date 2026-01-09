@@ -861,10 +861,12 @@ class MainWindow(QMainWindow):
         
         # Save current state before switching
         if self.current_log_path and self.current_log_path in self.loaded_logs:
-            self.log_states[self.current_log_path] = {
+            if self.current_log_path not in self.log_states:
+                self.log_states[self.current_log_path] = {}
+            self.log_states[self.current_log_path].update({
                 "scroll": self.v_scrollbar.value(),
                 "selected_raw": self.selected_raw_index
-            }
+            })
 
         self.current_log_path = filepath
         self.current_engine = self.loaded_logs[filepath]
@@ -884,6 +886,12 @@ class MainWindow(QMainWindow):
         self.filters_dirty_cache = True
         self.cached_filter_results = None
         
+        # Try to load cached filter results if available
+        state = self.log_states.get(filepath, {})
+        if "filter_cache" in state:
+            self.cached_filter_results = state["filter_cache"]
+            self.filters_dirty_cache = False
+        
         # Select in tree
         items = self.log_tree.findItems(os.path.basename(filepath), Qt.MatchExactly)
         for item in items:
@@ -895,12 +903,15 @@ class MainWindow(QMainWindow):
         else: self.refresh_filter_tree()
 
         # Restore State
-        state = self.log_states.get(filepath, {"scroll": 0, "selected_raw": -1})
-        self.v_scrollbar.setValue(state["scroll"])
-        if state["selected_raw"] != -1:
+        state = self.log_states.get(filepath, {})
+        scroll_pos = state.get("scroll", 0)
+        selected_raw = state.get("selected_raw", -1)
+        
+        self.v_scrollbar.setValue(scroll_pos)
+        if selected_raw != -1:
             # We use a slight delay or direct call to ensure model has updated viewport
-            self.selected_raw_index = state["selected_raw"]
-            self._restore_selection_ui(state["selected_raw"])
+            self.selected_raw_index = selected_raw
+            self._restore_selection_ui(selected_raw)
 
     def _restore_selection_ui(self, raw_index):
         """Internal helper to set the selection highlight without necessarily re-centering."""
@@ -1138,6 +1149,15 @@ class MainWindow(QMainWindow):
         self.jump_to_raw_index(raw_row, focus_list)
         self.search_info_label.setText(f"{result_index + 1} / {len(self.search_results)}")
 
+    def _invalidate_all_filter_caches(self, mark_modified=True):
+        """Clears filter cache for all loaded logs because filter rules have changed."""
+        for state in self.log_states.values():
+            if "filter_cache" in state:
+                del state["filter_cache"]
+        if mark_modified:
+            self.filters_modified = True
+        self.filters_dirty_cache = True
+
     def on_filter_tree_reordered(self):
         new_f = []
         root = self.filter_tree.invisibleRootItem()
@@ -1147,7 +1167,7 @@ class MainWindow(QMainWindow):
             new_f.append(self.filters[idx])
             item.setData(0, Qt.UserRole, i)
         self.filters = new_f
-        self.filters_modified = True; self.filters_dirty_cache = True
+        self._invalidate_all_filter_caches()
         self.update_window_title(); self.recalc_filters()
 
     def refresh_filter_tree(self):
@@ -1176,7 +1196,7 @@ class MainWindow(QMainWindow):
                 st = (item.checkState(0) == Qt.Checked)
                 if self.filters[idx]["enabled"] != st:
                     self.filters[idx]["enabled"] = st
-                    self.filters_modified = True; self.filters_dirty_cache = True
+                    self._invalidate_all_filter_caches()
                     self.update_window_title(); self.recalc_filters()
 
     def on_log_double_clicked(self, index):
@@ -1190,7 +1210,7 @@ class MainWindow(QMainWindow):
         dialog = FilterDialog(self, self.filters[idx])
         if dialog.exec():
             self.filters[idx].update(dialog.get_data())
-            self.filters_modified = True; self.filters_dirty_cache = True
+            self._invalidate_all_filter_caches()
             self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
 
     def add_filter_dialog(self, initial_text=""):
@@ -1199,14 +1219,14 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             flt = dialog.get_data(); flt["hits"] = 0
             self.filters.append(flt)
-            self.filters_modified = True; self.filters_dirty_cache = True
+            self._invalidate_all_filter_caches()
             self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
 
     def remove_filter(self):
         item = self.filter_tree.currentItem()
         if not item: return
         del self.filters[item.data(0, Qt.UserRole)]
-        self.filters_modified = True; self.filters_dirty_cache = True
+        self._invalidate_all_filter_caches()
         self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
 
     def move_filter_top(self):
@@ -1215,7 +1235,7 @@ class MainWindow(QMainWindow):
         idx = item.data(0, Qt.UserRole)
         if idx > 0:
             self.filters.insert(0, self.filters.pop(idx))
-            self.filters_modified = True; self.filters_dirty_cache = True
+            self._invalidate_all_filter_caches()
             self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
 
     def move_filter_bottom(self):
@@ -1224,7 +1244,7 @@ class MainWindow(QMainWindow):
         idx = item.data(0, Qt.UserRole)
         if idx < len(self.filters) - 1:
             self.filters.append(self.filters.pop(idx))
-            self.filters_modified = True; self.filters_dirty_cache = True
+            self._invalidate_all_filter_caches()
             self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
 
     def show_filter_menu(self, pos):
@@ -1242,7 +1262,7 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             en = self.filters[idx]["enabled"]
             act = menu.addAction("Disable" if en else "Enable")
-            def togg(): self.filters[idx]["enabled"] = not en; self.filters_dirty_cache = True; self.refresh_filter_tree(); self.recalc_filters()
+            def togg(): self.filters[idx]["enabled"] = not en; self._invalidate_all_filter_caches(); self.refresh_filter_tree(); self.recalc_filters()
             act.triggered.connect(togg)
         menu.exec_(self.filter_tree.mapToGlobal(pos))
 
@@ -1253,7 +1273,8 @@ class MainWindow(QMainWindow):
             loaded = load_tat_filters(path)
             if loaded:
                 self.current_filter_file = path  # Update current filter file path
-                self.filters = loaded; self.filters_modified = False; self.filters_dirty_cache = True
+                self.filters = loaded; self._invalidate_all_filter_caches(mark_modified=False)
+                self.filters_modified = False
                 self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
                 
                 # Auto-show Filter Panel when filters are loaded
@@ -1401,6 +1422,13 @@ class MainWindow(QMainWindow):
             try:
                 res = self.current_engine.filter(rust_f)
                 self.cached_filter_results = (res, rust_f); self.filters_dirty_cache = False
+                
+                # Cache the result for the current file
+                if self.current_log_path:
+                    if self.current_log_path not in self.log_states:
+                        self.log_states[self.current_log_path] = {}
+                    self.log_states[self.current_log_path]["filter_cache"] = (res, rust_f)
+
                 was_calculated = True
             except: return
         if self.cached_filter_results:
