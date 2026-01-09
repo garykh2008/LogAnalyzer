@@ -714,6 +714,19 @@ class MainWindow(QMainWindow):
         self.doc_action.setIcon(get_svg_icon("external-link", icon_color))
         self.about_action.setIcon(get_svg_icon("info", icon_color))
 
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        files = [u.toLocalFile() for u in event.mimeData().urls()]
+        if files:
+            for fp in files:
+                if os.path.exists(fp):
+                    self.load_log(fp, is_multiple=True)
+
     def open_file_dialog(self):
         last_dir = self.settings.value("last_dir", "")
         filepaths, _ = QFileDialog.getOpenFileNames(self, "Open Log Files", last_dir, "Log Files (*.log *.txt);;All Files (*)")
