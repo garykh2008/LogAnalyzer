@@ -81,7 +81,6 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{self.APP_NAME} (PySide6)")
         
         icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "loganalyzer.ico")
         if os.path.exists(icon_path):
@@ -94,6 +93,10 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self.last_status_message = "Ready"
         self.current_filter_file = None
+        self.current_log_path = None
+        self.filters_modified = False
+
+        self.update_window_title()
 
         # --- Multi-Log Management ---
         self.loaded_logs = {} # {path: engine}
