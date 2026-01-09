@@ -718,7 +718,6 @@ class MainWindow(QMainWindow):
         last_dir = self.settings.value("last_dir", "")
         filepaths, _ = QFileDialog.getOpenFileNames(self, "Open Log Files", last_dir, "Log Files (*.log *.txt);;All Files (*)")
         if filepaths: 
-            self._clear_all_logs()
             for fp in filepaths:
                 self.load_log(fp, is_multiple=True)
 
@@ -738,7 +737,6 @@ class MainWindow(QMainWindow):
     def load_logs_from_cli(self, file_list):
         """Internal helper for CLI to load multiple logs at once."""
         if not file_list: return
-        self._clear_all_logs()
         for fp in file_list:
             if os.path.exists(fp):
                 self.load_log(fp, is_multiple=True)
