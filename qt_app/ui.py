@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QDialog, QMessageBox, QScrollBar, QPushButton, QStackedLayout, QInputDialog, QFrame,
                                QSplitter, QSpinBox)
 from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics, QFontInfo
-from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation, QSize
+from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation, QSize, QItemSelectionModel
 from .models import LogModel
 from .engine_wrapper import get_engine
 from .toast import Toast
@@ -1318,7 +1318,9 @@ class MainWindow(QMainWindow):
         if 0 <= rel_row < self.model.rowCount():
             index = self.model.index(rel_row, 0)
             if index.isValid():
-                self.list_view.setCurrentIndex(index)
+                # Explicitly clear selection and select ONLY the target row 
+                # to avoid issues when Ctrl key is held down during shortcuts.
+                self.list_view.selectionModel().setCurrentIndex(index, QItemSelectionModel.ClearAndSelect)
                 self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
                 if focus_list: self.list_view.setFocus()
                 self.selected_raw_index = raw_index # Ensure state is synced
