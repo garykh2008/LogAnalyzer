@@ -170,16 +170,17 @@ class NotesManager(QObject):
         self.title_bar.setStyleSheet(f"background-color: {header_bg};")
         
         # Update Tree Background (Content Area matches Sidebar)
+        # We need to override global styles for this specific tree
         self.tree.setStyleSheet(f"""
             QTreeWidget {{ background-color: {content_bg}; color: {icon_color}; border: none; }}
             QTreeWidget::item {{ padding: 4px; border: none; border-bottom: 1px solid {border_color}; }}
             QTreeWidget::item:selected {{ background-color: #264f78; color: #ffffff; }}
-            QTreeWidget::item:hover {{ background-color: #2a2d2e; color: {icon_color}; }}
+            QTreeWidget::item:hover {{ background-color: rgba(255, 255, 255, 30); color: {icon_color}; }}
         """ if is_dark else f"""
             QTreeWidget {{ background-color: {content_bg}; color: {icon_color}; border: none; }}
             QTreeWidget::item {{ padding: 4px; border: none; border-bottom: 1px solid {border_color}; }}
             QTreeWidget::item:selected {{ background-color: #add6ff; color: #000000; }}
-            QTreeWidget::item:hover {{ background-color: #e8e8e8; color: {icon_color}; }}
+            QTreeWidget::item:hover {{ background-color: rgba(0, 0, 0, 20); color: {icon_color}; }}
         """)
         
         # Set Delegate for Line Column
@@ -381,12 +382,13 @@ class NotesManager(QObject):
         
         idx = item.data(0, Qt.UserRole)
         menu = QMenu(self.tree)
+        icon_color = "#d4d4d4" if self.is_dark_mode else "#333333"
         
-        edit_action = QAction("Edit Note", self.tree)
+        edit_action = QAction(get_svg_icon("edit", icon_color), "Edit Note", self.tree)
         edit_action.triggered.connect(lambda: self.add_note(idx, "", self.main_window.current_log_path))
         menu.addAction(edit_action)
         
-        del_action = QAction("Delete Note", self.tree)
+        del_action = QAction(get_svg_icon("trash", icon_color), "Delete Note", self.tree)
         del_action.triggered.connect(lambda: self.delete_note(idx, self.main_window.current_log_path))
         menu.addAction(del_action)
         
