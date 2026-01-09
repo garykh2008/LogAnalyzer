@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView, 
                                QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QDialog, 
-                               QTextEdit, QLabel, QMessageBox, QMenu, QToolButton)
+                               QTextEdit, QLabel, QMessageBox, QMenu, QToolButton, QStyledItemDelegate)
 from PySide6.QtCore import Qt, Signal, QObject, QSize
 from PySide6.QtGui import QColor, QAction, QFont, QFontInfo
 from .utils import adjust_color_for_theme, set_windows_title_bar_color
@@ -8,6 +8,30 @@ from .resources import get_svg_icon
 import os
 import re
 import json
+
+class NoteLineDelegate(QStyledItemDelegate):
+    def __init__(self, bg_color, fg_color, border_color, parent=None):
+        super().__init__(parent)
+        self.bg_color = bg_color
+        self.fg_color = fg_color
+        self.border_color = border_color
+
+    def paint(self, painter, option, index):
+        if index.column() == 0:
+            painter.fillRect(option.rect, self.bg_color)
+            
+            # Draw borders for separation
+            painter.setPen(self.border_color)
+            r = option.rect
+            # Right vertical border
+            painter.drawLine(r.right(), r.top(), r.right(), r.bottom())
+            # Bottom horizontal border
+            painter.drawLine(r.left(), r.bottom(), r.right(), r.bottom())
+            
+            painter.setPen(self.fg_color)
+            painter.drawText(option.rect, Qt.AlignCenter, str(index.data()))
+        else:
+            super().paint(painter, option, index)
 
 class NoteDialog(QDialog):
     # ... [Keep NoteDialog as is] ...
@@ -67,41 +91,53 @@ class NotesManager(QObject):
         self.dock.setObjectName("NotesDock")
         self.dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
         
+        # --- Custom Title Bar ---
+        self.title_bar = QWidget()
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(10, 4, 4, 4)
+        title_layout.setSpacing(4)
+        
+        self.title_label = QLabel("NOTES")
+        font = QFont("Inter SemiBold")
+        if not QFontInfo(font).exactMatch() and QFontInfo(font).family() != "Inter":
+             font.setFamily("Segoe UI")
+        font.setBold(True) # Fallback
+        self.title_label.setFont(font)
+        
+        self.btn_save = QToolButton()
+        self.btn_save.setToolTip("Save Notes (Ctrl+S)")
+        self.btn_save.setFixedSize(26, 26)
+        self.btn_save.clicked.connect(self.quick_save)
+        
+        self.btn_export = QToolButton()
+        self.btn_export.setToolTip("Export Notes to Text...")
+        self.btn_export.setFixedSize(26, 26)
+        self.btn_export.clicked.connect(lambda: self.main_window.export_notes_to_text())
+        
+        title_layout.addWidget(self.title_label)
+        title_layout.addStretch()
+        title_layout.addWidget(self.btn_save)
+        title_layout.addWidget(self.btn_export)
+        
+        self.dock.setTitleBarWidget(self.title_bar)
+
+        # --- Content ---
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Top Toolbar
-        toolbar = QWidget()
-        toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(10, 5, 10, 5)
-        toolbar_layout.setSpacing(5)
-        
-        self.btn_save = QToolButton()
-        self.btn_save.setToolTip("Save Notes (Ctrl+S)")
-        self.btn_save.setFixedSize(28, 28)
-        self.btn_save.clicked.connect(self.quick_save)
-        
-        self.btn_export = QToolButton()
-        self.btn_export.setToolTip("Export Notes to Text...")
-        self.btn_export.setFixedSize(28, 28)
-        self.btn_export.clicked.connect(lambda: self.main_window.export_notes_to_text())
-        
-        toolbar_layout.addStretch()
-        toolbar_layout.addWidget(self.btn_save)
-        toolbar_layout.addWidget(self.btn_export)
-        layout.addWidget(toolbar)
-
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Line", "Timestamp  ", "Content"])
+        self.tree.setHeaderHidden(True)
+        self.tree.setColumnCount(2) # Line, Content
         self.tree.setRootIsDecorated(False)
-        self.tree.setAlternatingRowColors(True)
+        self.tree.setAlternatingRowColors(False) # We will manually color lines
+        self.tree.setIndentation(0)
         
         # Column resizing
-        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.tree.header().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.Fixed)
+        self.tree.header().resizeSection(0, 50) # Fixed width for line numbers
+        self.tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
 
         self.tree.itemDoubleClicked.connect(self.on_item_double_clicked)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -123,8 +159,34 @@ class NotesManager(QObject):
         self.btn_save.setIcon(get_svg_icon("save", icon_color))
         self.btn_export.setIcon(get_svg_icon("external-link", icon_color))
         
-        # Force a style refresh on internal widgets
-        self.tree.viewport().update()
+        # Define Colors
+        header_bg = "#2d2d2d" if is_dark else "#e1e1e1" # Distinct Title Color
+        content_bg = "#252526" if is_dark else "#f3f3f3" # Sidebar BG (NOT Editor BG)
+        line_bg = content_bg # Gutter matches Sidebar
+        line_fg = "#858585" if is_dark else "#237893" # Line number text
+        border_color = "#404040" if is_dark else "#e5e5e5" # Subtle vertical border
+        
+        # Update Title Bar Style
+        self.title_bar.setStyleSheet(f"background-color: {header_bg};")
+        
+        # Update Tree Background (Content Area matches Sidebar)
+        self.tree.setStyleSheet(f"""
+            QTreeWidget {{ background-color: {content_bg}; color: {icon_color}; border: none; }}
+            QTreeWidget::item {{ padding: 4px; border: none; border-bottom: 1px solid {border_color}; }}
+            QTreeWidget::item:selected {{ background-color: #264f78; color: #ffffff; }}
+            QTreeWidget::item:hover {{ background-color: #2a2d2e; color: {icon_color}; }}
+        """ if is_dark else f"""
+            QTreeWidget {{ background-color: {content_bg}; color: {icon_color}; border: none; }}
+            QTreeWidget::item {{ padding: 4px; border: none; border-bottom: 1px solid {border_color}; }}
+            QTreeWidget::item:selected {{ background-color: #add6ff; color: #000000; }}
+            QTreeWidget::item:hover {{ background-color: #e8e8e8; color: {icon_color}; }}
+        """)
+        
+        # Set Delegate for Line Column
+        self.tree.setItemDelegate(NoteLineDelegate(QColor(line_bg), QColor(line_fg), QColor(border_color), self.tree))
+        
+        # Re-populate list
+        self.refresh_list()
 
     
     def has_unsaved_changes(self):
@@ -302,9 +364,12 @@ class NotesManager(QObject):
 
             item = QTreeWidgetItem(self.tree)
             item.setText(0, str(idx + 1))
-            item.setText(1, ts)
-            item.setText(2, content.replace("\n", " "))
+            item.setText(1, content.replace("\n", " "))
             item.setData(0, Qt.UserRole, idx)
+            
+            if ts:
+                item.setToolTip(0, ts)
+                item.setToolTip(1, ts)
 
     def on_item_double_clicked(self, item, column):
         idx = item.data(0, Qt.UserRole)

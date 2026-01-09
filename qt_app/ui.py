@@ -660,7 +660,14 @@ class MainWindow(QMainWindow):
             dialog_bg, dialog_fg = "#f3f3f3", "#000000"
             checkbox_active = "#40a9ff"
 
+        # Log View Gutter Theme (Match VS Code: Same as content but with border)
+        log_gutter_bg = None # Transparent, shows content bg
+        log_gutter_fg = "#858585" if self.is_dark_mode else "#237893"
+        log_border = "#404040" if self.is_dark_mode else "#e5e5e5" # Subtle border
+
         self.delegate.set_hover_color(hover_bg)
+        self.delegate.set_theme_config(log_gutter_bg, log_gutter_fg, log_border)
+        
         self.list_view.viewport().update()
         self._set_windows_title_bar_color(self.is_dark_mode)
         for widget in QApplication.topLevelWidgets():
@@ -669,7 +676,10 @@ class MainWindow(QMainWindow):
 
         style = f"""
         QWidget {{ font-family: "Inter", "Segoe UI", "Microsoft JhengHei UI", sans-serif; }}
-        QMainWindow, QDialog, QMessageBox, QDockWidget {{ background-color: {bg_color}; color: {fg_color}; }}
+        QMainWindow, QDialog, QMessageBox {{ background-color: {bg_color}; color: {fg_color}; }}
+        QDockWidget {{ background-color: {bg_color}; color: {fg_color}; }}
+        QMainWindow::separator {{ background-color: transparent; width: 4px; }}
+        QMainWindow::separator:hover {{ background-color: {float_border}; }}
         QWidget {{ color: {fg_color}; font-size: 12px; }}
         #activity_bar {{ background-color: {activity_bg}; border: none; spacing: 10px; padding-top: 5px; }}
         #activity_bar QToolButton {{ background-color: transparent; border: none; border-left: 3px solid transparent; border-radius: 0px; margin: 0px; font-size: 12px; }}
@@ -724,6 +734,7 @@ class MainWindow(QMainWindow):
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0px; background: transparent; }}
         QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: none; }}
         QAbstractScrollArea::corner {{ background: transparent; border: none; }}
+        QSplitter::handle {{ background-color: {float_border}; }}
         #search_widget {{ background-color: {float_bg}; border: 1px solid {float_border}; border-top: none; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }}
 
         #search_widget QLabel {{ color: {input_fg}; background-color: transparent; }}

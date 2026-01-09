@@ -80,6 +80,16 @@ class LogDelegate(QStyledItemDelegate):
         self.search_match_color = QColor("#653306")
         self.search_match_text_color = QColor("#ffffff")
         self.max_line_number = 1000
+        
+        # Theme config
+        self.gutter_bg = None
+        self.gutter_fg = QColor(100, 100, 100)
+        self.border_color = QColor("#3c3c3c")
+
+    def set_theme_config(self, gutter_bg, gutter_fg, border_color):
+        if gutter_bg: self.gutter_bg = QColor(gutter_bg)
+        if gutter_fg: self.gutter_fg = QColor(gutter_fg)
+        if border_color: self.border_color = QColor(border_color)
 
     def set_hover_color(self, color):
         self.hover_color = QColor(color)
@@ -117,7 +127,8 @@ class LogDelegate(QStyledItemDelegate):
             raw_index = index.data(Qt.UserRole + 1)
             digits = len(str(self.max_line_number))
             char_w = option.fontMetrics.horizontalAdvance('8')
-            line_num_width = max(40, digits * char_w + 15)
+            # Increase padding: Left (10px) + digits*char_w + Right (10px)
+            line_num_width = max(45, digits * char_w + 20)
             
             # The line number column rect should be shifted by scroll_x to stay on the left
             line_bg_rect = QRectF(option.rect.left() + scroll_x, option.rect.top(), line_num_width, option.rect.height())
@@ -126,20 +137,19 @@ class LogDelegate(QStyledItemDelegate):
                 line_num_str = str(raw_index + 1)
                 
                 # Draw Line Num Column Background
-                base_col = option.palette.color(QPalette.Base)
-                if base_col.lightness() > 128:
-                    num_bg = QColor(240, 240, 240)
-                    num_fg = QColor(128, 128, 128)
-                else:
-                    num_bg = QColor(40, 40, 40)
-                    num_fg = QColor(100, 100, 100)
+                # If gutter_bg is None, use base (content) color for blending
+                fill_color = self.gutter_bg if self.gutter_bg else option.palette.color(QPalette.Base)
+                painter.fillRect(line_bg_rect, fill_color)
                 
-                painter.fillRect(line_bg_rect, num_bg)
+                # Draw Right Border
+                painter.setPen(self.border_color)
+                painter.drawLine(line_bg_rect.topRight(), line_bg_rect.bottomRight())
                 
-                # Draw Line Num Text
+                # Draw Line Num Text (Right Aligned with padding)
                 painter.save()
-                painter.setPen(num_fg)
-                painter.drawText(line_bg_rect.adjusted(0, 0, -5, 0), Qt.AlignRight, line_num_str)
+                painter.setPen(self.gutter_fg)
+                # Right padding 12px
+                painter.drawText(line_bg_rect.adjusted(0, 0, -12, 0), Qt.AlignRight | Qt.AlignTop, line_num_str)
                 painter.restore()
 
             # 2. Text (Scrolls with the content)
@@ -170,7 +180,7 @@ class LogDelegate(QStyledItemDelegate):
                 if should_highlight:
                     self._paint_highlighted_text(painter, text_rect, text, option)
                 else:
-                    painter.drawText(text_rect, Qt.AlignLeft, text)
+                    painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignTop, text)
 
 
         finally:
@@ -227,7 +237,7 @@ class LogDelegate(QStyledItemDelegate):
         # Calculate line number column width
         digits = len(str(self.max_line_number))
         char_w = option.fontMetrics.horizontalAdvance('8')
-        line_num_width = max(40, digits * char_w + 15)
+        line_num_width = max(45, digits * char_w + 20)
         
         # Total width = line number column + text width + margins
         text_width = option.fontMetrics.horizontalAdvance(text)
