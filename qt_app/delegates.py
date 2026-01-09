@@ -244,6 +244,13 @@ class LogDelegate(QStyledItemDelegate):
         return QSize(line_num_width + 8 + text_width + 20, option.fontMetrics.height())
 
 class FilterDelegate(QStyledItemDelegate):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.border_color = QColor("#3c3c3c")
+
+    def set_theme_config(self, border_color):
+        self.border_color = QColor(border_color)
+
     def paint(self, painter, option, index):
         painter.save()
         try:
@@ -260,15 +267,24 @@ class FilterDelegate(QStyledItemDelegate):
             # Use specific color or fall back to theme base color to determine lightness
             effective_bg = bg_color if (bg_color and bg_color.isValid()) else option.palette.color(QPalette.Base)
             is_dark_bg = effective_bg.lightness() < 128
+            has_custom_bg = bg_color and bg_color.isValid()
             
             if option.state & QStyle.State_Selected:
-                painter.fillRect(option.rect, QColor(0, 122, 204, 80))
+                # Tint the background with blue, but use lower alpha for custom colors
+                alpha = 40 if has_custom_bg else 80
+                painter.fillRect(option.rect, QColor(0, 122, 204, alpha))
             elif option.state & QStyle.State_MouseOver:
-                # If background is dark, make it lighter. If light, make it darker.
-                overlay = QColor(255, 255, 255, 60) if is_dark_bg else QColor(0, 0, 0, 40)
+                # Subtle brightness overlay
+                alpha = 20 if has_custom_bg else 40
+                overlay = QColor(255, 255, 255, alpha) if is_dark_bg else QColor(0, 0, 0, alpha)
                 painter.fillRect(option.rect, overlay)
 
             # 3. Draw default content
             super().paint(painter, option, index)
+            
+            # 4. Draw Bottom Border
+            painter.setPen(self.border_color)
+            painter.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
+            
         finally:
             painter.restore()

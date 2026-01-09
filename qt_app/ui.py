@@ -203,11 +203,38 @@ class MainWindow(QMainWindow):
         self.filter_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
         self.filter_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
         
+        # Custom Title Bar
+        self.filter_title_bar = QWidget()
+        filter_title_layout = QHBoxLayout(self.filter_title_bar)
+        filter_title_layout.setContentsMargins(10, 4, 4, 4)
+        filter_title_layout.setSpacing(4)
+        
+        self.filter_title_label = QLabel("FILTERS")
+        font = QFont("Inter SemiBold")
+        if not QFontInfo(font).exactMatch() and QFontInfo(font).family() != "Inter":
+             font.setFamily("Segoe UI")
+        font.setBold(True)
+        self.filter_title_label.setFont(font)
+        
+        self.btn_add_filter = QToolButton()
+        self.btn_add_filter.setToolTip("Add Filter")
+        self.btn_add_filter.setFixedSize(26, 26)
+        self.btn_add_filter.clicked.connect(lambda: self.add_filter_dialog())
+        
+        filter_title_layout.addWidget(self.filter_title_label)
+        filter_title_layout.addStretch()
+        filter_title_layout.addWidget(self.btn_add_filter)
+        
+        self.filter_dock.setTitleBarWidget(self.filter_title_bar)
+        
         self.filter_tree = FilterTreeWidget(on_drop_callback=self.on_filter_tree_reordered)
-        self.filter_tree.setItemDelegate(FilterDelegate(self.filter_tree))
+        self.filter_delegate = FilterDelegate(self.filter_tree)
+        self.filter_tree.setItemDelegate(self.filter_delegate)
         self.filter_tree.setIndentation(0)
+        self.filter_tree.setHeaderHidden(True)
 
-        self.filter_tree.setHeaderLabels(["", "Pattern", "Hits  "])
+        self.filter_tree.setColumnCount(3)
+        # self.filter_tree.setHeaderLabels(["", "Pattern", "Hits  "])
         
         header = self.filter_tree.header()
         header.setMinimumSectionSize(0)
@@ -762,6 +789,21 @@ class MainWindow(QMainWindow):
         icon_color = fg_color
         welcome_icon_color = "#888888" # Subdued color for welcome screen
         self.welcome_icon.setPixmap(get_svg_icon("activity", welcome_icon_color, size=80).pixmap(80, 80))
+        
+        # Colors for Filter Dock (Sync with Notes Dock)
+        filter_header_bg = "#2d2d2d" if self.is_dark_mode else "#e1e1e1"
+        filter_content_bg = "#252526" if self.is_dark_mode else "#f3f3f3"
+        filter_border = "#404040" if self.is_dark_mode else "#e5e5e5"
+        
+        self.filter_title_bar.setStyleSheet(f"background-color: {filter_header_bg};")
+        self.filter_tree.setStyleSheet(f"""
+            QTreeWidget {{ background-color: {filter_content_bg}; color: {icon_color}; border: none; }}
+            QTreeWidget::item {{ padding: 4px; border: none; }} 
+            QTreeWidget::item:selected {{ background-color: transparent; color: {icon_color}; }}
+            QTreeWidget::item:hover {{ background-color: transparent; }}
+        """)
+        self.filter_delegate.set_theme_config(filter_border)
+        self.btn_add_filter.setIcon(get_svg_icon("plus", icon_color))
         
         self.btn_side_loglist.setIcon(get_svg_icon("file-text", icon_color))
         self.btn_side_filter.setIcon(get_svg_icon("filter", icon_color))
