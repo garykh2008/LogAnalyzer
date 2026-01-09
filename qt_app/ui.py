@@ -482,6 +482,14 @@ class MainWindow(QMainWindow):
         self.show_filtered_only = self.show_filtered_action.isChecked()
         self.recalc_filters()
         
+        mode_str = "Filtered View" if self.show_filtered_only else "Full Log View"
+        count = 0
+        if self.show_filtered_only and self.model.filtered_indices:
+            count = len(self.model.filtered_indices)
+        elif not self.show_filtered_only and self.current_engine:
+            count = self.current_engine.line_count()
+        self.toast.show_message(f"{mode_str}: {count:,} lines")
+        
         # Trigger re-search to update results count and matches for visibility change
         query = self.search_input.currentText()
         if query and not self.search_widget.isHidden():
@@ -1386,11 +1394,14 @@ class MainWindow(QMainWindow):
 
     def recalc_filters(self, force_color_update=False):
         if not self.current_engine: return
+        start_time = time.time()
+        was_calculated = False
         if self.filters_dirty_cache:
             rust_f = [(f["text"], f["is_regex"], f["is_exclude"], False, i) for i, f in enumerate(self.filters) if f["enabled"]]
             try:
                 res = self.current_engine.filter(rust_f)
                 self.cached_filter_results = (res, rust_f); self.filters_dirty_cache = False
+                was_calculated = True
             except: return
         if self.cached_filter_results:
             res, rust_f = self.cached_filter_results
@@ -1402,7 +1413,14 @@ class MainWindow(QMainWindow):
                        for j, rf in enumerate(rust_f)}
             self.model.update_filter_result(tag_codes, palette, filtered_indices if self.show_filtered_only else None)
             self.update_scrollbar_range()
-            if not force_color_update: self.refresh_filter_tree()
+            if not force_color_update:
+                self.refresh_filter_tree()
+                elapsed = time.time() - start_time
+                count = len(filtered_indices) if filtered_indices else 0
+                if self.show_filtered_only:
+                     self.toast.show_message(f"Filtered: {count:,} lines ({elapsed:.3f}s)")
+                elif was_calculated: # Only show if we actually recalculated
+                     self.toast.show_message(f"Filters updated ({elapsed:.3f}s)")
             self.update_status_bar(f"Shows {len(filtered_indices if self.show_filtered_only else range(self.current_engine.line_count())):,} lines")
 
     def show_goto_dialog(self):
