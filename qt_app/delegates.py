@@ -24,7 +24,8 @@ class LogListDelegate(QStyledItemDelegate):
                 bg_color = option.palette.highlight().color()
                 bg_color.setAlpha(80) # Semi-transparent selection
             elif state & QStyle.State_MouseOver:
-                bg_color = QColor(0, 0, 0, 20) if option.palette.base().color().lightness() > 128 else QColor(255, 255, 255, 20)
+                alpha = 30 if option.palette.base().color().lightness() < 128 else 20
+                bg_color = QColor(255, 255, 255, alpha) if option.palette.base().color().lightness() < 128 else QColor(0, 0, 0, alpha)
             
             if bg_color:
                 painter.fillRect(option.rect, bg_color)
@@ -116,20 +117,18 @@ class LogDelegate(QStyledItemDelegate):
             scroll_x = option.widget.horizontalScrollBar().value() if option.widget else 0
             
             # 1. Background
-            bg_color = None
             state = option.state
+            
+            # First, draw model-provided background (if any)
+            model_bg = index.data(Qt.BackgroundRole)
+            if model_bg and isinstance(model_bg, QColor):
+                painter.fillRect(option.rect, model_bg)
 
             if state & QStyle.State_Selected:
-                bg_color = option.palette.highlight()
+                painter.fillRect(option.rect, option.palette.highlight())
             elif state & QStyle.State_MouseOver:
-                 bg_color = self.hover_color
-            else:
-                model_bg = index.data(Qt.BackgroundRole)
-                if model_bg and isinstance(model_bg, QColor):
-                    bg_color = model_bg
-
-            if bg_color:
-                painter.fillRect(option.rect, bg_color)
+                 # Standard hover overlay (blended over the current background)
+                 painter.fillRect(option.rect, self.hover_color)
 
             # --- Fixed Line Number Column ---
             raw_index = index.data(Qt.UserRole + 1)
@@ -282,8 +281,8 @@ class FilterDelegate(QStyledItemDelegate):
                 alpha = 40 if has_custom_bg else 80
                 painter.fillRect(option.rect, QColor(0, 122, 204, alpha))
             elif option.state & QStyle.State_MouseOver:
-                # Subtle brightness overlay
-                alpha = 20 if has_custom_bg else 40
+                # Standardized brightness overlay
+                alpha = 30 if is_dark_bg else 20
                 overlay = QColor(255, 255, 255, alpha) if is_dark_bg else QColor(0, 0, 0, alpha)
                 painter.fillRect(option.rect, overlay)
 

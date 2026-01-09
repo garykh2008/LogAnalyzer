@@ -697,8 +697,11 @@ class MainWindow(QMainWindow):
 
         if self.is_dark_mode:
             bg_color, fg_color, selection_bg, selection_fg = "#1e1e1e", "#d4d4d4", "#264f78", "#ffffff"
-            hover_bg, scrollbar_bg, scrollbar_handle = "#2a2d2e", "#1e1e1e", "#424242"
-            scrollbar_hover, menu_bg, menu_fg, menu_sel = "#4f4f4f", "#252526", "#cccccc", "#094771"
+            # Define hover as a QColor for delegates and a string for QSS
+            hover_qcolor = QColor(255, 255, 255, 30)
+            hover_bg = "rgba(255, 255, 255, 30)"
+            scrollbar_bg, scrollbar_handle = "#1e1e1e", "#424242"
+            scrollbar_hover, menu_bg, menu_fg, menu_sel = "#4f4f4f", "#252526", "#cccccc", "rgba(255, 255, 255, 30)"
             menu_sel_fg = "#ffffff"
             bar_bg, bar_fg, input_bg, input_fg = "#007acc", "#ffffff", "#3c3c3c", "#cccccc"
             float_bg, float_border, dock_title_bg, tree_bg = "#252526", "#3c3c3c", "#2d2d2d", "#252526"
@@ -709,8 +712,10 @@ class MainWindow(QMainWindow):
             checkbox_active = "#007acc"
         else:
             bg_color, fg_color, selection_bg, selection_fg = "#ffffff", "#000000", "#add6ff", "#000000"
-            hover_bg, scrollbar_bg, scrollbar_handle = "#e8e8e8", "#f3f3f3", "#c1c1c1"
-            scrollbar_hover, menu_bg, menu_fg, menu_sel = "#a8a8a8", "#f3f3f3", "#333333", "#add6ff"
+            hover_qcolor = QColor(0, 0, 0, 20)
+            hover_bg = "rgba(0, 0, 0, 20)"
+            scrollbar_bg, scrollbar_handle = "#f3f3f3", "#c1c1c1"
+            scrollbar_hover, menu_bg, menu_fg, menu_sel = "#a8a8a8", "#f3f3f3", "#333333", "rgba(0, 0, 0, 20)"
             menu_sel_fg = "#000000"
             bar_bg, bar_fg, input_bg, input_fg = "#007acc", "#ffffff", "#ffffff", "#000000"
             float_bg, float_border, dock_title_bg, tree_bg = "#f3f3f3", "#bbbbbb", "#e1e1e1", "#f3f3f3"
@@ -725,7 +730,7 @@ class MainWindow(QMainWindow):
         log_gutter_fg = "#858585" if self.is_dark_mode else "#237893"
         log_border = "#404040" if self.is_dark_mode else "#e5e5e5" # Subtle border
 
-        self.delegate.set_hover_color(hover_bg)
+        self.delegate.set_hover_color(hover_qcolor) # Pass QColor directly
         self.delegate.set_theme_config(log_gutter_bg, log_gutter_fg, log_border)
         
         self.list_view.viewport().update()
@@ -751,7 +756,7 @@ class MainWindow(QMainWindow):
         #FilterDock QTreeWidget, #NotesDock QTreeWidget, #LogListDock QTreeWidget {{ background-color: {sidebar_bg}; border: none; }}
         QMenuBar {{ background-color: {menu_bg}; color: {menu_fg}; border-bottom: 1px solid {float_border}; padding: 2px; }}
         QMenuBar::item {{ background-color: transparent; padding: 4px 10px; border-radius: 4px; }}
-        QMenuBar::item:selected {{ background-color: {hover_bg}; color: {selection_fg}; }}
+        QMenuBar::item:selected {{ background-color: {hover_bg}; }}
         QMenu {{ background-color: {menu_bg}; color: {menu_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px; }}
         QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; }}
         QMenu::item:selected {{ background-color: {menu_sel}; color: {menu_sel_fg}; }}
@@ -848,12 +853,12 @@ class MainWindow(QMainWindow):
             QTreeWidget {{ background-color: {log_content_bg}; border: none; }}
             QTreeWidget::item {{ padding: 4px; border: none; }}
             QTreeWidget::item:selected {{ background-color: #264f78; color: #ffffff; }}
-            QTreeWidget::item:hover {{ background-color: #2a2d2e; }}
+            QTreeWidget::item:hover {{ background-color: {hover_bg}; }}
         """ if self.is_dark_mode else f"""
             QTreeWidget {{ background-color: {log_content_bg}; border: none; }}
             QTreeWidget::item {{ padding: 4px; border: none; }}
             QTreeWidget::item:selected {{ background-color: #add6ff; color: #000000; }}
-            QTreeWidget::item:hover {{ background-color: #e8e8e8; }}
+            QTreeWidget::item:hover {{ background-color: {hover_bg}; }}
         """)
         self.log_list_delegate.set_theme_config(log_list_border)
         self.btn_open_log.setIcon(get_svg_icon("file-text", icon_color))
