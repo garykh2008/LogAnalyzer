@@ -5,6 +5,8 @@ from PySide6.QtCore import Qt, Signal, QObject, QSize
 from PySide6.QtGui import QColor, QAction, QFont, QFontInfo
 from .utils import adjust_color_for_theme, set_windows_title_bar_color
 from .resources import get_svg_icon
+from .modern_dialog import ModernDialog
+from .modern_messagebox import ModernMessageBox
 import os
 import re
 import json
@@ -33,15 +35,13 @@ class NoteLineDelegate(QStyledItemDelegate):
         else:
             super().paint(painter, option, index)
 
-class NoteDialog(QDialog):
-    # ... [Keep NoteDialog as is] ...
+class NoteDialog(ModernDialog):
     def __init__(self, parent=None, initial_text="", line_num=0):
-        super().__init__(parent)
-        self.setWindowTitle(f"Note for Line {line_num}")
-        self.resize(400, 200)
+        super().__init__(parent, title=f"Note for Line {line_num}", fixed_size=(400, 240))
         self.note_content = None
 
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         
         self.text_edit = QTextEdit()
         
@@ -56,7 +56,9 @@ class NoteDialog(QDialog):
         layout.addWidget(self.text_edit)
 
         btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(0, 10, 0, 0)
         btn_save = QPushButton("Save")
+        btn_save.setDefault(True)
         btn_save.clicked.connect(self.save)
         btn_cancel = QPushButton("Cancel")
         btn_cancel.clicked.connect(self.reject)
@@ -66,6 +68,7 @@ class NoteDialog(QDialog):
         btn_layout.addWidget(btn_cancel)
         layout.addLayout(btn_layout)
         
+        self.setContentLayout(layout)
         self.text_edit.setFocus()
 
     def save(self):
@@ -309,15 +312,13 @@ class NotesManager(QObject):
             
             self.main_window.toast.show_message(f"Exported to {os.path.basename(filepath)}")
         except Exception as e:
-            QMessageBox.critical(self.main_window, "Error", f"Export failed: {e}")
+            ModernMessageBox.critical(self.main_window, "Error", f"Export failed: {e}")
 
     def add_note(self, raw_index, timestamp, filepath):
         key = (filepath, raw_index)
         current_text = self.notes.get(key, "")
         
         dialog = NoteDialog(self.main_window, current_text, raw_index + 1)
-        # Apply title bar theme
-        set_windows_title_bar_color(dialog.winId(), self.is_dark_mode)
         
         if dialog.exec():
             content = dialog.note_content

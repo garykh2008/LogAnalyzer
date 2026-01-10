@@ -23,6 +23,7 @@ import bisect
 
 from .components import CustomTitleBar
 from .modern_dialog import ModernDialog
+from .modern_messagebox import ModernMessageBox
 
 class FilterTreeWidget(QTreeWidget):
     def __init__(self, on_drop_callback=None, parent=None):
@@ -1009,15 +1010,11 @@ class MainWindow(QMainWindow):
     def _clear_all_logs(self):
         # 1. Check for unsaved notes before clearing everything
         if self.notes_manager.has_unsaved_changes():
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("Unsaved Notes")
-            msg_box.setText("There are unsaved notes. Save them for all files before clearing?")
-            msg_box.setIcon(QMessageBox.Question)
-            msg_box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
-            msg_box.setDefaultButton(QMessageBox.Save)
-            msg_box.create(); set_windows_title_bar_color(msg_box.winId(), self.is_dark_mode)
+            res = ModernMessageBox.question(self, "Unsaved Notes", 
+                                            "There are unsaved notes. Save them for all files before clearing?", 
+                                            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, 
+                                            QMessageBox.Save)
             
-            res = msg_box.exec()
             if res == QMessageBox.Save:
                 if not self.notes_manager.save_all_notes():
                     return # Save failed or cancelled inside save_all_notes
@@ -1224,14 +1221,11 @@ class MainWindow(QMainWindow):
             # Check for unsaved notes for THIS specific file
             file_notes = {k: v for (fp, k), v in self.notes_manager.notes.items() if fp == filepath}
             if file_notes and self.notes_manager.has_unsaved_changes():
-                msg_box = QMessageBox(self)
-                msg_box.setWindowTitle("Unsaved Notes")
-                msg_box.setText(f"File '{os.path.basename(filepath)}' has unsaved notes. Save them before removing?")
-                msg_box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
-                msg_box.setDefaultButton(QMessageBox.Save)
-                msg_box.create(); set_windows_title_bar_color(msg_box.winId(), self.is_dark_mode)
+                res = ModernMessageBox.question(self, "Unsaved Notes",
+                                                f"File '{os.path.basename(filepath)}' has unsaved notes. Save them before removing?",
+                                                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                                                QMessageBox.Save)
                 
-                res = msg_box.exec()
                 if res == QMessageBox.Save:
                     # Save only this file's notes
                     self.notes_manager._save_file_notes(filepath)
@@ -1538,16 +1532,9 @@ class MainWindow(QMainWindow):
 
         # Helper to prompt user
         def prompt_save_changes(title, text):
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle(title)
-            msg_box.setText(text)
-            msg_box.setIcon(QMessageBox.Question)
-            msg_box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel)
-            msg_box.setDefaultButton(QMessageBox.Save)
-            
-            msg_box.create()
-            set_windows_title_bar_color(msg_box.winId(), self.is_dark_mode)
-            return msg_box.exec()
+            return ModernMessageBox.question(self, title, text, 
+                                             QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, 
+                                             QMessageBox.Save)
 
         # 1. Check Filters
         if self.filters_modified:
@@ -1716,8 +1703,18 @@ class MainWindow(QMainWindow):
 
     def show_shortcuts(self):
         shortcuts = [("General", ""), ("Ctrl + O", "Open Log File"), ("Ctrl + Q", "Exit Application"), ("", ""), ("View & Navigation", ""), ("Ctrl + F", "Open Find Bar"), ("Esc", "Close Find Bar / Clear Selection"), ("Ctrl + H", "Toggle Show Filtered Only"), ("F2 / F3", "Find Previous / Next"), ("Ctrl + Left / Right", "Navigate Filter Hits (Selected Filter)"), ("Home / End", "Jump to Start / End of Log"), ("", ""), ("Log View", ""), ("Double-Click", "Create Filter from selected text"), ("'C' key", "Add / Edit Note for current line"), ("Ctrl + C", "Copy selected lines"), ("", ""), ("Filters", ""), ("Delete", "Remove selected filter"), ("Double-Click", "Edit filter properties"), ("Space", "Toggle filter enabled/disabled")]
-        dialog = QDialog(self); dialog.setWindowTitle("Keyboard Shortcuts"); dialog.resize(550, 600); layout = QVBoxLayout(dialog)
-        tree = QTreeWidget(); tree.setHeaderLabels(["Key", "Description"]); tree.setRootIsDecorated(False); tree.setAlternatingRowColors(True)
+        
+        dialog = ModernDialog(self, title="Keyboard Shortcuts", fixed_size=(550, 600))
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        tree = QTreeWidget()
+        tree.setHeaderLabels(["Key", "Description"])
+        tree.setRootIsDecorated(False)
+        tree.setAlternatingRowColors(True)
+        # Apply slight styling to tree for dialog
+        tree.setStyleSheet("border: none;") 
+        
         for k, d in shortcuts:
             item = QTreeWidgetItem(tree)
             if not k and not d: continue
@@ -1725,13 +1722,26 @@ class MainWindow(QMainWindow):
                 item.setText(0, k); bg = QColor(60,60,60) if self.is_dark_mode else QColor(230,230,230)
                 item.setBackground(0, bg); item.setBackground(1, bg); f = item.font(0); f.setBold(True); item.setFont(0, f)
             else: item.setText(0, k); item.setText(1, d)
-        tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents); tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
-        layout.addWidget(tree); btn = QPushButton("Close"); btn.clicked.connect(dialog.accept); layout.addWidget(btn); set_windows_title_bar_color(dialog.winId(), self.is_dark_mode); dialog.exec()
+        tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
+        
+        layout.addWidget(tree)
+        
+        btn = QPushButton("Close")
+        btn.clicked.connect(dialog.accept)
+        # Add button container
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn)
+        btn_layout.setContentsMargins(10, 10, 10, 10)
+        
+        layout.addLayout(btn_layout)
+        
+        dialog.setContentLayout(layout)
+        dialog.exec()
 
     def show_about(self):
-        msg_box = QMessageBox(self); msg_box.setWindowTitle("About"); msg_box.setTextFormat(Qt.RichText)
-        msg_box.setText(f"<h3>{self.APP_NAME} {self.VERSION}</h3><p>A high-performance log analysis tool built with PySide6 and Rust extension.</p><p>Developer: Gary Hsieh</p>")
-        msg_box.setStandardButtons(QMessageBox.Ok); set_windows_title_bar_color(msg_box.winId(), self.is_dark_mode); msg_box.exec()
+        ModernMessageBox.information(self, "About", f"<h3>{self.APP_NAME} {self.VERSION}</h3><p>A high-performance log analysis tool built with PySide6 and Rust extension.</p><p>Developer: Gary Hsieh</p>")
 
     def open_documentation(self):
         path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "Doc", f"Log_Analyzer_{self.VERSION}_Docs_EN.html"))
