@@ -528,10 +528,13 @@ class MainWindow(QMainWindow):
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
+        # Disable default grip to prevent duplicates
+        self.status_bar.setSizeGripEnabled(False)
+        
         self.status_label = QLabel("Ready")
         self.status_bar.addWidget(self.status_label, 1)
         
-        # Add Resize Grip for Frameless Window
+        # Add Custom Resize Grip for Frameless Window
         self.size_grip = QSizeGrip(self)
         self.status_bar.addPermanentWidget(self.size_grip)
 
