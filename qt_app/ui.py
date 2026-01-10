@@ -887,8 +887,8 @@ class MainWindow(QMainWindow):
         QMenuBar {{ background-color: transparent; color: {titlebar_fg}; border: none; padding: 0px; }}
         QMenuBar::item {{ background-color: transparent; padding: 5px 10px; border-radius: 4px; }}
         QMenuBar::item:selected {{ background-color: {titlebar_hover}; }}
-        QMenu {{ background-color: {menu_bg}; color: {menu_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px; }}
-        QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; }}
+        QMenu {{ background-color: {menu_bg}; color: {menu_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px; margin: 0px; }}
+        QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; margin: 1px 0px; }}
         QMenu::item:selected {{ background-color: {menu_sel}; color: {menu_sel_fg}; }}
         QMenu::separator {{ height: 1px; background: {float_border}; margin: 4px 8px; }}
         """
