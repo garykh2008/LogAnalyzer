@@ -806,6 +806,7 @@ class MainWindow(QMainWindow):
         QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; margin: 1px 0px; }}
         QMenu::item:selected {{ background-color: {menu_sel}; color: {menu_sel_fg}; }}
         QMenu::separator {{ height: 1px; background: {float_border}; margin: 4px 8px; }}
+        QToolTip {{ color: #333333; background-color: #f0f0f0; border: 1px solid #cccccc; padding: 4px; border-radius: 3px; }}
         """
         
         self._set_windows_title_bar_color(self.is_dark_mode)
