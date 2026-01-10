@@ -1,67 +1,62 @@
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QCheckBox, QPushButton, QColorDialog, QDialogButtonBox, QGroupBox, QGridLayout)
+from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QCheckBox, QPushButton, QColorDialog, QDialogButtonBox, QGroupBox, QGridLayout, QFrame, QSizePolicy)
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtCore import Qt
 from .utils import set_windows_title_bar_color, adjust_color_for_theme
 from .resources import get_svg_icon
+from .modern_dialog import ModernDialog
 
-class FilterDialog(QDialog):
+class FilterDialog(ModernDialog):
 
     def __init__(self, parent=None, filter_data=None):
-        super().__init__(parent)
-        self.setWindowTitle("Edit Filter" if filter_data else "Add Filter")
-        self.resize(450, 320) # Slightly larger for better spacing
-
+        # Increased height slightly, removed fixed size constraint to allow layout to breathe if needed
+        super().__init__(parent, title="Edit Filter" if filter_data else "Add Filter", fixed_size=(500, 320))
+        
         self.filter_data = filter_data or {}
 
-        main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(15)
+        # Use the existing content_layout from ModernDialog
+        self.content_layout.setSpacing(12) # Slightly tighter spacing
 
-        # --- Group 1: Matching Rules ---
-        group_match = QGroupBox("Matching Rules")
-        group_match_layout = QVBoxLayout(group_match)
-        group_match_layout.setSpacing(10)
-
-        # Pattern Input (Top-aligned label)
-        lbl_pattern = QLabel("Filter Pattern")
+        # --- Section 1: Pattern ---
+        lbl_pattern = QLabel("Pattern")
         f = lbl_pattern.font(); f.setBold(True); lbl_pattern.setFont(f)
+        self.content_layout.addWidget(lbl_pattern)
+
         self.pattern_edit = QLineEdit(self.filter_data.get("text", ""))
         self.pattern_edit.setPlaceholderText("e.g. Error, Warning, ^[0-9]+")
-        self.pattern_edit.setMinimumHeight(30)
+        self.pattern_edit.setMinimumHeight(32)
         self.pattern_edit.textChanged.connect(self._update_preview)
-        
-        group_match_layout.addWidget(lbl_pattern)
-        group_match_layout.addWidget(self.pattern_edit)
+        self.content_layout.addWidget(self.pattern_edit)
 
-        # Options (Horizontal)
+        # Options Row
         opts_layout = QHBoxLayout()
+        opts_layout.setSpacing(20)
         self.chk_regex = QCheckBox("Regex")
         self.chk_regex.setChecked(self.filter_data.get("is_regex", False))
         self.chk_exclude = QCheckBox("Exclude")
         self.chk_exclude.setChecked(self.filter_data.get("is_exclude", False))
         
-        # Case sensitive (New feature place holder or if supported)
-        # self.chk_case = QCheckBox("Case Sensitive") 
-
         opts_layout.addWidget(self.chk_regex)
         opts_layout.addWidget(self.chk_exclude)
         opts_layout.addStretch()
-        group_match_layout.addLayout(opts_layout)
+        self.content_layout.addLayout(opts_layout)
 
-        main_layout.addWidget(group_match)
-
-        # --- Group 2: Appearance ---
-        group_style = QGroupBox("Appearance")
-        group_style_layout = QVBoxLayout(group_style)
+        # --- Section 2: Style ---
+        lbl_style = QLabel("Appearance")
+        f = lbl_style.font(); f.setBold(True)
+        lbl_style.setFont(f)
+        self.content_layout.addWidget(lbl_style)
         
-        color_grid = QGridLayout()
+        # Style Row: [Text Color] [Bg Color] [Preview Area]
+        style_layout = QHBoxLayout()
+        style_layout.setSpacing(10)
         
-        self.btn_fg = QPushButton(" Text Color")
-        self.btn_fg.setIcon(get_svg_icon("type"))
-        self.btn_fg.setMinimumHeight(30)
-        self.btn_bg = QPushButton(" Background")
-        self.btn_bg.setIcon(get_svg_icon("droplet"))
-        self.btn_bg.setMinimumHeight(30)
+        self.btn_fg = QPushButton("Text")
+        self.btn_fg.setFixedWidth(80)
+        self.btn_fg.setMinimumHeight(32)
+        self.btn_bg = QPushButton("Back")
+        self.btn_bg.setFixedWidth(80)
+        self.btn_bg.setMinimumHeight(32)
 
         # Default colors
         self.fg_color = self.filter_data.get("fg_color", "#000000")
@@ -69,37 +64,38 @@ class FilterDialog(QDialog):
 
         self.btn_fg.clicked.connect(self._pick_fg)
         self.btn_bg.clicked.connect(self._pick_bg)
-
-        color_grid.addWidget(self.btn_fg, 0, 0)
-        color_grid.addWidget(self.btn_bg, 0, 1)
         
-        group_style_layout.addLayout(color_grid)
-        
-        # Live Preview Area
-        self.lbl_preview = QLabel("Preview Text")
+        # Preview Label (Acts as the third column)
+        self.lbl_preview = QLabel("Preview")
         self.lbl_preview.setAlignment(Qt.AlignCenter)
-        self.lbl_preview.setFixedHeight(40)
-        # Give it a border to stand out
-        self.lbl_preview.setStyleSheet("border: 1px solid #cccccc; border-radius: 4px;")
+        self.lbl_preview.setMinimumHeight(32)
+        self.lbl_preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         
-        group_style_layout.addWidget(QLabel("Preview:"))
-        group_style_layout.addWidget(self.lbl_preview)
+        style_layout.addWidget(self.btn_fg)
+        style_layout.addWidget(self.btn_bg)
+        style_layout.addWidget(self.lbl_preview)
+        
+        self.content_layout.addLayout(style_layout)
 
-        main_layout.addWidget(group_style)
-
-        # Initial Update
-        self._update_btn_styles()
-        self._update_preview()
+        self.content_layout.addStretch() # Push buttons to bottom
 
         # Buttons
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        main_layout.addWidget(buttons)
+        self.content_layout.addWidget(buttons)
 
-        # Apply Title Bar Theme
-        if parent and hasattr(parent, 'is_dark_mode'):
-            set_windows_title_bar_color(self.winId(), parent.is_dark_mode)
+        # Initial Update
+        self._update_btn_styles()
+        self._update_preview()
+        
+    def apply_theme(self):
+        super().apply_theme() # Apply base modern dialog styles
+        
+        # Ensure buttons show correct theme adjusted preview
+        self._update_btn_styles()
+        self._update_preview()
+
 
     def _pick_fg(self):
         c = QColorDialog.getColor(QColor(self.fg_color), self, "Select Text Color")
@@ -116,6 +112,7 @@ class FilterDialog(QDialog):
             self._update_preview()
 
     def _update_preview(self):
+        if not hasattr(self, 'lbl_preview') or not hasattr(self, 'pattern_edit'): return
         txt = self.pattern_edit.text() or "Preview Text"
         
         # Use theme-adjusted colors for preview to match actual list view look
@@ -130,6 +127,7 @@ class FilterDialog(QDialog):
         self.lbl_preview.setStyleSheet(f"background-color: {display_bg}; color: {display_fg}; border: 1px solid #888; border-radius: 4px; font-family: 'Inter', 'Consolas'; font-size: 14px;")
 
     def _update_btn_styles(self):
+        if not hasattr(self, 'btn_fg') or not hasattr(self, 'btn_bg'): return
         # Calculate contrast text for button readability
         def contrast(hex_color):
             c = QColor(hex_color)
