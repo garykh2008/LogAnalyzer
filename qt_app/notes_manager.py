@@ -196,6 +196,11 @@ class NotesManager(QObject):
     def has_unsaved_changes(self):
         return len(self.dirty_files) > 0
 
+    def close_file(self, filepath):
+        """Cleans up internal state when a file is closed."""
+        if filepath in self.dirty_files:
+            self.dirty_files.remove(filepath)
+
     def load_notes_for_file(self, log_filepath):
         """Automatically called when a log is loaded for the first time."""
         if not log_filepath: return

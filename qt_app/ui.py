@@ -222,7 +222,7 @@ class MainWindow(QMainWindow):
         self.btn_clear_logs = QToolButton()
         self.btn_clear_logs.setToolTip("Clear All Logs")
         self.btn_clear_logs.setFixedSize(26, 26)
-        self.btn_clear_logs.clicked.connect(self._clear_all_logs)
+        self.btn_clear_logs.clicked.connect(lambda: self._clear_all_logs())
         
         log_title_layout.addWidget(self.log_title_label)
         log_title_layout.addStretch()
@@ -1007,9 +1007,9 @@ class MainWindow(QMainWindow):
             if os.path.exists(fp):
                 self.load_log(fp, is_multiple=True)
 
-    def _clear_all_logs(self):
+    def _clear_all_logs(self, check_unsaved=True):
         # 1. Check for unsaved notes before clearing everything
-        if self.notes_manager.has_unsaved_changes():
+        if check_unsaved and self.notes_manager.has_unsaved_changes():
             res = ModernMessageBox.question(self, "Unsaved Notes", 
                                             "There are unsaved notes. Save them for all files before clearing?", 
                                             QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, 
@@ -1213,7 +1213,7 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
         
         clear_action = menu.addAction(get_svg_icon("x-circle", ic), "Clear All")
-        clear_action.triggered.connect(self._clear_all_logs)
+        clear_action.triggered.connect(lambda: self._clear_all_logs())
         menu.exec_(self.log_tree.mapToGlobal(pos))
 
     def _remove_log_file(self, filepath):
@@ -1232,13 +1232,14 @@ class MainWindow(QMainWindow):
                 elif res == QMessageBox.Cancel:
                     return
 
+            self.notes_manager.close_file(filepath)
             del self.loaded_logs[filepath]
             self.log_order.remove(filepath)
             if filepath in self.log_states: del self.log_states[filepath]
             self.update_log_tree()
             if self.current_log_path == filepath:
                 if self.log_order: self._switch_to_log(self.log_order[0])
-                else: self._clear_all_logs()
+                else: self._clear_all_logs(check_unsaved=False)
 
     def show_context_menu(self, pos):
         menu = QMenu(self)
