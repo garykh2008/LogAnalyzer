@@ -1863,6 +1863,23 @@ class MainWindow(QMainWindow):
         self.is_scrolling = True
         try:
             self.model.set_viewport(value, self.calculate_viewport_size())
+            
+            # Sync visual selection
+            if self.selected_raw_index != -1:
+                target_row = -1
+                
+                if self.show_filtered_only and self.model.filtered_indices:
+                    idx = bisect.bisect_left(self.model.filtered_indices, self.selected_raw_index)
+                    if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == self.selected_raw_index:
+                        target_row = idx - value
+                else:
+                    target_row = self.selected_raw_index - value
+                
+                if 0 <= target_row < self.model.rowCount():
+                    idx = self.model.index(target_row, 0)
+                    self.list_view.selectionModel().setCurrentIndex(idx, QItemSelectionModel.ClearAndSelect)
+                else:
+                    self.list_view.selectionModel().clearSelection()
         finally:
             self.is_scrolling = False
 
