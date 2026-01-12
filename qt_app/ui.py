@@ -143,7 +143,11 @@ class MainWindow(QMainWindow):
         self.cached_filter_results = None 
         self.is_scrolling = False
         
-        self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
+        # Dock Configuration
+        if sys.platform == "linux":
+            self.setDockOptions(QMainWindow.AllowTabbedDocks)
+        else:
+            self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
 
         self.list_view = QListView()
         self.model = LogModel()
@@ -196,10 +200,15 @@ class MainWindow(QMainWindow):
         self.activity_bar.addWidget(self.btn_side_filter)
         self.activity_bar.addWidget(self.btn_side_notes)
 
+        # Feature configuration based on platform
+        dock_features = QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
+        if sys.platform == "linux":
+            dock_features = QDockWidget.NoDockWidgetFeatures
+
         # --- Log List Dock ---
         self.log_list_dock = QDockWidget("LOG FILES", self)
         self.log_list_dock.setObjectName("LogListDock")
-        self.log_list_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.log_list_dock.setFeatures(dock_features)
         self.log_list_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
         
         # Custom Title Bar
@@ -257,7 +266,7 @@ class MainWindow(QMainWindow):
         # --- Filter Dock ---
         self.filter_dock = QDockWidget("FILTERS", self)
         self.filter_dock.setObjectName("FilterDock")
-        self.filter_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.filter_dock.setFeatures(dock_features)
         self.filter_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
         
         # Custom Title Bar
@@ -324,7 +333,7 @@ class MainWindow(QMainWindow):
         self.notes_dock = self.notes_manager.dock
         self.notes_dock.setWindowTitle("NOTES")
         self.notes_dock.setObjectName("NotesDock")
-        self.notes_dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.notes_dock.setFeatures(dock_features)
         self.notes_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.notes_dock)
         self.notes_dock.visibilityChanged.connect(lambda visible: self.btn_side_notes.setChecked(visible))
@@ -433,6 +442,7 @@ class MainWindow(QMainWindow):
 
         self.should_maximize = self.settings.value("is_maximized", False, type=bool)
 
+        has_saved_state = False
         if self.settings.value("window_state"):
             has_saved_state = self.restoreState(self.settings.value("window_state"))
 
@@ -642,7 +652,8 @@ class MainWindow(QMainWindow):
                 target.hide()
             else:
                 target.show()
-                target.raise_()
+                if sys.platform != "linux":
+                    target.raise_()
 
     def eventFilter(self, obj, event):
         if obj == self.custom_menu_bar:
