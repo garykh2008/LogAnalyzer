@@ -24,6 +24,7 @@ import bisect
 from .components import CustomTitleBar, DimmerOverlay, BadgeToolButton, ClickableLabel, LoadingSpinner
 from .modern_dialog import ModernDialog
 from .modern_messagebox import ModernMessageBox
+from .scrollbar_map import SearchScrollBar
 
 class FilterTreeWidget(QTreeWidget):
     def __init__(self, on_drop_callback=None, parent=None):
@@ -332,7 +333,7 @@ class MainWindow(QMainWindow):
 
         # Virtual Viewport Setup
         self.list_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.v_scrollbar = QScrollBar(Qt.Vertical)
+        self.v_scrollbar = SearchScrollBar(Qt.Vertical)
         self.v_scrollbar.valueChanged.connect(self.on_scrollbar_value_changed)
         self.list_view.installEventFilter(self)
         
@@ -829,6 +830,7 @@ class MainWindow(QMainWindow):
 
         self.delegate.set_hover_color(hover_qcolor) # Pass QColor directly
         self.delegate.set_theme_config(log_gutter_bg, log_gutter_fg, log_border)
+        self.v_scrollbar.set_theme(self.is_dark_mode)
         
         self.list_view.viewport().update()
         
@@ -1369,6 +1371,7 @@ class MainWindow(QMainWindow):
         self.search_widget.hide()
         self.delegate.set_search_query(None, False)
         self.search_results = []
+        self.v_scrollbar.set_search_results([], 1)
         self.search_info_label.setText("")
         self.list_view.viewport().update()
         self.list_view.setFocus()
@@ -1421,6 +1424,10 @@ class MainWindow(QMainWindow):
         self.search_results = results
         self.delegate.set_search_query(query, is_case)
         self.list_view.viewport().update()
+        
+        # Update Scrollbar Heatmap
+        total_lines = len(self.model.filtered_indices) if self.show_filtered_only and self.model.filtered_indices else self.current_engine.line_count()
+        self.v_scrollbar.set_search_results(self.search_results, total_lines)
         
         if results: 
             # Determine start index based on current selection
