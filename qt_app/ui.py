@@ -798,10 +798,15 @@ class MainWindow(QMainWindow):
             titlebar_hover = "#d0d0d0"
             close_hover = "#c42b1c"
 
-        # Log View Gutter Theme (Match VS Code: Same as content but with border)
-        log_gutter_bg = None # Transparent, shows content bg
-        log_gutter_fg = "#858585" if self.is_dark_mode else "#237893"
-        log_border = "#404040" if self.is_dark_mode else "#e5e5e5" # Subtle border
+        # Log View Gutter Theme
+        if self.is_dark_mode:
+            log_gutter_bg = "#252526" 
+            log_gutter_fg = "#858585"
+            log_border = "#404040"
+        else:
+            log_gutter_bg = "#f3f3f3"
+            log_gutter_fg = "#237893"
+            log_border = "#e5e5e5"
 
         self.delegate.set_hover_color(hover_qcolor) # Pass QColor directly
         self.delegate.set_theme_config(log_gutter_bg, log_gutter_fg, log_border)
