@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QToolButton, QStyleOption, QStyle, QApplication)
 from PySide6.QtGui import QIcon, QPainter, QFont, QColor
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QRect
 from .resources import get_svg_icon
 import os
 
@@ -134,4 +134,55 @@ class DimmerOverlay(QWidget):
     def mousePressEvent(self, event):
         # Consume event to block interaction with underlying window
         pass
+
+
+class BadgeToolButton(QToolButton):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.badge_label = QLabel(self)
+        self.badge_label.hide()
+        self.badge_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.badge_label.setAlignment(Qt.AlignCenter)
+        self._bg_color = "#007acc"
+        self._update_style()
+
+    def _update_style(self):
+        self.badge_label.setStyleSheet(f"""
+            background-color: {self._bg_color};
+            color: white;
+            border-radius: 8px;
+            font-weight: bold;
+            font-family: Inter, Segoe UI;
+            font-size: 10px;
+        """)
+
+    def set_badge(self, text, bg_color=None):
+        if not text or str(text) == "0":
+            self.badge_label.hide()
+            return
+            
+        self.badge_label.setText(str(text))
+        if bg_color: 
+            self._bg_color = bg_color
+            self._update_style()
+        
+        # Calculate width: min 16px, expand for longer text
+        fm = self.badge_label.fontMetrics()
+        w = max(16, fm.horizontalAdvance(str(text)) + 6)
+        self.badge_label.setFixedSize(w, 16)
+        
+        self.badge_label.show()
+        self.badge_label.raise_()
+        self._update_pos()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_pos()
+        
+    def _update_pos(self):
+        if self.badge_label.isVisible():
+            x = self.width() - self.badge_label.width() - 4
+            y = 4
+            self.badge_label.move(x, y)
+
 

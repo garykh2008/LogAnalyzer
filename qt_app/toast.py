@@ -1,24 +1,27 @@
-from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QFrame, QHBoxLayout, QGraphicsOpacityEffect, QGraphicsDropShadowEffect
-from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, Signal, QPoint, QEasingCurve, QSize
-from PySide6.QtGui import QColor, QPalette, QPainter
+from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QFrame, QHBoxLayout, QGraphicsDropShadowEffect
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, Signal, QPoint, QEasingCurve, QObject, QRect
+from PySide6.QtGui import QColor
 from .resources import get_svg_icon
 
-class ToastNotification(QWidget): # Container Widget for Opacity
+class ToastNotification(QWidget):
     closed = Signal()
 
-    def __init__(self, parent, message, type_str="info", duration=3000, is_dark=True):
-        super().__init__(parent)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents) 
-        
+    def __init__(self, message, type_str="info", duration=3000, is_dark=True):
+        super().__init__(None) # Top-level window
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+
         # Main Layout
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(4, 4, 4, 4) # Space for shadow
-        
-        # Content Frame (The actual visible part)
+        self.layout.setContentsMargins(10, 2, 10, 10) # Minimal top margin
+
+        # Content Frame
         self.content_frame = QFrame()
         self.content_frame.setObjectName("ToastContent")
         self.layout.addWidget(self.content_frame)
-        
+
         # Style Config
         colors = {
             "info":    {"border": "#3794ff", "icon": "message-info"},
@@ -27,26 +30,23 @@ class ToastNotification(QWidget): # Container Widget for Opacity
             "error":   {"border": "#dc3545", "icon": "message-error"}
         }
         cfg = colors.get(type_str, colors["info"])
-        
-        # Theme Colors with Tint
+
+        # Theme Colors
         if is_dark:
             text_color = "#ffffff"
             border_color = "#454545"
-            # Subtle background tints for dark mode
-            if type_str == "success": bg_color = "#1e3a1e" 
+            if type_str == "success": bg_color = "#1e3a1e"
             elif type_str == "error": bg_color = "#3a1e1e"
             elif type_str == "warning": bg_color = "#3a3a1e"
             else: bg_color = "#252526"
         else:
             text_color = "#333333"
             border_color = "#cccccc"
-            # Subtle background tints for light mode
             if type_str == "success": bg_color = "#f0fff4"
             elif type_str == "error": bg_color = "#fff0f0"
             elif type_str == "warning": bg_color = "#fffbe6"
             else: bg_color = "#ffffff"
 
-        # Stylesheet
         self.content_frame.setStyleSheet(f"""
             #ToastContent {{
                 background-color: {bg_color};
@@ -62,44 +62,38 @@ class ToastNotification(QWidget): # Container Widget for Opacity
                 font-size: 13px;
             }}
         """)
-        
-        # Shadow Effect (Applied to Content Frame)
+
+        # Shadow
         self.shadow = QGraphicsDropShadowEffect(self.content_frame)
         self.shadow.setBlurRadius(15)
         self.shadow.setXOffset(0)
         self.shadow.setYOffset(4)
-        self.shadow.setColor(QColor(0, 0, 0, 60)) # Semi-transparent black shadow
+        self.shadow.setColor(QColor(0, 0, 0, 60))
         self.content_frame.setGraphicsEffect(self.shadow)
-        
-        # Inner Layout
+
+        # Inner Content
         frame_layout = QHBoxLayout(self.content_frame)
         frame_layout.setContentsMargins(12, 10, 16, 10)
         frame_layout.setSpacing(12)
-        
-        # Icon
+
         icon_label = QLabel()
         icon_label.setFixedSize(18, 18)
         icon_label.setScaledContents(True)
-        # Use border color for icon to match theme
         icon_label.setPixmap(get_svg_icon(cfg['icon'], cfg['border'], 18).pixmap(18, 18))
         frame_layout.addWidget(icon_label)
-        
-        # Text
+
         text_label = QLabel(message)
         frame_layout.addWidget(text_label)
-        
-        # Opacity Effect for Animation (Applied to SELF - the container)
-        self.opacity_effect = QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self.opacity_effect)
-        
-        # Fade In Animation
-        self.anim = QPropertyAnimation(self.opacity_effect, b"opacity")
+
+        # Animation (Window Opacity)
+        self.setWindowOpacity(0.0)
+        self.anim = QPropertyAnimation(self, b"windowOpacity")
         self.anim.setDuration(250)
         self.anim.setStartValue(0.0)
         self.anim.setEndValue(1.0)
         self.anim.setEasingCurve(QEasingCurve.OutCubic)
         self.anim.start()
-        
+
         # Timer
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
@@ -117,59 +111,60 @@ class ToastNotification(QWidget): # Container Widget for Opacity
         self.closed.emit()
         self.deleteLater()
 
-class Toast(QWidget):
-    """
-    Toast Manager that handles stacking notifications.
-    Uses Qt.Tool to float above everything.
-    """
+class Toast(QObject):
     def __init__(self, parent):
         super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
-        
-        self.is_dark_mode = True # Default
-        
-        # Container Layout - Stack from bottom
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 40) # Bottom padding relative to window
-        self.layout.setSpacing(8)
-        self.layout.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
-        
+        self.parent_widget = parent
+        self.is_dark_mode = True
         self.notifications = []
-        
-        # Initial size
-        if parent:
-            self.resize_to_parent()
 
     def set_theme(self, is_dark):
         self.is_dark_mode = is_dark
 
     def show_message(self, message, duration=3000, type_str="info"):
-        # Limit max notifications to avoid screen clutter
         if len(self.notifications) >= 5:
-            # Remove oldest
             oldest = self.notifications.pop(0)
-            self.layout.removeWidget(oldest)
-            oldest.deleteLater()
+            oldest.close_notification()
 
-        notif = ToastNotification(self, message, type_str, duration, self.is_dark_mode)
-        self.layout.addWidget(notif)
-        self.notifications.append(notif)
+        notif = ToastNotification(message, type_str, duration, self.is_dark_mode)
+        # Ensure it's shown to calculate size hint
+        notif.show()
+        notif.adjustSize() 
         
+        self.notifications.append(notif)
         notif.closed.connect(lambda: self._remove_notification(notif))
         
-        notif.show()
-        self.show()
-        self.raise_()
+        self.reposition_all()
 
     def _remove_notification(self, notif):
         if notif in self.notifications:
             self.notifications.remove(notif)
-            self.layout.removeWidget(notif)
-            # notif.deleteLater() is called inside notif.close_notification
+        self.reposition_all()
 
+    def reposition_all(self):
+        if not self.parent_widget: return
+        
+        geo = self.parent_widget.geometry()
+        # Start from bottom center
+        base_y = geo.y() + geo.height() - 60 
+        center_x = geo.x() + geo.width() // 2
+        
+        # Iterate backwards (newest at bottom)
+        for notif in reversed(self.notifications):
+            w = notif.width()
+            h = notif.height()
+            x = center_x - w // 2
+            y = base_y - h
+            
+            notif.move(x, y)
+            
+            base_y -= (h - 8) # Spacing adjustment to account for shadow overlap
+
+    # Called by MainWindow on move/resize
     def resize_to_parent(self):
-        if self.parent():
-            self.setGeometry(self.parent().geometry())
+        self.reposition_all()
+    
+    # Compatibility with previous interface
+    def raise_(self):
+        for n in self.notifications:
+            n.raise_()

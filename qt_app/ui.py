@@ -21,7 +21,7 @@ import sys
 import ctypes
 import bisect
 
-from .components import CustomTitleBar, DimmerOverlay
+from .components import CustomTitleBar, DimmerOverlay, BadgeToolButton
 from .modern_dialog import ModernDialog
 from .modern_messagebox import ModernMessageBox
 
@@ -179,13 +179,13 @@ class MainWindow(QMainWindow):
         self.btn_side_loglist.setToolTip("Log Files (Ctrl+Shift+L)")
         self.btn_side_loglist.clicked.connect(lambda: self.toggle_sidebar(2))
 
-        self.btn_side_filter = QToolButton()
+        self.btn_side_filter = BadgeToolButton()
         self.btn_side_filter.setCheckable(True)
         self.btn_side_filter.setFixedSize(48, 48)
         self.btn_side_filter.setToolTip("Filters (Ctrl+Shift+F)")
         self.btn_side_filter.clicked.connect(lambda: self.toggle_sidebar(0))
 
-        self.btn_side_notes = QToolButton()
+        self.btn_side_notes = BadgeToolButton()
         self.btn_side_notes.setCheckable(True)
         self.btn_side_notes.setFixedSize(48, 48)
         self.btn_side_notes.setToolTip("Notes (Ctrl+Shift+N)")
@@ -1158,6 +1158,9 @@ class MainWindow(QMainWindow):
         self.update_window_title()
         self.update_status_bar(f"Shows {count:,} lines")
         
+        note_count = sum(1 for (fp, ln) in self.notes_manager.notes if fp == filepath)
+        self.btn_side_notes.set_badge(note_count)
+        
         self.search_results = []
         self.current_match_index = -1
         self.update_scrollbar_range()
@@ -1417,7 +1420,11 @@ class MainWindow(QMainWindow):
         query = self.search_input.currentText()
         if query: self._perform_search(query)
 
-    def on_notes_updated(self): self.list_view.viewport().update()
+    def on_notes_updated(self): 
+        self.list_view.viewport().update()
+        if self.current_log_path:
+            count = sum(1 for (fp, ln) in self.notes_manager.notes if fp == self.current_log_path)
+            self.btn_side_notes.set_badge(count)
 
     def jump_to_raw_index(self, raw_index, focus_list=True):
         view_row = raw_index
@@ -1756,6 +1763,10 @@ class MainWindow(QMainWindow):
                 elif was_calculated: # Only show if we actually recalculated
                      self.toast.show_message(f"Filters updated ({elapsed:.3f}s)")
             self.update_status_bar(f"Shows {len(filtered_indices if self.show_filtered_only else range(self.current_engine.line_count())):,} lines")
+            
+            # Update Badge
+            enabled_count = sum(1 for f in self.filters if f["enabled"])
+            self.btn_side_filter.set_badge(enabled_count)
 
     def show_goto_dialog(self):
         total = len(self.model.filtered_indices) if self.show_filtered_only else self.current_engine.line_count()
