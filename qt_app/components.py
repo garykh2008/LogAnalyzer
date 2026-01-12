@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QToolButton, QStyleOption, QStyle, QApplication)
 from PySide6.QtGui import QIcon, QPainter, QFont, QColor
-from PySide6.QtCore import Qt, QRect, Signal
+from PySide6.QtCore import Qt, QRect, Signal, QTimer
 from .resources import get_svg_icon
 import os
 
@@ -197,6 +197,45 @@ class ClickableLabel(QLabel):
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
+
+
+class LoadingSpinner(QWidget):
+    def __init__(self, parent=None, size=16, color="#007acc"):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self._color = color
+        self._angle = 0
+        
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._rotate)
+        self.icon_pixmap = get_svg_icon("loader", self._color, size).pixmap(size, size)
+        self.hide()
+
+    def _rotate(self):
+        self._angle = (self._angle + 30) % 360
+        self.update()
+
+    def start(self):
+        if not self.timer.isActive():
+            self.show()
+            self.timer.start(50)
+
+    def stop(self):
+        self.timer.stop()
+        self.hide()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.rotate(self._angle)
+        painter.translate(-self.width() / 2, -self.height() / 2)
+        
+        painter.drawPixmap(0, 0, self.icon_pixmap)
+        painter.end()
+
 
 
 

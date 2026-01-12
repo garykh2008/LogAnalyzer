@@ -21,7 +21,7 @@ import sys
 import ctypes
 import bisect
 
-from .components import CustomTitleBar, DimmerOverlay, BadgeToolButton, ClickableLabel
+from .components import CustomTitleBar, DimmerOverlay, BadgeToolButton, ClickableLabel, LoadingSpinner
 from .modern_dialog import ModernDialog
 from .modern_messagebox import ModernMessageBox
 
@@ -456,8 +456,11 @@ class MainWindow(QMainWindow):
         self.status_count_label.setToolTip("Click to Go to Line (Ctrl+G)")
         self.status_count_label.clicked.connect(self.show_goto_dialog)
         
+        self.spinner = LoadingSpinner(size=14, color="#3794ff")
+        
         status_layout.addWidget(self.status_mode_label)
         status_layout.addWidget(self.status_count_label)
+        status_layout.addWidget(self.spinner)
         status_layout.addStretch()
         
         self.status_bar.addWidget(status_container, 1)
@@ -1140,6 +1143,7 @@ class MainWindow(QMainWindow):
         self.welcome_widget.hide()
         
         self.update_status_bar(f"Loading {filepath}...")
+        self.show_busy()
         start_time = time.time()
         self.settings.setValue("last_dir", os.path.dirname(filepath))
         
@@ -1152,6 +1156,7 @@ class MainWindow(QMainWindow):
         
         count = engine.line_count()
         self.toast.show_message(f"Loaded {count:,} lines in {time.time()-start_time:.3f}s", duration=4000, type_str="success")
+        self.hide_busy()
 
     def _switch_to_log(self, filepath):
         if filepath not in self.loaded_logs: return
@@ -1745,45 +1750,49 @@ class MainWindow(QMainWindow):
 
     def recalc_filters(self, force_color_update=False):
         if not self.current_engine: return
-        start_time = time.time()
-        was_calculated = False
-        if self.filters_dirty_cache:
-            rust_f = [(f["text"], f["is_regex"], f["is_exclude"], False, i) for i, f in enumerate(self.filters) if f["enabled"]]
-            try:
-                res = self.current_engine.filter(rust_f)
-                self.cached_filter_results = (res, rust_f); self.filters_dirty_cache = False
-                
-                # Cache the result for the current file
-                if self.current_log_path:
-                    if self.current_log_path not in self.log_states:
-                        self.log_states[self.current_log_path] = {}
-                    self.log_states[self.current_log_path]["filter_cache"] = (res, rust_f)
+        self.show_busy()
+        try:
+            start_time = time.time()
+            was_calculated = False
+            if self.filters_dirty_cache:
+                rust_f = [(f["text"], f["is_regex"], f["is_exclude"], False, i) for i, f in enumerate(self.filters) if f["enabled"]]
+                try:
+                    res = self.current_engine.filter(rust_f)
+                    self.cached_filter_results = (res, rust_f); self.filters_dirty_cache = False
+                    
+                    # Cache the result for the current file
+                    if self.current_log_path:
+                        if self.current_log_path not in self.log_states:
+                            self.log_states[self.current_log_path] = {}
+                        self.log_states[self.current_log_path]["filter_cache"] = (res, rust_f)
 
-                was_calculated = True
-            except: return
-        if self.cached_filter_results:
-            res, rust_f = self.cached_filter_results
-            tag_codes, filtered_indices, subset_counts = res[0], res[1], res[2]
-            for j, rf in enumerate(rust_f):
-                if j < len(subset_counts): self.filters[rf[4]]["hits"] = subset_counts[j]
-            palette = {j+2: (adjust_color_for_theme(self.filters[rf[4]]["fg_color"], False, self.is_dark_mode),
-                             adjust_color_for_theme(self.filters[rf[4]]["bg_color"], True, self.is_dark_mode))
-                       for j, rf in enumerate(rust_f)}
-            self.model.update_filter_result(tag_codes, palette, filtered_indices if self.show_filtered_only else None)
-            self.update_scrollbar_range()
-            if not force_color_update:
-                self.refresh_filter_tree()
-                elapsed = time.time() - start_time
-                count = len(filtered_indices) if filtered_indices else 0
-                if self.show_filtered_only:
-                     self.toast.show_message(f"Filtered: {count:,} lines ({elapsed:.3f}s)")
-                elif was_calculated: # Only show if we actually recalculated
-                     self.toast.show_message(f"Filters updated ({elapsed:.3f}s)")
-            self.update_status_bar(f"Shows {len(filtered_indices if self.show_filtered_only else range(self.current_engine.line_count())):,} lines")
-            
-            # Update Badge
-            enabled_count = sum(1 for f in self.filters if f["enabled"])
-            self.btn_side_filter.set_badge(enabled_count)
+                    was_calculated = True
+                except: return
+            if self.cached_filter_results:
+                res, rust_f = self.cached_filter_results
+                tag_codes, filtered_indices, subset_counts = res[0], res[1], res[2]
+                for j, rf in enumerate(rust_f):
+                    if j < len(subset_counts): self.filters[rf[4]]["hits"] = subset_counts[j]
+                palette = {j+2: (adjust_color_for_theme(self.filters[rf[4]]["fg_color"], False, self.is_dark_mode),
+                                 adjust_color_for_theme(self.filters[rf[4]]["bg_color"], True, self.is_dark_mode))
+                           for j, rf in enumerate(rust_f)}
+                self.model.update_filter_result(tag_codes, palette, filtered_indices if self.show_filtered_only else None)
+                self.update_scrollbar_range()
+                if not force_color_update:
+                    self.refresh_filter_tree()
+                    elapsed = time.time() - start_time
+                    count = len(filtered_indices) if filtered_indices else 0
+                    if self.show_filtered_only:
+                         self.toast.show_message(f"Filtered: {count:,} lines ({elapsed:.3f}s)")
+                    elif was_calculated: # Only show if we actually recalculated
+                         self.toast.show_message(f"Filters updated ({elapsed:.3f}s)")
+                self.update_status_bar(f"Shows {len(filtered_indices if self.show_filtered_only else range(self.current_engine.line_count())):,} lines")
+                
+                # Update Badge
+                enabled_count = sum(1 for f in self.filters if f["enabled"])
+                self.btn_side_filter.set_badge(enabled_count)
+        finally:
+            self.hide_busy()
 
     def show_goto_dialog(self):
         total = len(self.model.filtered_indices) if self.show_filtered_only else self.current_engine.line_count()
@@ -1903,6 +1912,13 @@ class MainWindow(QMainWindow):
         
         self.title_bar.btn_max.setIcon(get_svg_icon(icon_name, fg))
         self.title_bar.btn_max.setToolTip("Restore" if is_max else "Maximize")
+
+    def show_busy(self):
+        self.spinner.start()
+        QApplication.processEvents()
+
+    def hide_busy(self):
+        self.spinner.stop()
 
     def close_app(self):
         self.close()
