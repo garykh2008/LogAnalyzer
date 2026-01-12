@@ -1,65 +1,62 @@
-# 🔍 Log Analyzer
+# 🔍 Log Analyzer V2.0
 
-> A high-performance, multi-threaded log analysis tool designed for developers and system administrators.
+> A professional, high-performance log analysis tool powered by Qt and Rust.
 
-![Python](https://img.shields.io/badge/Python-3.6%2B-blue?style=flat-square)
-![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey?style=flat-square)
+![Python](https://img.shields.io/badge/Python-3.8%2B-blue?style=flat-square)
+![PySide6](https://img.shields.io/badge/UI-PySide6-green?style=flat-square)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey?style=flat-square)
 ![Status](https://img.shields.io/badge/Status-Active-success?style=flat-square)
 
-**Log Analyzer** addresses the common issue of lag and unresponsiveness found in traditional text editors when opening large log files. It provides a robust suite of tools for filtering, searching, and visualizing log data, powered by a custom Rust engine for sub-second performance even with massive datasets.
+**Log Analyzer V2.0** is a complete architectural overhaul, transitioning from legacy frameworks to a modern, industrial-grade **Qt (PySide6)** ecosystem. It addresses the common issue of lag and unresponsiveness when opening massive log files by utilizing a custom **Virtual Viewport** rendering engine and a high-performance **Rust core**.
 
 ---
 
-## ✨ Key Features
+## ✨ Key Features (V2.0 Highlights)
 
-### 🚀 Extreme Performance
-- **Rust-Powered Core**: Utilizing a custom `log_engine_rs` extension and `rayon` for parallel processing.
-- **Multi-threaded**: Background processing ensures the UI never freezes, even when loading 1GB+ files.
-- **Zero-Copy Loading**: Optimized memory management for handling tens of millions of lines.
+### 🚀 Next-Gen Performance
+- **Virtual Viewport**: Smoothly scroll through 100M+ lines with zero lag.
+- **Rust-Powered Core**: Sub-second filtering and loading powered by Rust and `rayon`.
+- **Zero-Copy Architecture**: Minimal memory footprint even with massive datasets.
 
-### 🔍 Advanced Analysis
-- **Powerful Filtering**: Support for Include (positive) and Exclude (negative) filters, Regex patterns, and instant toggling.
-- **Multi-Log Merging**: Seamlessly load and merge multiple log files into a single, time-sorted view.
-- **Interactive Timeline**: A density heatmap timeline to visualize event clusters and quickly navigate through time.
-- **Smart Search**: Find history, regex support, and cross-file searching capabilities.
+### 🖥️ Modern & Flexible UI
+- **Dockable Panels**: Fully customizable workspace with movable and stackable "Filters" and "Notes" panels.
+- **Activity Bar**: VS Code-inspired sidebar for quick navigation with dynamic **Notification Badges**.
+- **Scrollbar Heatmap**: A visual minimap on the scrollbar track to identify search result distribution at a glance.
+- **Professional Theming**: Polished Dark and Light modes with consistent styling across all dialogs and menus.
 
-### 🛠️ Developer Friendly
-- **Integrated Notes**: Annotate specific lines and export findings to Text or JSON.
-- **TAT Support**: Fully compatible with `TextAnalysisTool.NET` filter files (`.tat`).
-- **Modern UI**: Dark mode support, intuitive sidebar, and customizable syntax highlighting.
+### 🔍 Intelligent Analysis
+- **Smart Search**: Floating search overlay with history, regex support, and instant navigation (F2/F3).
+- **Interactive Status Bar**: Quick-actions for toggling view modes and jumping to specific line numbers.
+- **Integrated Notes**: Seamlessly annotate log lines with auto-persistence to sidecar files.
+- **Smart "Go to Line"**: Intelligently switches view modes to reach hidden lines.
 
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.6 or higher
-- Tkinter (usually included with Python)
-- *Optional*: `tkinterdnd2` for drag-and-drop support.
+- **Python 3.8+**
+- **PySide6** (`pip install PySide6`)
+- **Rust Toolchain** (only required if building from source)
 
 ### Running the Application
 
 **GUI Mode:**
-Simply run the main script to launch the interface:
 ```bash
 python loganalyzer.py
 ```
 
 **Command Line (CLI):**
-Log Analyzer supports robust CLI arguments for automation and quick access:
-
+Log Analyzer supports robust CLI arguments for automation:
 ```bash
 # Open a single log file
 python loganalyzer.py app.log
 
-# Open multiple log files (supports wildcards)
+# Open multiple log files (wildcards supported)
 python loganalyzer.py logs/*.log
 
 # Load a specific filter set on startup
 python loganalyzer.py app.log -f my_filters.tat
-
-# Load a list of files from a text file
-python loganalyzer.py @file_list.txt
 ```
 
 ---
@@ -68,15 +65,15 @@ python loganalyzer.py @file_list.txt
 
 For a comprehensive guide on all features, keyboard shortcuts, and advanced configuration, please consult the full documentation:
 
-👉 **[Read the Complete User Manual](Doc/Log_Analyzer_Docs_EN.md)**
+👉 **[Read the Complete V2.0 User Manual](Doc/Log_Analyzer_Docs_EN.md)**
 
 ---
 
 ## 📦 Version History
 
-- **v1.7**: Multi-Log Management, Merged View, and Enhanced Search.
+- **v2.0**: Major transition to Qt (PySide6). Introduced Virtual Viewport, Docking UI, Scrollbar Heatmap, Activity Bar Badges, and a completely redesigned UX.
+- **v1.7**: Multi-Log Management and Merged View.
 - **v1.6**: Introduction of the Rust Core Engine.
 - **v1.5**: Performance overhaul and Zero-Copy loading.
-- **v1.4**: Interactive Event Timeline and Dark Mode.
 
-*(See [Release Notes](Doc/Log_Analyzer_Docs_EN.md#5-release-notes) for full history)*
+*(See [Release Notes](Doc/Log_Analyzer_Docs_EN.md#4-release-notes) for full history)*
