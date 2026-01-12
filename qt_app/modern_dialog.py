@@ -102,3 +102,13 @@ class ModernDialog(QDialog):
         icon_c = fg_color
         from .resources import get_svg_icon
         self.title_bar.btn_close.setIcon(get_svg_icon("x-close", icon_c))
+
+    def exec(self):
+        if self.parent() and hasattr(self.parent(), "show_dimmer"):
+            self.parent().show_dimmer()
+        
+        res = super().exec()
+        
+        if self.parent() and hasattr(self.parent(), "hide_dimmer"):
+            self.parent().hide_dimmer()
+        return res

@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QDialog, QMessageBox, QScrollBar, QPushButton, QStackedLayout, QInputDialog, QFrame,
                                QSplitter, QSpinBox, QSizeGrip, QStyleOption, QStyle)
 from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics, QFontInfo, QPixmap, QPainter
-from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation, QSize, QItemSelectionModel
+from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation, QSize, QItemSelectionModel, QRect
 from .models import LogModel
 from .engine_wrapper import get_engine
 from .toast import Toast
@@ -21,7 +21,7 @@ import sys
 import ctypes
 import bisect
 
-from .components import CustomTitleBar
+from .components import CustomTitleBar, DimmerOverlay
 from .modern_dialog import ModernDialog
 from .modern_messagebox import ModernMessageBox
 
@@ -451,12 +451,21 @@ class MainWindow(QMainWindow):
         self.status_bar.addPermanentWidget(self.size_grip)
 
         self.toast = Toast(self)
+        self.dimmer = DimmerOverlay(self)
         self._create_menu()
 
         # 1. Restore saved geometry and layout state (remembers positions)
-        has_saved_state = False
-        if self.settings.value("window_geometry"):
-            self.restoreGeometry(self.settings.value("window_geometry"))
+        # Manual geometry handling to support correct "Normal" size restoration
+        rect = self.settings.value("window_rect")
+        if rect and isinstance(rect, QRect):
+            self.setGeometry(rect)
+        else:
+            self.resize(1200, 800)
+            
+        self.last_normal_rect = self.geometry()
+
+        self.should_maximize = self.settings.value("is_maximized", False, type=bool)
+
         if self.settings.value("window_state"):
             has_saved_state = self.restoreState(self.settings.value("window_state"))
 
@@ -781,8 +790,8 @@ class MainWindow(QMainWindow):
         # Update Window Controls Icons
         icon_c = titlebar_fg
         self.title_bar.btn_min.setIcon(get_svg_icon("window-minimize", icon_c))
-        self.title_bar.btn_max.setIcon(get_svg_icon("window-maximize", icon_c))
         self.title_bar.btn_close.setIcon(get_svg_icon("x-close", icon_c))
+        self.update_maximize_icon()
         
         # Style Custom Title Bar
         self.title_bar.setStyleSheet(f"""
@@ -1270,11 +1279,30 @@ class MainWindow(QMainWindow):
             self.toast.show_message(f"Copied {len(text_lines)} lines")
 
     def resizeEvent(self, event):
+        if not self.isMaximized():
+            self.last_normal_rect = self.geometry()
+
         self.update_scrollbar_range()
         if not self.search_widget.isHidden():
             cw = self.centralWidget()
             self.search_widget.move(cw.width() - self.search_widget.width() - 20, 0)
+        
+        if hasattr(self, 'dimmer') and self.dimmer.isVisible():
+            self.dimmer.resize(self.size())
+            
         super().resizeEvent(event)
+
+    def moveEvent(self, event):
+        if not self.isMaximized():
+            self.last_normal_rect = self.geometry()
+        super().moveEvent(event)
+
+    def show_dimmer(self):
+        self.dimmer.show()
+
+    def hide_dimmer(self):
+        self.dimmer.hide()
+
 
     def show_search_bar(self):
         if self.search_widget.isHidden():
@@ -1528,10 +1556,6 @@ class MainWindow(QMainWindow):
                     self.filter_dock.raise_()
 
     def closeEvent(self, event):
-        # Save window state and geometry
-        self.settings.setValue("window_geometry", self.saveGeometry())
-        self.settings.setValue("window_state", self.saveState())
-
         # Helper to prompt user
         def prompt_save_changes(title, text):
             return ModernMessageBox.question(self, title, text, 
@@ -1570,6 +1594,17 @@ class MainWindow(QMainWindow):
                 pass
             else:
                 event.ignore(); return
+
+        # Save Window State (Moved to end to avoid saving if cancelled)
+        is_max = self.isMaximized()
+        self.settings.setValue("is_maximized", is_max)
+        
+        if not is_max:
+            self.settings.setValue("window_rect", self.geometry())
+        elif hasattr(self, 'last_normal_rect') and self.last_normal_rect:
+            self.settings.setValue("window_rect", self.last_normal_rect)
+            
+        self.settings.setValue("window_state", self.saveState())
 
         event.accept()
 
@@ -1770,6 +1805,30 @@ class MainWindow(QMainWindow):
     def _set_windows_title_bar_color(self, is_dark):
         if sys.platform == "win32":
             set_windows_title_bar_color(self.winId(), is_dark)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Workaround for frameless window restore issue on Windows
+        if getattr(self, 'should_maximize', False):
+            QTimer.singleShot(0, self.showMaximized)
+        self.update_maximize_icon()
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.WindowStateChange:
+            self.update_maximize_icon()
+        super().changeEvent(event)
+
+    def update_maximize_icon(self):
+        if not hasattr(self, 'title_bar'): return
+        
+        is_max = self.isMaximized()
+        icon_name = "window-restore" if is_max else "window-maximize"
+        
+        # Recalculate titlebar_fg based on mode (logic copied from apply_theme)
+        fg = "#cccccc" if self.is_dark_mode else "#333333"
+        
+        self.title_bar.btn_max.setIcon(get_svg_icon(icon_name, fg))
+        self.title_bar.btn_max.setToolTip("Restore" if is_max else "Maximize")
 
     def close_app(self):
         self.close()

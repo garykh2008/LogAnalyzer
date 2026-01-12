@@ -182,9 +182,8 @@ SVG_ICONS = {
     "window-restore": """
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" 
              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <path d="M3 12h18M12 3v18" stroke="transparent" /> <!-- Spacer to keep viewbox -->
-            <path d="M5 5h14v14H5z" fill="currentColor" fill-opacity="0.2"/> <!-- Filled hint -->
+            <rect width="13" height="13" x="8" y="8" rx="2" ry="2" />
+            <path d="M16 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h2" />
         </svg>
     """,
     "message-info": """

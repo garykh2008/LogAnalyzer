@@ -1,5 +1,5 @@
-from PySide6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QToolButton, QStyleOption, QStyle)
-from PySide6.QtGui import QIcon, QPainter, QFont
+from PySide6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QToolButton, QStyleOption, QStyle, QApplication)
+from PySide6.QtGui import QIcon, QPainter, QFont, QColor
 from PySide6.QtCore import Qt
 from .resources import get_svg_icon
 import os
@@ -11,6 +11,7 @@ class CustomTitleBar(QWidget):
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(10, 0, 0, 0)
         self.layout.setSpacing(5)
+        self.click_pos = None
 
         # 1. App Icon
         self.icon_label = QLabel()
@@ -94,12 +95,43 @@ class CustomTitleBar(QWidget):
             win.showMaximized()
     
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and event.y() < self.height():
-            win = self.window()
-            if win:
-                win.windowHandle().startSystemMove()
+        if event.button() == Qt.LeftButton:
+            self.click_pos = event.globalPosition().toPoint()
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.click_pos and event.buttons() & Qt.LeftButton:
+            diff = (event.globalPosition().toPoint() - self.click_pos).manhattanLength()
+            if diff > QApplication.startDragDistance():
+                win = self.window()
+                if win:
+                    win.windowHandle().startSystemMove()
+                    self.click_pos = None
+        super().mouseMoveEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.toggle_max_restore()
+
+
+class DimmerOverlay(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, False) # Catch mouse events
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.hide()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 100)) # Semi-transparent black
+
+    def showEvent(self, event):
+        if self.parent():
+            self.resize(self.parent().size())
+        self.raise_()
+        super().showEvent(event)
+        
+    def mousePressEvent(self, event):
+        # Consume event to block interaction with underlying window
+        pass
+
