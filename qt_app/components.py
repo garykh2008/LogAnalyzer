@@ -1,6 +1,6 @@
-from PySide6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QToolButton, QStyleOption, QStyle, QApplication)
+from PySide6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QToolButton, QStyleOption, QStyle, QApplication, QLineEdit, QFrame, QVBoxLayout, QGraphicsOpacityEffect, QGraphicsDropShadowEffect, QComboBox, QSizePolicy, QCompleter)
 from PySide6.QtGui import QIcon, QPainter, QFont, QColor
-from PySide6.QtCore import Qt, QRect, Signal, QTimer
+from PySide6.QtCore import Qt, QRect, Signal, QTimer, QPropertyAnimation, QEasingCurve, QStringListModel
 from .resources import get_svg_icon
 import os
 
@@ -239,6 +239,169 @@ class LoadingSpinner(QWidget):
         
         painter.drawPixmap(0, 0, self.icon_pixmap)
         painter.end()
+
+
+class SearchOverlay(QWidget):
+    findNext = Signal(str, bool, bool) # text, case, wrap
+    findPrev = Signal(str, bool, bool)
+    closed = Signal()
+    searchChanged = Signal(str, bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(550)
+        self.hide()
+        
+        # Card Frame
+        self.card = QFrame(self)
+        self.card.setObjectName("SearchCard")
+        
+        # Shadow
+        self.shadow = QGraphicsDropShadowEffect(self.card)
+        self.shadow.setBlurRadius(20)
+        self.shadow.setColor(QColor(0, 0, 0, 100))
+        self.shadow.setOffset(0, 4)
+        self.card.setGraphicsEffect(self.shadow)
+        
+        # Layout
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        self.main_layout.addWidget(self.card)
+        
+        card_layout = QHBoxLayout(self.card)
+        card_layout.setContentsMargins(10, 6, 10, 6)
+        card_layout.setSpacing(6)
+        
+        # Input
+        self.input = QLineEdit()
+        self.input.setPlaceholderText("Find...")
+        self.input.setMinimumHeight(28)
+        self.input.returnPressed.connect(self._on_return_pressed)
+        
+        self.history_model = QStringListModel()
+        self.completer = QCompleter(self.history_model, self)
+        self.completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.input.setCompleter(self.completer)
+        
+        card_layout.addWidget(self.input, 1)
+        
+        # Buttons
+        self.btn_case = QToolButton()
+        self.btn_case.setCheckable(True)
+        self.btn_case.setToolTip("Match Case")
+        self.btn_case.setFixedSize(28, 28) # 也稍微加大按鈕
+        self.btn_case.toggled.connect(self._on_search_params_changed)
+        
+        self.btn_wrap = QToolButton()
+        self.btn_wrap.setCheckable(True)
+        self.btn_wrap.setChecked(True)
+        self.btn_wrap.setToolTip("Wrap Search")
+        self.btn_wrap.setFixedSize(28, 28)
+        
+        self.btn_prev = QToolButton()
+        self.btn_prev.setFixedSize(28, 28)
+        self.btn_prev.clicked.connect(lambda: self.findPrev.emit(self.input.text(), self.btn_case.isChecked(), self.btn_wrap.isChecked()))
+        
+        self.btn_next = QToolButton()
+        self.btn_next.setFixedSize(28, 28)
+        self.btn_next.clicked.connect(lambda: self.findNext.emit(self.input.text(), self.btn_case.isChecked(), self.btn_wrap.isChecked()))
+        
+        self.info_label = QLabel()
+        self.info_label.setMinimumWidth(40)
+        self.info_label.setAlignment(Qt.AlignCenter)
+        self.info_label.setStyleSheet("color: #888888; font-size: 11px;")
+        
+        self.btn_close = QToolButton()
+        self.btn_close.setFixedSize(28, 28)
+        self.btn_close.clicked.connect(self.hide_overlay)
+        
+        card_layout.addWidget(self.btn_case)
+        card_layout.addWidget(self.btn_wrap)
+        card_layout.addWidget(self.btn_prev)
+        card_layout.addWidget(self.btn_next)
+        card_layout.addWidget(self.info_label)
+        card_layout.addWidget(self.btn_close)
+
+    def _on_return_pressed(self):
+        text = self.input.text()
+        if text:
+            history = self.history_model.stringList()
+            if text in history: history.remove(text)
+            history.insert(0, text)
+            if len(history) > 10: history = history[:10]
+            self.history_model.setStringList(history)
+            
+        self.findNext.emit(text, self.btn_case.isChecked(), self.btn_wrap.isChecked())
+
+    def _on_search_params_changed(self):
+        self.searchChanged.emit(self.input.text(), self.btn_case.isChecked())
+
+    def show_overlay(self):
+        self.adjustSize()
+        self.show()
+        self.raise_()
+        self.input.setFocus()
+        self.input.selectAll()
+
+    def hide_overlay(self):
+        self.hide()
+        self.closed.emit()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.hide_overlay()
+        else:
+            super().keyPressEvent(event)
+
+    def set_results_info(self, text):
+        self.info_label.setText(text)
+
+    def apply_theme(self, is_dark):
+        if is_dark:
+            bg = "#252526"
+            fg = "#cccccc"
+            border = "#454545"
+            input_bg = "#3c3c3c"
+        else:
+            bg = "#ffffff"
+            fg = "#333333"
+            border = "#cccccc"
+            input_bg = "#f3f3f3"
+            
+        self.card.setStyleSheet(f"""
+            #SearchCard {{
+                background-color: {bg};
+                border: 1px solid {border};
+                border-radius: 8px;
+            }}
+            QLineEdit {{
+                background-color: {input_bg};
+                color: {fg};
+                border: 1px solid {border};
+                border-radius: 4px;
+                padding: 2px 6px;
+            }}
+            QToolButton {{
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 4px;
+            }}
+            QToolButton:hover {{
+                background-color: rgba(128, 128, 128, 40);
+                border: 1px solid {border};
+            }}
+            QToolButton:checked {{
+                background-color: rgba(0, 122, 204, 80);
+                border: 1px solid {border};
+            }}
+        """)
+        ic = fg
+        self.btn_case.setIcon(get_svg_icon("case-sensitive", ic, 16))
+        self.btn_wrap.setIcon(get_svg_icon("wrap", ic, 16))
+        self.btn_prev.setIcon(get_svg_icon("chevron-up", ic, 16))
+        self.btn_next.setIcon(get_svg_icon("chevron-down", ic, 16))
+        self.btn_close.setIcon(get_svg_icon("x-close", ic, 16))
+
 
 
 

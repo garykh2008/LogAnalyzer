@@ -21,7 +21,7 @@ import sys
 import ctypes
 import bisect
 
-from .components import CustomTitleBar, DimmerOverlay, BadgeToolButton, ClickableLabel, LoadingSpinner
+from .components import CustomTitleBar, DimmerOverlay, BadgeToolButton, ClickableLabel, LoadingSpinner, SearchOverlay
 from .modern_dialog import ModernDialog
 from .modern_messagebox import ModernMessageBox
 from .scrollbar_map import SearchScrollBar
@@ -387,58 +387,6 @@ class MainWindow(QMainWindow):
         
         self.central_stack.setCurrentIndex(0)
 
-        # --- Search Bar ---
-        self.search_widget = QWidget(self.central_area)
-        self.search_widget.setObjectName("search_widget")
-        self.search_layout = QHBoxLayout(self.search_widget)
-        self.search_layout.setContentsMargins(5, 5, 5, 5)
-        self.search_layout.setSpacing(5)
-
-        self.search_input = QComboBox()
-        self.search_input.setEditable(True)
-        self.search_input.setPlaceholderText("Find...")
-        self.search_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.search_input.lineEdit().returnPressed.connect(self.find_next)
-        
-        # Install event filter for Esc key handling
-        self.search_input.installEventFilter(self)
-        self.search_input.lineEdit().installEventFilter(self)
-
-        self.btn_prev = QToolButton()
-        self.btn_prev.setFixedSize(26, 24)
-        self.btn_next = QToolButton()
-        self.btn_next.setFixedSize(26, 24)
-        
-        self.chk_case = QToolButton()
-        self.chk_case.setCheckable(True)
-        self.chk_case.setFixedSize(26, 24)
-        self.chk_case.setToolTip("Match Case")
-        self.chk_case.toggled.connect(self.on_search_case_changed)
-
-        self.chk_wrap = QToolButton()
-        self.chk_wrap.setToolTip("Wrap Search")
-        self.chk_wrap.setCheckable(True)
-        self.chk_wrap.setFixedSize(26, 24)
-        self.chk_wrap.setChecked(True)
-
-        self.btn_close_search = QToolButton()
-        self.btn_close_search.clicked.connect(self.hide_search_bar)
-
-        self.search_info_label = QLabel("")
-        self.search_info_label.setMinimumWidth(40)
-        self.search_info_label.setAlignment(Qt.AlignCenter)
-
-        self.search_layout.addWidget(self.search_input)
-        self.search_layout.addWidget(self.chk_case)
-        self.search_layout.addWidget(self.chk_wrap)
-        self.search_layout.addWidget(self.btn_prev)
-        self.search_layout.addWidget(self.btn_next)
-        self.search_layout.addWidget(self.search_info_label)
-        self.search_layout.addWidget(self.btn_close_search)
-
-        self.search_widget.setFixedWidth(550)
-        self.search_widget.hide()
-
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.setSizeGripEnabled(False)
@@ -501,9 +449,15 @@ class MainWindow(QMainWindow):
         # Overlay Widgets (Initialize LAST to be on top)
         self.dimmer = DimmerOverlay(self)
         self.toast = Toast(self)
+        
+        # Search Overlay
+        self.search_overlay = SearchOverlay(self.central_area)
+        self.search_overlay.findNext.connect(self.find_next)
+        self.search_overlay.findPrev.connect(self.find_previous)
+        self.search_overlay.searchChanged.connect(self._perform_search)
+        self.search_overlay.closed.connect(self._on_search_closed)
 
         self.apply_theme()
-        self.btn_prev.clicked.connect(self.find_previous)
 
     def _create_menu(self):
         # Use the menu bar we already embedded in the custom title bar
@@ -657,9 +611,10 @@ class MainWindow(QMainWindow):
         self.toast.show_message(f"{mode_str}: {count:,} lines")
         
         # Trigger re-search to update results count and matches for visibility change
-        query = self.search_input.currentText()
-        if query and not self.search_widget.isHidden():
-            self._perform_search(query)
+        if hasattr(self, 'search_overlay'):
+            query = self.search_overlay.input.text()
+            if query and not self.search_overlay.isHidden():
+                self._perform_search(query)
 
     def toggle_sidebar(self, index):
         docks = [self.filter_dock, self.notes_dock, self.log_list_dock]
@@ -722,7 +677,7 @@ class MainWindow(QMainWindow):
             mod = event.modifiers()
             
             # Global Esc to close search bar
-            if key == Qt.Key_Escape and not self.search_widget.isHidden():
+            if hasattr(self, 'search_overlay') and key == Qt.Key_Escape and not self.search_overlay.isHidden():
                 self.hide_search_bar()
                 return True
 
@@ -736,7 +691,7 @@ class MainWindow(QMainWindow):
 
             if obj == self.list_view:
                 if key == Qt.Key_Return or key == Qt.Key_Enter:
-                    if not self.search_widget.isHidden():
+                    if hasattr(self, 'search_overlay') and not self.search_overlay.isHidden():
                         self.find_next()
                         return True
                 elif key == Qt.Key_Down:
@@ -774,6 +729,7 @@ class MainWindow(QMainWindow):
         self.notes_manager.set_theme(self.is_dark_mode)
         self.model.set_theme_mode(self.is_dark_mode)
         if hasattr(self, 'toast'): self.toast.set_theme(self.is_dark_mode)
+        if hasattr(self, 'search_overlay'): self.search_overlay.apply_theme(self.is_dark_mode)
         app = QApplication.instance()
 
         if self.is_dark_mode:
@@ -926,9 +882,6 @@ class MainWindow(QMainWindow):
         QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: none; }}
         QAbstractScrollArea::corner {{ background: transparent; border: none; }}
         QSplitter::handle {{ background-color: {float_border}; }}
-        #search_widget {{ background-color: {float_bg}; border: 1px solid {float_border}; border-top: none; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }}
-
-        #search_widget QLabel {{ color: {input_fg}; background-color: transparent; }}
         """
 
         cb_border = "#555555" if not self.is_dark_mode else float_border
@@ -993,11 +946,6 @@ class MainWindow(QMainWindow):
         self.btn_side_loglist.setIcon(get_svg_icon("file-text", icon_color))
         self.btn_side_filter.setIcon(get_svg_icon("filter", icon_color))
         self.btn_side_notes.setIcon(get_svg_icon("book-open", icon_color))
-        self.btn_prev.setIcon(get_svg_icon("chevron-up", icon_color))
-        self.btn_next.setIcon(get_svg_icon("chevron-down", icon_color))
-        self.chk_case.setIcon(get_svg_icon("case-sensitive", icon_color))
-        self.chk_wrap.setIcon(get_svg_icon("wrap", icon_color))
-        self.btn_close_search.setIcon(get_svg_icon("x-close", icon_color))
         
         self.open_action.setIcon(get_svg_icon("file-text", icon_color))
         self.recent_menu.setIcon(get_svg_icon("folder", icon_color))
@@ -1336,10 +1284,11 @@ class MainWindow(QMainWindow):
             self.last_normal_rect = self.geometry()
 
         self.update_scrollbar_range()
-        if not self.search_widget.isHidden():
-            cw = self.centralWidget()
-            self.search_widget.move(cw.width() - self.search_widget.width() - 20, 0)
         
+        if hasattr(self, 'search_overlay') and not self.search_overlay.isHidden():
+            cw = self.centralWidget()
+            self.search_overlay.move(cw.width() - self.search_overlay.width() - 20, 10)
+
         if hasattr(self, 'dimmer') and self.dimmer.isVisible():
             self.dimmer.resize(self.size())
 
@@ -1362,61 +1311,72 @@ class MainWindow(QMainWindow):
 
 
     def show_search_bar(self):
-        if self.search_widget.isHidden():
-            self.search_widget.show(); self.search_widget.raise_(); self.resizeEvent(None)
-            self.search_input.setFocus(); self.search_input.lineEdit().selectAll()
-        else: self.search_input.setFocus()
+        self.search_overlay.show_overlay()
+        self.resizeEvent(None) 
 
     def hide_search_bar(self):
-        self.search_widget.hide()
+        self.search_overlay.hide_overlay()
+
+    def _on_search_closed(self):
         self.delegate.set_search_query(None, False)
         self.search_results = []
         self.v_scrollbar.set_search_results([], 1)
-        self.search_info_label.setText("")
         self.list_view.viewport().update()
         self.list_view.setFocus()
 
-    def find_next(self):
-        query = self.search_input.currentText()
+    def find_next(self, query=None, is_case=None, is_wrap=None):
+        if isinstance(query, bool): query = None
+        if query is None:
+            query = self.search_overlay.input.text()
+            is_case = self.search_overlay.btn_case.isChecked()
+            is_wrap = self.search_overlay.btn_wrap.isChecked()
+
         if not query: return
         if self.delegate.search_query != query or not self.search_results:
-            # If search bar is hidden and results are cleared, don't auto-start search on F3
-            if self.search_widget.isHidden(): return
-            self._perform_search(query)
+            if self.search_overlay.isHidden(): return
+            self._perform_search(query, is_case)
             return
+        
         curr_raw = self.selected_raw_index
         idx = bisect.bisect_right(self.search_results, curr_raw)
         if idx >= len(self.search_results):
-            if self.chk_wrap.isChecked(): idx = 0; self.toast.show_message("Wrapped to top", type_str="warning")
+            if is_wrap: 
+                idx = 0; self.toast.show_message("Wrapped to top", type_str="warning")
             else: return
         
-        # Keep focus in search input if it's already there (e.g. Enter pressed)
-        keep_focus = self.search_input.lineEdit().hasFocus() or self.search_input.hasFocus()
+        keep_focus = self.search_overlay.input.hasFocus()
         self._jump_to_match(idx, focus_list=not keep_focus)
 
-    def find_previous(self):
-        query = self.search_input.currentText()
+    def find_previous(self, query=None, is_case=None, is_wrap=None):
+        if isinstance(query, bool): query = None
+        if query is None:
+            query = self.search_overlay.input.text()
+            is_case = self.search_overlay.btn_case.isChecked()
+            is_wrap = self.search_overlay.btn_wrap.isChecked()
+
         if not query: return
         if self.delegate.search_query != query or not self.search_results:
-            if self.search_widget.isHidden(): return
-            self._perform_search(query)
+            if self.search_overlay.isHidden(): return
+            self._perform_search(query, is_case)
             return
+            
         curr_raw = self.selected_raw_index
         idx = bisect.bisect_left(self.search_results, curr_raw) - 1
         if idx < 0:
-            if self.chk_wrap.isChecked(): idx = len(self.search_results)-1; self.toast.show_message("Wrapped to bottom", type_str="warning")
+            if is_wrap: 
+                idx = len(self.search_results)-1; self.toast.show_message("Wrapped to bottom", type_str="warning")
             else: return
 
-        # Keep focus in search input if it's already there
-        keep_focus = self.search_input.lineEdit().hasFocus() or self.search_input.hasFocus()
+        keep_focus = self.search_overlay.input.hasFocus()
         self._jump_to_match(idx, focus_list=not keep_focus)
 
-    def _perform_search(self, query):
+    def _perform_search(self, query, is_case=None):
         if not query or not self.current_engine: return
-        is_case = self.chk_case.isChecked()
+        if is_case is None:
+            is_case = self.search_overlay.btn_case.isChecked()
+            
         results = self.current_engine.search(query, False, is_case)
         
-        # Filter results if viewing filtered only
         if self.show_filtered_only and self.model.filtered_indices:
             visible_set = set(self.model.filtered_indices)
             results = [r for r in results if r in visible_set]
@@ -1425,29 +1385,24 @@ class MainWindow(QMainWindow):
         self.delegate.set_search_query(query, is_case)
         self.list_view.viewport().update()
         
-        # Update Scrollbar Heatmap
         total_lines = len(self.model.filtered_indices) if self.show_filtered_only and self.model.filtered_indices else self.current_engine.line_count()
         self.v_scrollbar.set_search_results(self.search_results, total_lines)
         
         if results: 
-            # Determine start index based on current selection
-            curr_raw = self.selected_raw_index
-            # Find the first match that is >= curr_raw (inclusive if we are exactly on a match? usually next means after)
-            # Actually, for initial search (e.g. typing), usually we want the first match *visible* or *after cursor*.
-            # If we are already on a line, let's search forward from there.
-            idx = bisect.bisect_left(results, curr_raw)
-            if idx >= len(results): 
-                idx = 0 # Wrap to start if no matches after cursor
+            idx = bisect.bisect_left(results, self.selected_raw_index)
+            if idx >= len(results): idx = 0
             
-            # Check focus before jumping
-            keep_focus = self.search_input.lineEdit().hasFocus() or self.search_input.hasFocus()
+            keep_focus = self.search_overlay.input.hasFocus()
             self._jump_to_match(idx, focus_list=not keep_focus)
         else: 
-            self.search_info_label.setText("No results")
+            self.search_overlay.set_results_info("No results")
 
-    def on_search_case_changed(self):
-        query = self.search_input.currentText()
-        if query: self._perform_search(query)
+    def _jump_to_match(self, result_index, focus_list=True):
+        if not self.search_results or result_index < 0 or result_index >= len(self.search_results): return
+        raw_row = self.search_results[result_index]
+        self.jump_to_raw_index(raw_row, focus_list)
+        self.search_overlay.set_results_info(f"{result_index + 1} / {len(self.search_results)}")
+
 
     def on_notes_updated(self): 
         self.list_view.viewport().update()
@@ -1486,7 +1441,8 @@ class MainWindow(QMainWindow):
         if not self.search_results or result_index < 0 or result_index >= len(self.search_results): return
         raw_row = self.search_results[result_index]
         self.jump_to_raw_index(raw_row, focus_list)
-        self.search_info_label.setText(f"{result_index + 1} / {len(self.search_results)}")
+        if hasattr(self, 'search_overlay'):
+            self.search_overlay.set_results_info(f"{result_index + 1} / {len(self.search_results)}")
 
     def _invalidate_all_filter_caches(self, mark_modified=True):
         """Clears filter cache for all loaded logs because filter rules have changed."""
