@@ -241,6 +241,32 @@ class LoadingSpinner(QWidget):
         painter.end()
 
 
+class HistoryLineEdit(QLineEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+    
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Down:
+            self.show_history()
+        else:
+            super().keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        # Show history on click if empty, or maybe always if user wants to see history?
+        # Standard combo box behavior: click shows list.
+        # But for line edit, click usually moves cursor.
+        # Let's show only if text is empty, mimicking "recent searches".
+        if not self.text():
+            self.show_history()
+
+    def show_history(self):
+        c = self.completer()
+        if c:
+            c.setCompletionPrefix("") 
+            c.complete() 
+
+
 class SearchOverlay(QWidget):
     findNext = Signal(str, bool, bool) # text, case, wrap
     findPrev = Signal(str, bool, bool)
@@ -273,9 +299,10 @@ class SearchOverlay(QWidget):
         card_layout.setSpacing(6)
         
         # Input
-        self.input = QLineEdit()
+        self.input = HistoryLineEdit()
         self.input.setPlaceholderText("Find...")
         self.input.setMinimumHeight(28)
+        self.input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.input.returnPressed.connect(self._on_return_pressed)
         
         self.history_model = QStringListModel()
@@ -345,6 +372,7 @@ class SearchOverlay(QWidget):
 
     def hide_overlay(self):
         self.hide()
+        self.set_results_info("")
         self.closed.emit()
 
     def keyPressEvent(self, event):
