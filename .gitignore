@@ -1,3 +1,5 @@
-app_config.jsonrelease/
+app_config.json
+release/
 rust_extention/target/
+rust_extention/Cargo.lock
 **/__pycache__/
