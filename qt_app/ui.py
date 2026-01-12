@@ -21,7 +21,7 @@ import sys
 import ctypes
 import bisect
 
-from .components import CustomTitleBar, DimmerOverlay, BadgeToolButton
+from .components import CustomTitleBar, DimmerOverlay, BadgeToolButton, ClickableLabel
 from .modern_dialog import ModernDialog
 from .modern_messagebox import ModernMessageBox
 
@@ -440,11 +440,27 @@ class MainWindow(QMainWindow):
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        # Disable default grip to prevent duplicates
         self.status_bar.setSizeGripEnabled(False)
         
-        self.status_label = QLabel("Ready")
-        self.status_bar.addWidget(self.status_label, 1)
+        # Status Bar Content
+        status_container = QWidget()
+        status_layout = QHBoxLayout(status_container)
+        status_layout.setContentsMargins(10, 0, 10, 0)
+        status_layout.setSpacing(20)
+        
+        self.status_mode_label = ClickableLabel("Full Log View")
+        self.status_mode_label.setToolTip("Click to toggle Filtered Only mode (Ctrl+H)")
+        self.status_mode_label.clicked.connect(self.toggle_show_filtered_only_from_status)
+        
+        self.status_count_label = ClickableLabel("0 lines")
+        self.status_count_label.setToolTip("Click to Go to Line (Ctrl+G)")
+        self.status_count_label.clicked.connect(self.show_goto_dialog)
+        
+        status_layout.addWidget(self.status_mode_label)
+        status_layout.addWidget(self.status_count_label)
+        status_layout.addStretch()
+        
+        self.status_bar.addWidget(status_container, 1)
         
         # Add Custom Resize Grip for Frameless Window
         self.size_grip = QSizeGrip(self)
@@ -892,6 +908,7 @@ class MainWindow(QMainWindow):
         QToolButton:hover {{ background-color: {hover_bg}; border: 1px solid {float_border}; }}
         QToolButton:checked {{ background-color: {selection_bg}; color: {selection_fg}; border: 1px solid {menu_sel}; }}
         QStatusBar {{ background-color: {menu_bg}; color: {menu_fg}; border-top: 1px solid {float_border}; }}
+        QStatusBar QLabel:hover {{ color: {bar_bg}; }}
         QScrollBar:vertical {{ border: none; background: transparent; width: 10px; margin: 0px; }}
         QScrollBar::handle:vertical {{ background: {scrollbar_handle}; min-height: 20px; border-radius: 5px; }}
         QScrollBar::handle:vertical:hover {{ background: {scrollbar_hover}; }}
@@ -1841,8 +1858,23 @@ class MainWindow(QMainWindow):
         if self.current_engine and self.filters:
             self.recalc_filters(True)
 
-    def update_status_bar(self, message):
-        self.status_label.setText(message)
+    def toggle_show_filtered_only_from_status(self):
+        self.show_filtered_action.setChecked(not self.show_filtered_action.isChecked())
+        self.toggle_show_filtered_only()
+
+    def update_status_bar(self, message=None):
+        if not hasattr(self, 'status_mode_label'): return
+        
+        mode_text = "Filtered View" if self.show_filtered_only else "Full Log View"
+        self.status_mode_label.setText(mode_text)
+        
+        total_count = self.current_engine.line_count() if self.current_engine else 0
+        
+        if self.show_filtered_only:
+            filtered_count = len(self.model.filtered_indices) if self.model.filtered_indices else 0
+            self.status_count_label.setText(f"{filtered_count:,} lines (Total {total_count:,})")
+        else:
+            self.status_count_label.setText(f"{total_count:,} lines")
 
     def _set_windows_title_bar_color(self, is_dark):
         if sys.platform == "win32":

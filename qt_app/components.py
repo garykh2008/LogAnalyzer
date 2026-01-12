@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QToolButton, QStyleOption, QStyle, QApplication)
 from PySide6.QtGui import QIcon, QPainter, QFont, QColor
-from PySide6.QtCore import Qt, QRect
+from PySide6.QtCore import Qt, QRect, Signal
 from .resources import get_svg_icon
 import os
 
@@ -184,5 +184,19 @@ class BadgeToolButton(QToolButton):
             x = self.width() - self.badge_label.width() - 4
             y = 4
             self.badge_label.move(x, y)
+
+
+class ClickableLabel(QLabel):
+    clicked = Signal()
+
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
 
 
