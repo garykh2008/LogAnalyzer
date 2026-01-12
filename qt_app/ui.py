@@ -453,6 +453,7 @@ class MainWindow(QMainWindow):
         self.toast = Toast(self)
         self.dimmer = DimmerOverlay(self)
         self._create_menu()
+        self.custom_menu_bar.installEventFilter(self)
 
         # 1. Restore saved geometry and layout state (remembers positions)
         # Manual geometry handling to support correct "Normal" size restoration
@@ -668,10 +669,28 @@ class MainWindow(QMainWindow):
                 target.raise_()
 
     def eventFilter(self, obj, event):
-        if obj == self.list_view and event.type() == QEvent.Resize:
+        if obj == self.custom_menu_bar:
+            if event.type() == QEvent.MouseButtonDblClick:
+                if not self.custom_menu_bar.actionAt(event.pos()):
+                    self.title_bar.toggle_max_restore()
+                    return True
+            elif event.type() == QEvent.MouseButtonPress:
+                if not self.custom_menu_bar.actionAt(event.pos()) and event.button() == Qt.LeftButton:
+                    self._menu_bar_click_pos = event.globalPosition().toPoint()
+            elif event.type() == QEvent.MouseMove:
+                if hasattr(self, '_menu_bar_click_pos') and self._menu_bar_click_pos and (event.buttons() & Qt.LeftButton):
+                    diff = (event.globalPosition().toPoint() - self._menu_bar_click_pos).manhattanLength()
+                    if diff > QApplication.startDragDistance():
+                        self.windowHandle().startSystemMove()
+                        self._menu_bar_click_pos = None
+                        return True
+            elif event.type() == QEvent.MouseButtonRelease:
+                self._menu_bar_click_pos = None
+
+        if hasattr(self, 'list_view') and obj == self.list_view and event.type() == QEvent.Resize:
             self.update_scrollbar_range()
             return False
-        if obj == self.list_view and event.type() == QEvent.Wheel:
+        if hasattr(self, 'list_view') and obj == self.list_view and event.type() == QEvent.Wheel:
             delta = event.angleDelta().y()
             self.v_scrollbar.setValue(self.v_scrollbar.value() + (-delta / 40))
             return True
