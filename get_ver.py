@@ -1,7 +1,7 @@
 import re
 import os
 
-QT_UI_FILE = os.path.join('qt_app', 'ui.py')
+QT_UI_FILE = os.path.join('log_analyzer', 'ui.py')
 
 def get_version():
     """

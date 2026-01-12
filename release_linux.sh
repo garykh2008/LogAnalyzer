@@ -62,7 +62,7 @@ python3 build_docs.py
 VERSION=$(python3 get_ver.py)
 echo "[Linux Build] Detected version: $VERSION"
 
-# 5. PyInstaller
+# PyInstaller
 echo "[Linux Build] Running PyInstaller..."
 ABS_PATH=$(pwd)
 TEMP_DIST="$VENV_BASE/dist"
@@ -71,19 +71,17 @@ TEMP_WORK="$VENV_BASE/build"
 mkdir -p release/linux
 
 # Build Qt App
-# We point to qt_app/main.py but need to ensure it can import qt_app package or relative imports work.
-# PyInstaller usually handles 'qt_app/main.py' correctly if run from root.
 pyinstaller --noconfirm --noconsole --onefile --clean \
     --distpath "$TEMP_DIST" \
     --workpath "$TEMP_WORK" \
     --specpath "$TEMP_WORK" \
     --add-data "$ABS_PATH/Doc:Doc" \
-    --add-data "$ABS_PATH/qt_app/fonts:qt_app/fonts" \
+    --add-data "$ABS_PATH/log_analyzer/fonts:log_analyzer/fonts" \
     --add-data "$ABS_PATH/loganalyzer.ico:." \
     --icon="$ABS_PATH/loganalyzer.ico" \
     --hidden-import log_engine_rs \
     --name "LogAnalyzer_Linux_${VERSION}" \
-    "qt_app/main.py"
+    "log_analyzer/main.py"
 
 # Copy binary
 echo "[Linux Build] Copying binary to release/linux/..."

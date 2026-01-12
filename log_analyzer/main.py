@@ -6,8 +6,8 @@ import glob
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtCore import Qt, qInstallMessageHandler, QtMsgType
-from qt_app.ui import MainWindow
-from qt_app.utils import load_custom_fonts
+from log_analyzer.ui import MainWindow
+from log_analyzer.utils import load_custom_fonts
 
 def qt_message_handler(mode, context, message):
     if "Point size <= 0" in message:

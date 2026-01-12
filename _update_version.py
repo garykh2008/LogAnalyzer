@@ -3,7 +3,7 @@ import re
 import os
 
 def update_version(new_version):
-    files_to_check = [os.path.join('qt_app', 'ui.py')]
+    files_to_check = [os.path.join('log_analyzer', 'ui.py')]
     updated_any = False
 
     for file_path in files_to_check:
