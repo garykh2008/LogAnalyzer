@@ -1,99 +1,175 @@
-from PySide6.QtWidgets import QWidget, QLabel, QHBoxLayout, QVBoxLayout, QGraphicsOpacityEffect
-from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QAbstractAnimation
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QFrame, QHBoxLayout, QGraphicsOpacityEffect, QGraphicsDropShadowEffect
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, Signal, QPoint, QEasingCurve, QSize
+from PySide6.QtGui import QColor, QPalette, QPainter
+from .resources import get_svg_icon
 
-class Toast(QWidget):
-    """
-    A custom Toast notification widget for PySide6.
-    Displays a message for a short duration and then fades out.
-    """
-    def __init__(self, parent):
+class ToastNotification(QWidget): # Container Widget for Opacity
+    closed = Signal()
+
+    def __init__(self, parent, message, type_str="info", duration=3000, is_dark=True):
         super().__init__(parent)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents) # Click through
-        self.setAttribute(Qt.WA_ShowWithoutActivating)
-
-        # UI Setup
+        self.setAttribute(Qt.WA_TransparentForMouseEvents) 
+        
+        # Main Layout
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setContentsMargins(4, 4, 4, 4) # Space for shadow
+        
+        # Content Frame (The actual visible part)
+        self.content_frame = QFrame()
+        self.content_frame.setObjectName("ToastContent")
+        self.layout.addWidget(self.content_frame)
+        
+        # Style Config
+        colors = {
+            "info":    {"border": "#3794ff", "icon": "message-info"},
+            "success": {"border": "#28a745", "icon": "check-circle"},
+            "warning": {"border": "#ffc107", "icon": "message-warn"},
+            "error":   {"border": "#dc3545", "icon": "message-error"}
+        }
+        cfg = colors.get(type_str, colors["info"])
+        
+        # Theme Colors with Tint
+        if is_dark:
+            text_color = "#ffffff"
+            border_color = "#454545"
+            # Subtle background tints for dark mode
+            if type_str == "success": bg_color = "#1e3a1e" 
+            elif type_str == "error": bg_color = "#3a1e1e"
+            elif type_str == "warning": bg_color = "#3a3a1e"
+            else: bg_color = "#252526"
+        else:
+            text_color = "#333333"
+            border_color = "#cccccc"
+            # Subtle background tints for light mode
+            if type_str == "success": bg_color = "#f0fff4"
+            elif type_str == "error": bg_color = "#fff0f0"
+            elif type_str == "warning": bg_color = "#fffbe6"
+            else: bg_color = "#ffffff"
 
-        self.label = QLabel("")
-        self.label.setAlignment(Qt.AlignCenter)
-        self.label.setWordWrap(False)
-        self.label.setStyleSheet("""
-            background-color: #333333;
-            color: #ffffff;
-            border-radius: 4px;
-            padding: 8px 16px;
-            font-family: Consolas;
-            font-size: 12px;
-            border: 1px solid #454545;
+        # Stylesheet
+        self.content_frame.setStyleSheet(f"""
+            #ToastContent {{
+                background-color: {bg_color};
+                color: {text_color};
+                border-radius: 4px;
+                border: 1px solid {border_color};
+                border-left: 4px solid {cfg['border']};
+            }}
+            QLabel {{
+                color: {text_color};
+                background: transparent;
+                font-family: "Segoe UI", "Inter", sans-serif;
+                font-size: 13px;
+            }}
         """)
-
-        self.layout.addWidget(self.label)
-
-        # Opacity Effect
+        
+        # Shadow Effect (Applied to Content Frame)
+        self.shadow = QGraphicsDropShadowEffect(self.content_frame)
+        self.shadow.setBlurRadius(15)
+        self.shadow.setXOffset(0)
+        self.shadow.setYOffset(4)
+        self.shadow.setColor(QColor(0, 0, 0, 60)) # Semi-transparent black shadow
+        self.content_frame.setGraphicsEffect(self.shadow)
+        
+        # Inner Layout
+        frame_layout = QHBoxLayout(self.content_frame)
+        frame_layout.setContentsMargins(12, 10, 16, 10)
+        frame_layout.setSpacing(12)
+        
+        # Icon
+        icon_label = QLabel()
+        icon_label.setFixedSize(18, 18)
+        icon_label.setScaledContents(True)
+        # Use border color for icon to match theme
+        icon_label.setPixmap(get_svg_icon(cfg['icon'], cfg['border'], 18).pixmap(18, 18))
+        frame_layout.addWidget(icon_label)
+        
+        # Text
+        text_label = QLabel(message)
+        frame_layout.addWidget(text_label)
+        
+        # Opacity Effect for Animation (Applied to SELF - the container)
         self.opacity_effect = QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(self.opacity_effect)
-
-        # Animation setup
-        self.opacity_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.opacity_anim.setDuration(300)
-        self.opacity_anim.finished.connect(self._on_anim_finished)
-
+        
+        # Fade In Animation
+        self.anim = QPropertyAnimation(self.opacity_effect, b"opacity")
+        self.anim.setDuration(250)
+        self.anim.setStartValue(0.0)
+        self.anim.setEndValue(1.0)
+        self.anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.anim.start()
+        
+        # Timer
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.fade_out)
+        self.timer.start(duration)
 
-        self.is_fading_out = False
-        self.hide()
+    def fade_out(self):
+        self.anim.setStartValue(1.0)
+        self.anim.setEndValue(0.0)
+        self.anim.setDuration(250)
+        self.anim.finished.connect(self.close_notification)
+        self.anim.start()
 
-    def show_message(self, message, duration=3000):
-        # 1. Update Content
-        self.label.setText(message)
-        self.label.adjustSize()
-        self.adjustSize()
+    def close_notification(self):
+        self.closed.emit()
+        self.deleteLater()
 
-        # 2. Position
-        if self.parent():
-            parent_rect = self.parent().rect()
-            x = (parent_rect.width() - self.width()) // 2
-            y = parent_rect.height() - self.height() - 50
-            self.move(x, y)
+class Toast(QWidget):
+    """
+    Toast Manager that handles stacking notifications.
+    Uses Qt.Tool to float above everything.
+    """
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        
+        self.is_dark_mode = True # Default
+        
+        # Container Layout - Stack from bottom
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 40) # Bottom padding relative to window
+        self.layout.setSpacing(8)
+        self.layout.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
+        
+        self.notifications = []
+        
+        # Initial size
+        if parent:
+            self.resize_to_parent()
 
-        # 3. Check if already visible
-        is_visible_and_opaque = self.isVisible() and self.opacity_effect.opacity() > 0.9
+    def set_theme(self, is_dark):
+        self.is_dark_mode = is_dark
 
-        # Stop everything first
-        self.timer.stop()
-        self.opacity_anim.stop()
-        self.is_fading_out = False
+    def show_message(self, message, duration=3000, type_str="info"):
+        # Limit max notifications to avoid screen clutter
+        if len(self.notifications) >= 5:
+            # Remove oldest
+            oldest = self.notifications.pop(0)
+            self.layout.removeWidget(oldest)
+            oldest.deleteLater()
 
+        notif = ToastNotification(self, message, type_str, duration, self.is_dark_mode)
+        self.layout.addWidget(notif)
+        self.notifications.append(notif)
+        
+        notif.closed.connect(lambda: self._remove_notification(notif))
+        
+        notif.show()
         self.show()
         self.raise_()
 
-        if is_visible_and_opaque:
-            # If already visible, just stay visible (reset opacity to 1.0 just in case)
-            self.opacity_effect.setOpacity(1.0)
-            # Just restart the fade-out timer
-            self.timer.start(duration)
-        else:
-            # Full Fade In
-            self.opacity_effect.setOpacity(0.0)
-            self.opacity_anim.setStartValue(0.0)
-            self.opacity_anim.setEndValue(1.0)
-            self.opacity_anim.start()
+    def _remove_notification(self, notif):
+        if notif in self.notifications:
+            self.notifications.remove(notif)
+            self.layout.removeWidget(notif)
+            # notif.deleteLater() is called inside notif.close_notification
 
-            # Schedule Fade Out
-            self.timer.start(duration + 300)
-
-    def fade_out(self):
-        self.is_fading_out = True
-        self.opacity_anim.setStartValue(1.0)
-        self.opacity_anim.setEndValue(0.0)
-        self.opacity_anim.start()
-
-    def _on_anim_finished(self):
-        # Only hide if we just finished the fade-out animation
-        if self.is_fading_out:
-            self.hide()
-            self.is_fading_out = False
+    def resize_to_parent(self):
+        if self.parent():
+            self.setGeometry(self.parent().geometry())

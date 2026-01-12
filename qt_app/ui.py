@@ -450,8 +450,6 @@ class MainWindow(QMainWindow):
         self.size_grip = QSizeGrip(self)
         self.status_bar.addPermanentWidget(self.size_grip)
 
-        self.toast = Toast(self)
-        self.dimmer = DimmerOverlay(self)
         self._create_menu()
         self.custom_menu_bar.installEventFilter(self)
 
@@ -475,14 +473,17 @@ class MainWindow(QMainWindow):
             self.tabifyDockWidget(self.log_list_dock, self.filter_dock)
             self.tabifyDockWidget(self.filter_dock, self.notes_dock)
 
-        self.apply_theme()
-        self.btn_prev.clicked.connect(self.find_previous)
-        self.btn_next.clicked.connect(self.find_next)
-        
         # 3. Force all docks hidden on startup (overrides visibility from restoreState)
         self.log_list_dock.hide()
         self.filter_dock.hide()
         self.notes_dock.hide()
+
+        # Overlay Widgets (Initialize LAST to be on top)
+        self.dimmer = DimmerOverlay(self)
+        self.toast = Toast(self)
+
+        self.apply_theme()
+        self.btn_prev.clicked.connect(self.find_previous)
 
     def _create_menu(self):
         # Use the menu bar we already embedded in the custom title bar
@@ -752,6 +753,7 @@ class MainWindow(QMainWindow):
     def apply_theme(self):
         self.notes_manager.set_theme(self.is_dark_mode)
         self.model.set_theme_mode(self.is_dark_mode)
+        if hasattr(self, 'toast'): self.toast.set_theme(self.is_dark_mode)
         app = QApplication.instance()
 
         if self.is_dark_mode:
@@ -1127,7 +1129,7 @@ class MainWindow(QMainWindow):
         self._switch_to_log(filepath)
         
         count = engine.line_count()
-        self.toast.show_message(f"Loaded {count:,} lines in {time.time()-start_time:.3f}s", duration=4000)
+        self.toast.show_message(f"Loaded {count:,} lines in {time.time()-start_time:.3f}s", duration=4000, type_str="success")
 
     def _switch_to_log(self, filepath):
         if filepath not in self.loaded_logs: return
@@ -1308,6 +1310,10 @@ class MainWindow(QMainWindow):
         
         if hasattr(self, 'dimmer') and self.dimmer.isVisible():
             self.dimmer.resize(self.size())
+
+        if hasattr(self, 'toast'):
+            self.toast.resize_to_parent()
+            self.toast.raise_()
             
         super().resizeEvent(event)
 
@@ -1348,7 +1354,7 @@ class MainWindow(QMainWindow):
         curr_raw = self.selected_raw_index
         idx = bisect.bisect_right(self.search_results, curr_raw)
         if idx >= len(self.search_results):
-            if self.chk_wrap.isChecked(): idx = 0; self.toast.show_message("Wrapped to top")
+            if self.chk_wrap.isChecked(): idx = 0; self.toast.show_message("Wrapped to top", type_str="warning")
             else: return
         
         # Keep focus in search input if it's already there (e.g. Enter pressed)
@@ -1365,7 +1371,7 @@ class MainWindow(QMainWindow):
         curr_raw = self.selected_raw_index
         idx = bisect.bisect_left(self.search_results, curr_raw) - 1
         if idx < 0:
-            if self.chk_wrap.isChecked(): idx = len(self.search_results)-1; self.toast.show_message("Wrapped to bottom")
+            if self.chk_wrap.isChecked(): idx = len(self.search_results)-1; self.toast.show_message("Wrapped to bottom", type_str="warning")
             else: return
 
         # Keep focus in search input if it's already there
@@ -1568,6 +1574,7 @@ class MainWindow(QMainWindow):
                 self.filters = loaded; self._invalidate_all_filter_caches(mark_modified=False)
                 self.filters_modified = False
                 self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
+                self.toast.show_message("Filters Loaded", type_str="success")
                 
                 # Auto-show Filter Panel when filters are loaded
                 if self.filter_dock.isHidden():
@@ -1630,7 +1637,7 @@ class MainWindow(QMainWindow):
     def quick_save_filters(self):
         if self.current_filter_file:
             if save_tat_filters(self.current_filter_file, self.filters):
-                self.filters_modified = False; self.update_window_title(); self.toast.show_message("Saved")
+                self.filters_modified = False; self.update_window_title(); self.toast.show_message("Saved", type_str="success")
         else: self.save_filters_as()
 
     def save_filters_as(self):
@@ -1638,7 +1645,7 @@ class MainWindow(QMainWindow):
         if path:
             self.settings.setValue("last_filter_dir", os.path.dirname(path))
             if save_tat_filters(path, self.filters):
-                self.current_filter_file = path; self.filters_modified = False; self.update_window_title(); self.toast.show_message("Saved")
+                self.current_filter_file = path; self.filters_modified = False; self.update_window_title(); self.toast.show_message("Saved", type_str="success")
 
     def export_notes_to_text(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export Notes", self.settings.value("last_note_export_dir", ""), "Text (*.txt);;All (*)")
