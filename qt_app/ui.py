@@ -862,7 +862,7 @@ class MainWindow(QMainWindow):
         QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; margin: 1px 0px; }}
         QMenu::item:selected {{ background-color: {menu_sel}; color: {menu_sel_fg}; }}
         QMenu::separator {{ height: 1px; background: {float_border}; margin: 4px 8px; }}
-        QToolTip {{ color: #333333; background-color: #f0f0f0; border: 1px solid #cccccc; padding: 4px; border-radius: 3px; }}
+        QToolTip {{ color: {fg_color}; background-color: {menu_bg}; border: 1px solid {float_border}; padding: 5px; border-radius: 0px; }}
         """
         
         self._set_windows_title_bar_color(self.is_dark_mode)
@@ -1802,7 +1802,7 @@ class MainWindow(QMainWindow):
             self.hide_busy()
 
     def show_goto_dialog(self):
-        total = len(self.model.filtered_indices) if self.show_filtered_only else self.current_engine.line_count()
+        total = self.current_engine.line_count() if self.current_engine else 0
         if total <= 0: return
         
         dialog = GoToLineDialog(self, total)
@@ -1810,8 +1810,23 @@ class MainWindow(QMainWindow):
         
         if dialog.exec():
             val = dialog.get_line()
-            raw = self.model.filtered_indices[val-1] if self.show_filtered_only else val-1
-            self.jump_to_raw_index(raw)
+            target_raw = val - 1
+            
+            if self.show_filtered_only and self.model.filtered_indices:
+                import bisect
+                idx = bisect.bisect_left(self.model.filtered_indices, target_raw)
+                
+                # Check if exact match exists in filtered view
+                if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == target_raw:
+                    self.jump_to_raw_index(target_raw)
+                else:
+                    # Target line is hidden, switch to Full View
+                    self.show_filtered_action.setChecked(False)
+                    self.toggle_show_filtered_only()
+                    self.jump_to_raw_index(target_raw)
+                    self.toast.show_message(f"Line {val} was hidden. Switched to Full Log View.", type_str="info")
+            else:
+                self.jump_to_raw_index(target_raw)
 
     def show_shortcuts(self):
         shortcuts = [("General", ""), ("Ctrl + O", "Open Log File"), ("Ctrl + Q", "Exit Application"), ("", ""), ("View & Navigation", ""), ("Ctrl + F", "Open Find Bar"), ("Esc", "Close Find Bar / Clear Selection"), ("Ctrl + H", "Toggle Show Filtered Only"), ("F2 / F3", "Find Previous / Next"), ("Ctrl + Left / Right", "Navigate Filter Hits (Selected Filter)"), ("Home / End", "Jump to Start / End of Log"), ("", ""), ("Log View", ""), ("Double-Click", "Create Filter from selected text"), ("'C' key", "Add / Edit Note for current line"), ("Ctrl + C", "Copy selected lines"), ("", ""), ("Filters", ""), ("Delete", "Remove selected filter"), ("Double-Click", "Edit filter properties"), ("Space", "Toggle filter enabled/disabled")]
