@@ -3,3 +3,4 @@ release/
 rust_extention/target/
 rust_extention/Cargo.lock
 **/__pycache__/
+build/

@@ -3,7 +3,7 @@ import re
 import os
 
 def update_version(new_version):
-    files_to_check = [os.path.join('qt_app', 'ui.py'), 'loganalyzer.py']
+    files_to_check = [os.path.join('qt_app', 'ui.py')]
     updated_any = False
 
     for file_path in files_to_check:
@@ -14,11 +14,8 @@ def update_version(new_version):
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            # Regex based on file type
-            if 'ui.py' in file_path:
-                pattern = r'(VERSION\s*=\s*["\']).*?(["\'])'
-            else:
-                pattern = r'(self\.VERSION\s*=\s*["\']).*?(["\'])'
+            # Regex for Qt App (qt_app/ui.py)
+            pattern = r'(VERSION\s*=\s*["\']).*?(["\'])'
             
             replacement = r'\g<1>{}\g<2>'.format(new_version)
             
