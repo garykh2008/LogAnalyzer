@@ -34,104 +34,92 @@
 <h2 id="table-of-contents">Table of Contents</h2>
 <ul>
 <li><a href="#log-analyzer-v20-user-manual">Log Analyzer V2.0 User Manual</a></li>
-<li><a href="#table-of-contents">Table of Contents</a></li>
 <li><a href="#1-introduction">1. Introduction</a></li>
 <li><a href="#2-key-features">2. Key Features</a><ul>
 <li><a href="#-next-gen-performance">🚀 Next-Gen Performance</a></li>
 <li><a href="#️-modern--flexible-ui">🖥️ Modern \&amp; Flexible UI</a></li>
-<li><a href="#-enhanced-search--navigation">🔍 Enhanced Search \&amp; Navigation</a></li>
+<li><a href="#-advanced-visualization">📊 Advanced Visualization</a></li>
+<li><a href="#-intelligent-search--navigation">🔍 Intelligent Search \&amp; Navigation</a></li>
 <li><a href="#-comprehensive-notes-system">📝 Comprehensive Notes System</a></li>
 </ul>
 </li>
 <li><a href="#3-user-guide">3. User Guide</a><ul>
-<li><a href="#menu-bar">Menu Bar</a></li>
-<li><a href="#file">File</a></li>
-<li><a href="#view">View</a></li>
-<li><a href="#filter-dock">Filter (Dock)</a></li>
-<li><a href="#notes-dock">Notes (Dock)</a></li>
-<li><a href="#help">Help</a></li>
+<li><a href="#activity-bar-far-left">Activity Bar (Far Left)</a></li>
+<li><a href="#status-bar-bottom">Status Bar (Bottom)</a></li>
+<li><a href="#notification-system-toasts">Notification System (Toasts)</a></li>
 <li><a href="#shortcuts">Shortcuts</a></li>
 </ul>
 </li>
 <li><a href="#4-release-notes">4. Release Notes</a><ul>
-<li><a href="#version-20-2026-01-07">Version 2.0 (2026-01-07)</a></li>
-<li><a href="#major-architecture-overhaul">Major Architecture Overhaul</a></li>
-<li><a href="#key-improvements">Key Improvements</a></li>
-<li><a href="#new-features--enhancements">New Features \&amp; Enhancements</a></li>
+<li><a href="#version-20-2026-01-12">Version 2.0 (2026-01-12)</a></li>
 </ul>
 </li>
 </ul>
 <hr />
 <h2 id="1-introduction">1. Introduction</h2>
 <p><strong>Log Analyzer V2.0</strong> represents a complete architectural overhaul, transitioning from the legacy Tkinter framework to the modern, industrial-grade <strong>Qt (PySide6)</strong> ecosystem. </p>
-<p>Designed for developers and system administrators who demand speed and flexibility, V2.0 introduces a <strong>Virtual Viewport</strong> rendering engine capable of displaying millions of log lines with zero lag, a fully customizable <strong>Docking UI</strong>, and a refined user experience that retains the powerful Rust-based filtering core of previous versions.</p>
+<p>Designed for high-performance log analysis, V2.0 introduces a <strong>Virtual Viewport</strong> rendering engine capable of displaying millions of log lines with zero lag, a fully customizable <strong>Docking UI</strong>, and a refined user experience powered by a high-speed Rust filtering core.</p>
 <h2 id="2-key-features">2. Key Features</h2>
 <h3 id="next-gen-performance">🚀 Next-Gen Performance</h3>
 <ul>
-<li><strong>Virtual Viewport</strong>: A custom-built rendering engine that renders <em>only</em> the lines currently visible on screen. This allows the application to scroll through files with 100+ million lines as smoothly as a small text file, with minimal memory footprint for UI elements.</li>
+<li><strong>Virtual Viewport</strong>: A custom-built rendering engine that renders <em>only</em> the lines currently visible on screen. This allows the application to scroll through files with 100+ million lines as smoothly as a small text file.</li>
 <li><strong>Rust-Powered Core</strong>: Retains the high-performance Rust backend (<code>log_engine_rs</code>) for multi-threaded file loading and regular expression filtering.</li>
 </ul>
 <h3 id="modern-flexible-ui">🖥️ Modern &amp; Flexible UI</h3>
 <ul>
-<li><strong>Docking System</strong>: The <strong>Filters</strong> and <strong>Notes</strong> panels are now fully dockable. You can:<ul>
-<li>Pin them to the Left, Right, or Bottom of the window.</li>
-<li>Tab them together to save space.</li>
-<li>Float them as separate windows for multi-monitor setups.</li>
+<li><strong>Activity Bar</strong>: A VS Code-inspired vertical bar for quick access to <strong>Log List</strong>, <strong>Filters</strong>, and <strong>Notes</strong>. Includes <strong>Notification Badges</strong> that display the count of enabled filters and notes for the current file.</li>
+<li><strong>Docking System</strong>: Fully dockable panels for Filters and Notes. You can pin them to any edge, tab them together, or float them as separate windows. <ul>
+<li><em>Note: On Linux, a simplified fixed-layout mode is used to ensure maximum stability.</em></li>
 </ul>
 </li>
-<li><strong>Professional Theming</strong>: Features a polished <strong>Dark Mode</strong> (default) and <strong>Light Mode</strong>, with consistent styling across all dialogs, scrollbars, and menus.</li>
-<li><strong>Dynamic Line Numbers</strong>: Integrated line number display that automatically adjusts its width based on the total line count.</li>
+<li><strong>Professional Theming</strong>: Polished <strong>Dark Mode</strong> and <strong>Light Mode</strong> with consistent styling across all components, including a custom frameless title bar.</li>
+<li><strong>Distinct Line Gutter</strong>: A dedicated line number area with its own background color, visually separated from the content for better readability.</li>
 </ul>
-<h3 id="enhanced-search-navigation">🔍 Enhanced Search &amp; Navigation</h3>
+<h3 id="advanced-visualization">📊 Advanced Visualization</h3>
 <ul>
-<li><strong>Modern Search Bar</strong>: A sleek, floating search bar (<code>Ctrl+F</code>) with toggle buttons for <strong>Match Case (Aa)</strong> and <strong>Wrap Around (W)</strong>.</li>
-<li><strong>Global Navigation</strong>: <ul>
-<li><strong>F3 / F2</strong>: Jump to the Next / Previous search match instantly, even if it's millions of lines away.</li>
-<li><strong>Ctrl + Left / Right</strong>: Jump to the Previous / Next line that matches the <em>currently selected filter</em>.</li>
+<li><strong>Scrollbar Minimap (Heatmap)</strong>: The vertical scrollbar track now displays color-coded markers (orange/yellow) indicating the distribution of search results across the entire file.</li>
+<li><strong>Density View</strong>: Provides a high-level overview of where matches are concentrated, allowing you to jump to interesting sections instantly.</li>
+</ul>
+<h3 id="intelligent-search-navigation">🔍 Intelligent Search &amp; Navigation</h3>
+<ul>
+<li><strong>Floating Search Overlay</strong>: A modern, non-intrusive search panel with shadows and animations.</li>
+<li><strong>Search History</strong>: Access previous search queries by clicking the input box or pressing the <strong>Down</strong> arrow key.</li>
+<li><strong>Interactive Status Bar</strong>: <ul>
+<li>Click the <strong>Line Count</strong> to open the "Go to Line" dialog.</li>
+<li>Click the <strong>View Mode</strong> label to toggle "Show Filtered Only" instantly.</li>
 </ul>
 </li>
+<li><strong>Smart "Go to Line"</strong>: In Filtered View, you can still enter <strong>raw line numbers</strong>. If the target line is hidden by filters, the app will automatically switch back to Full View to reach the destination.</li>
 </ul>
 <h3 id="comprehensive-notes-system">📝 Comprehensive Notes System</h3>
 <ul>
-<li><strong>Integrated Workflow</strong>: Press <code>C</code> on any line to instantly add or edit a note.</li>
-<li><strong>Visual Highlights</strong>: Lines with notes are visually highlighted with a distinct background color.</li>
-<li><strong>Persistence</strong>: Notes are automatically saved to sidecar <code>.note</code> (JSON) files and automatically reloaded when you open the log again.</li>
-<li><strong>Export</strong>: Generate a readable text report of all your notes via the "Export Notes to Text..." menu.</li>
+<li><strong>Integrated Workflow</strong>: Press <code>C</code> on any line to add/edit a note.</li>
+<li><strong>Visual Highlights</strong>: Lines with notes are highlighted with a distinct background.</li>
+<li><strong>Persistence</strong>: Notes are saved to <code>.note</code> files and reloaded automatically.</li>
 </ul>
 <h2 id="3-user-guide">3. User Guide</h2>
-<h3 id="menu-bar">Menu Bar</h3>
-<h4 id="file">File</h4>
+<h3 id="activity-bar-far-left">Activity Bar (Far Left)</h3>
 <ul>
-<li><strong>Open Log... (Ctrl+O)</strong>: Open a single log file.</li>
-<li><strong>Open Recent</strong>: Quickly access recently opened files.</li>
-<li><strong>Load / Save Filters</strong>: Import or export your filter rules (<code>.tat</code> format).</li>
-<li><strong>Exit (Ctrl+Q)</strong>: Close the application.</li>
+<li><strong>File List</strong>: Manage multiple loaded log files.</li>
+<li><strong>Filters</strong>: Add, edit, or reorder filter rules (<code>.tat</code> format supported).</li>
+<li><strong>Notes</strong>: View and navigate all notes in the current file.</li>
+<li><strong>Badges</strong>: Look for the small blue circles on icons—they indicate your active filter count and total notes.</li>
 </ul>
-<h4 id="view">View</h4>
+<h3 id="status-bar-bottom">Status Bar (Bottom)</h3>
 <ul>
-<li><strong>Toggle Notes</strong>: Show or hide the Notes docking panel.</li>
-<li><strong>Export Notes to Text...</strong>: Save all current notes to a <code>.txt</code> file.</li>
-<li><strong>Go to Line... (Ctrl+G)</strong>: Instantly jump to a specific line number in the current view.</li>
-<li><strong>Show Filtered Only (Ctrl+H)</strong>: Toggle between showing all lines (with highlights) and showing only lines that match enabled filters.</li>
-<li><strong>Toggle Dark/Light Mode</strong>: Switch the application theme.</li>
-<li><strong>Find... (Ctrl+F)</strong>: Open the search bar.</li>
+<li><strong>Left Section</strong>: Displays the current view mode (Full vs. Filtered). Click to toggle.</li>
+<li><strong>Middle Section</strong>: Displays line counts. Click to trigger "Go to Line".</li>
+<li><strong>Busy Indicator</strong>: A rotating spinner appears here during heavy Rust operations (loading/filtering).</li>
 </ul>
-<h4 id="filter-dock">Filter (Dock)</h4>
+<h3 id="notification-system-toasts">Notification System (Toasts)</h3>
 <ul>
-<li><strong>Management</strong>: Add, Edit, or Remove filters.</li>
-<li><strong>Drag &amp; Drop</strong>: Reorder filters by dragging them.</li>
-<li><strong>Checkboxes</strong>: Enable/Disable specific filters instantly.</li>
+<li><strong>Stacking</strong>: Multiple notifications can now appear simultaneously, stacking from the bottom.</li>
+<li><strong>Contextual Coloring</strong>: <ul>
+<li><strong>Success (Green)</strong>: File loaded, settings saved.</li>
+<li><strong>Warning (Yellow)</strong>: Search wrap-around, hidden lines.</li>
+<li><strong>Info (Standard)</strong>: Copied text, mode toggled.</li>
 </ul>
-<h4 id="notes-dock">Notes (Dock)</h4>
-<ul>
-<li><strong>List View</strong>: Displays all notes associated with the current file, including line number and timestamp.</li>
-<li><strong>Navigation</strong>: Double-click a note in the list to jump to that line in the log.</li>
-<li><strong>Save Button</strong>: Manually save notes to disk (auto-save is also performed on exit).</li>
-</ul>
-<h4 id="help">Help</h4>
-<ul>
-<li><strong>Keyboard Shortcuts</strong>: View a list of available hotkeys.</li>
-<li><strong>About</strong>: Version and developer information.</li>
+</li>
 </ul>
 <h3 id="shortcuts">Shortcuts</h3>
 <table>
@@ -144,11 +132,11 @@
 <tbody>
 <tr>
 <td style="text-align: left;"><strong>Ctrl + O</strong></td>
-<td style="text-align: left;">Open Log File</td>
+<td style="text-align: left;">Open Log File(s)</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Ctrl + F</strong></td>
-<td style="text-align: left;">Open Find Bar</td>
+<td style="text-align: left;">Open Search Bar</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Ctrl + G</strong></td>
@@ -163,12 +151,20 @@
 <td style="text-align: left;">Toggle "Show Filtered Only"</td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Ctrl + B</strong></td>
-<td style="text-align: left;">Toggle Sidebar (if applicable)</td>
+<td style="text-align: left;"><strong>Ctrl + Shift + L</strong></td>
+<td style="text-align: left;">Toggle Log Files Panel</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Ctrl + Shift + F</strong></td>
+<td style="text-align: left;">Toggle Filters Panel</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Ctrl + Shift + N</strong></td>
+<td style="text-align: left;">Toggle Notes Panel</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Ctrl + Left/Right</strong></td>
-<td style="text-align: left;">Navigate Filter Hits</td>
+<td style="text-align: left;">Navigate Filter Hits (Selected Filter)</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Double-Click</strong> (Log)</td>
@@ -179,33 +175,26 @@
 <td style="text-align: left;">Add / Edit Note for selected line</td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Space</strong> (Filter List)</td>
-<td style="text-align: left;">Toggle Filter Enabled/Disabled</td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Delete</strong> (Filter List)</td>
-<td style="text-align: left;">Remove Filter</td>
+<td style="text-align: left;"><strong>Esc</strong></td>
+<td style="text-align: left;">Close Search Bar / Dialogs</td>
 </tr>
 </tbody>
 </table>
 <h2 id="4-release-notes">4. Release Notes</h2>
-<h3 id="version-20-2026-01-07">Version 2.0 (2026-01-07)</h3>
-<h4 id="major-architecture-overhaul">Major Architecture Overhaul</h4>
-<ul>
-<li><strong>Qt (PySide6) Rewrite</strong>: The application UI has been completely rewritten from Tkinter to Qt, offering a native, robust, and scalable interface.</li>
-<li><strong>Virtual Viewport Implementation</strong>: Solved the performance bottleneck of rendering large lists. The UI now handles massive logs with zero lag.</li>
-</ul>
-<h4 id="key-improvements">Key Improvements</h4>
-<ul>
-<li><strong>Docking UI</strong>: Filters and Notes are now movable, dockable panels, allowing for a personalized workspace layout.</li>
-<li><strong>Search Upgrade</strong>: A completely redesigned search experience with modern toggle buttons, instant case-sensitivity updates, and reliable navigation across massive files.</li>
-<li><strong>Virtual Viewport</strong>: The core rendering engine ensures stable performance regardless of file size.</li>
-</ul>
-<h4 id="new-features-enhancements">New Features &amp; Enhancements</h4>
-<ul>
-<li><strong>Notes System</strong>: Fully ported with enhancements like JSON persistence, auto-loading, and text export.</li>
-<li><strong>Modern Theme</strong>: A polished dark/light theme consistent across all dialogs.</li>
-</ul>
+<h3 id="version-20-2026-01-12">Version 2.0 (2026-01-12)</h3>
+<p><strong>Major Architecture Overhaul</strong>
+*   <strong>Qt (PySide6) Transition</strong>: Completely rebuilt the UI for superior stability and native performance.
+*   <strong>Unified Entry Point</strong>: Added <code>loganalyzer.py</code> at the root for easier execution.</p>
+<p><strong>New Visual Features</strong>
+*   <strong>Scrollbar Minimap</strong>: Visual distribution of search results.
+*   <strong>Floating Search Overlay</strong>: Redesigned with shadows, rounded corners, and history support.
+*   <strong>Activity Bar Badges</strong>: Dynamic counters for active filters and notes.
+*   <strong>Enhanced Status Bar</strong>: Now interactive with clickable quick-actions.
+*   <strong>Advanced Toast System</strong>: Stacking notifications with status visualization.</p>
+<p><strong>Stability &amp; UX</strong>
+*   <strong>Virtual Viewport</strong>: Zero-lag rendering for massive files.
+*   <strong>Cross-Platform Optimization</strong>: Tailored Docker and Windowing behavior for Windows and Linux (Wayland/X11).
+*   <strong>Gutter Background</strong>: Distinct visual styling for the line number area.</p>
 	</body>
 	</html>
 	
