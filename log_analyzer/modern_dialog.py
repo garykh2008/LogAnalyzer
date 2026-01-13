@@ -48,9 +48,9 @@ class ModernDialog(QDialog):
             self.title_bar.title_label.setText(title)
 
     def apply_theme(self):
-        is_dark = True
-        if self.parent() and hasattr(self.parent(), 'is_dark_mode'):
-            is_dark = self.parent().is_dark_mode
+        from .config import get_config
+        config = get_config()
+        is_dark = (config.theme == "Dark")
         
         # Define Colors ( synced with MainWindow )
         if is_dark:

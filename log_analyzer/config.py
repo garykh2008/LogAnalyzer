@@ -27,6 +27,24 @@ class ConfigManager(QObject):
     def set(self, key, value):
         self.settings.setValue(key, value)
 
+    def reset_to_defaults(self):
+        """Resets all settings to their default values."""
+        # 1. Appearance
+        self.theme = "Light"
+        self.ui_font_size = 12
+        self.ui_font_family = "Inter"
+        
+        # 2. Editor
+        self.set_editor_font("Consolas", 12)
+        self.editor_line_spacing = 0
+        self.show_line_numbers = True
+        
+        # 3. General
+        self.default_encoding = "UTF-8"
+        
+        # Ensure changes are saved
+        self.settings.sync()
+
     # --- Convenience Accessors with Signals ---
 
     # 1. Appearance

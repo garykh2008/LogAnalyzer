@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QStackedWidget,
-    QComboBox, QCheckBox, QSpinBox, QGroupBox, QFrame
+    QComboBox, QCheckBox, QSpinBox, QGroupBox, QFrame, QPushButton
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QFontDatabase
@@ -10,14 +10,19 @@ from log_analyzer.resources import get_svg_icon
 
 class PreferencesDialog(ModernDialog):
     def __init__(self, parent=None):
-        super().__init__(parent, title="Preferences", fixed_size=(700, 500))
+        super().__init__(parent, title="Preferences", fixed_size=(700, 550))
         self.config = get_config()
         self.init_ui()
 
     def init_ui(self):
         # Create main layout container
         container = QWidget()
-        main_layout = QHBoxLayout(container)
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
+        content_row = QWidget()
+        main_layout = QHBoxLayout(content_row)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
@@ -42,6 +47,29 @@ class PreferencesDialog(ModernDialog):
 
         main_layout.addWidget(self.sidebar)
         main_layout.addWidget(self.pages)
+
+        # 3. Bottom Action Bar
+        bottom_bar = QFrame()
+        bottom_bar.setObjectName("bottom_bar")
+        bottom_bar.setFixedHeight(60)
+        bottom_layout = QHBoxLayout(bottom_bar)
+        bottom_layout.setContentsMargins(20, 0, 20, 0)
+        
+        self.btn_reset = QPushButton("Reset to Defaults")
+        self.btn_reset.setIcon(get_svg_icon("rotate-ccw", "#888888"))
+        self.btn_reset.clicked.connect(self.on_reset_clicked)
+        
+        self.btn_close = QPushButton("Close")
+        self.btn_close.setDefault(True)
+        self.btn_close.clicked.connect(self.accept)
+        self.btn_close.setFixedWidth(100)
+        
+        bottom_layout.addWidget(self.btn_reset)
+        bottom_layout.addStretch()
+        bottom_layout.addWidget(self.btn_close)
+
+        container_layout.addWidget(content_row, 1)
+        container_layout.addWidget(bottom_bar)
 
         # Set the content of ModernDialog
         # Reset default padding of ModernDialog for this specific layout
@@ -82,6 +110,7 @@ class PreferencesDialog(ModernDialog):
             content_bg = "#1e1e1e"
             content_fg = "#d4d4d4"
             header_fg = "#ffffff"
+            bottom_border = "#333333"
         else:
             sidebar_bg = "#f3f3f3"
             sidebar_fg = "#333333"
@@ -92,6 +121,7 @@ class PreferencesDialog(ModernDialog):
             content_bg = "#ffffff"
             content_fg = "#333333"
             header_fg = "#000000"
+            bottom_border = "#eeeeee"
 
         self.sidebar.setStyleSheet(f"""
             QListWidget {{
@@ -121,6 +151,42 @@ class PreferencesDialog(ModernDialog):
             QStackedWidget {{ background-color: {content_bg}; color: {content_fg}; }}
             QLabel#section_header {{ font-size: {ui_font_size + 4}px; font-weight: bold; color: {header_fg}; margin-bottom: 10px; }}
         """)
+
+        # Style Bottom Bar
+        self.findChild(QFrame, "bottom_bar").setStyleSheet(f"""
+            #bottom_bar {{
+                background-color: {sidebar_bg};
+                border-top: 1px solid {bottom_border};
+            }}
+        """)
+
+    def on_reset_clicked(self):
+        from log_analyzer.modern_messagebox import ModernMessageBox
+        from PySide6.QtWidgets import QMessageBox
+        
+        res = ModernMessageBox.question(self, "Reset Settings", 
+                                        "Are you sure you want to reset all settings to default values?",
+                                        QMessageBox.Yes | QMessageBox.No)
+        
+        if res == QMessageBox.Yes:
+            self.config.reset_to_defaults()
+            # Refresh all UI components in the dialog to reflect new config
+            self.refresh_ui_from_config()
+
+    def refresh_ui_from_config(self):
+        # 1. General
+        self.encoding_combo.setCurrentText(self.config.default_encoding)
+        
+        # 2. Log View
+        self.font_combo.setCurrentText(self.config.editor_font_family)
+        self.font_size_spin.setValue(self.config.editor_font_size)
+        self.line_spacing_spin.setValue(self.config.editor_line_spacing)
+        self.line_numbers_cb.setChecked(self.config.show_line_numbers)
+        
+        # 3. Appearance
+        self.theme_combo.setCurrentText(self.config.theme)
+        self.ui_font_spin.setValue(self.config.ui_font_size)
+        self.ui_font_combo.setCurrentText(self.config.ui_font_family)
 
     def create_general_page(self):
         page = QWidget()
@@ -248,14 +314,6 @@ class PreferencesDialog(ModernDialog):
         
         theme_layout.addWidget(QLabel("Application Theme:"))
         theme_layout.addWidget(self.theme_combo)
-        
-        # UI Font Size
-        theme_layout.addWidget(QLabel("UI Font Size:"))
-        self.ui_font_spin = QSpinBox()
-        self.ui_font_spin.setRange(8, 24)
-        self.ui_font_spin.setValue(self.config.ui_font_size)
-        self.ui_font_spin.valueChanged.connect(lambda v: setattr(self.config, 'ui_font_size', v))
-        theme_layout.addWidget(self.ui_font_spin)
 
         # UI Font Family
         theme_layout.addWidget(QLabel("UI Font Family:"))
@@ -289,10 +347,35 @@ class PreferencesDialog(ModernDialog):
 
         self.ui_font_combo.currentTextChanged.connect(on_ui_font_changed)
         theme_layout.addWidget(self.ui_font_combo)
+
+        # UI Font Size
+        theme_layout.addWidget(QLabel("UI Font Size:"))
+        self.ui_font_spin = QSpinBox()
+        self.ui_font_spin.setRange(8, 24)
+        self.ui_font_size = self.config.ui_font_size # Store reference for internal access if needed
+        self.ui_font_spin.setValue(self.config.ui_font_size)
+        self.ui_font_spin.valueChanged.connect(lambda v: setattr(self.config, 'ui_font_size', v))
+        theme_layout.addWidget(self.ui_font_spin)
         
         layout.addWidget(theme_group)
 
         return page
+
+    def on_font_combo_changed(self, text):
+        self.update_combo_font(text)
+        self.update_editor_font()
+
+    def update_combo_font(self, family):
+        # Use stylesheet to override the global application font-family setting
+        # We apply it to the QComboBox and its internal QAbstractItemView to ensure consistency,
+        # although item fonts are handled by setItemData.
+        self.font_combo.setStyleSheet(f"font-family: \"{family}\"; font-size: 14px;")
+
+    def update_editor_font(self):
+        family = self.font_combo.currentText()
+        size = self.font_size_spin.value()
+        self.config.set_editor_font(family, size)
+
 
     def on_font_combo_changed(self, text):
         self.update_combo_font(text)
