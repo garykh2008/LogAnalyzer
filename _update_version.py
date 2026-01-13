@@ -21,12 +21,15 @@ def update_version(new_version):
             
             new_content, count = re.subn(pattern, replacement, content)
 
-            if count > 0 and new_content != content:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(new_content)
-                print(f"[Info] Updated version in {file_path}")
+            if count > 0:
+                if new_content != content:
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(new_content)
+                    print(f"[Info] Updated version in {file_path}")
+                else:
+                    print(f"[Info] Version in {file_path} is already {new_version}")
                 updated_any = True
-            elif count == 0:
+            else:
                 print(f"[Warning] Version pattern not found in {file_path}")
 
         except Exception as e:

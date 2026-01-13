@@ -25,7 +25,7 @@ if "%~1" == "" (
 )
 :: Check if parameter starts with 'v' (case-insensitive)
 set "PARAM=%~1"
-if /I "!PARAM:~0,1!" == "v" goto :full_release_mode
+if /I "%PARAM:~0,1%" == "v" goto :full_release_mode
 
 :: If we reach here, the parameter is invalid
 echo [Error] Invalid parameter: %~1
@@ -95,7 +95,7 @@ if exist "%OLD_HTML_FILE%" (
 
 :: Add all new/modified files
 echo      Adding new release files to Git...
-git add qt_app/ui.py "%NEW_HTML_FILE%"
+git add log_analyzer/ui.py "%NEW_HTML_FILE%"
 git add "%NEW_HTML_FILE%"
 
 :: --- 6. Commit ---
