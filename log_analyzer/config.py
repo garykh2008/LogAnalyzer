@@ -11,6 +11,7 @@ class ConfigManager(QObject):
     fontChanged = Signal(object) # Emits QFont
     themeChanged = Signal(str)   # Emits "Dark", "Light", or "System"
     uiFontSizeChanged = Signal(int) # Emits size
+    uiFontFamilyChanged = Signal(str) # Emits family
     editorFontChanged = Signal(str, int) # Emits font_family, font_size
     editorLineSpacingChanged = Signal(int) # Emits spacing
     showLineNumbersChanged = Signal(bool)
@@ -49,6 +50,16 @@ class ConfigManager(QObject):
         if current != value:
             self.settings.setValue("appearance/ui_font_size", value)
             self.uiFontSizeChanged.emit(value)
+
+    @property
+    def ui_font_family(self):
+        return self.settings.value("appearance/ui_font_family", "Inter")
+
+    @ui_font_family.setter
+    def ui_font_family(self, value):
+        if self.ui_font_family != value:
+            self.settings.setValue("appearance/ui_font_family", value)
+            self.uiFontFamilyChanged.emit(value)
 
     # 2. Log Editor / View
     @property

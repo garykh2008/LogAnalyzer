@@ -485,6 +485,7 @@ class MainWindow(QMainWindow):
         self.config.editorLineSpacingChanged.connect(self.apply_line_spacing)
         self.config.themeChanged.connect(self.on_config_theme_changed)
         self.config.uiFontSizeChanged.connect(lambda s: self.apply_theme())
+        self.config.uiFontFamilyChanged.connect(lambda f: self.apply_theme())
         
         # Apply initial config state
         self.apply_editor_font(self.config.editor_font_family, self.config.editor_font_size)
@@ -863,12 +864,14 @@ class MainWindow(QMainWindow):
         
         # Base UI Font Size
         ui_font_size = self.config.ui_font_size
+        ui_font_family = self.config.ui_font_family
         
         if hasattr(self, 'toast'): self.toast.set_theme(self.is_dark_mode, max(12, ui_font_size))
         
         # Welcome Label Scaling
         if hasattr(self, 'welcome_label'):
             f = self.welcome_label.font()
+            f.setFamily(ui_font_family)
             f.setPixelSize(ui_font_size + 8)
             self.welcome_label.setFont(f)
 
@@ -883,7 +886,7 @@ class MainWindow(QMainWindow):
         # Style Custom Title Bar
         self.title_bar.setStyleSheet(f"""
             #title_bar {{ background-color: {titlebar_bg}; border-bottom: 1px solid {float_border}; }}
-            #title_bar QLabel {{ color: {titlebar_fg}; font-size: {ui_font_size + 2}px; }}
+            #title_bar QLabel {{ color: {titlebar_fg}; font-family: "{ui_font_family}"; font-size: {ui_font_size + 2}px; }}
             QToolButton {{ background-color: transparent; border: none; border-radius: 0px; }}
             QToolButton:hover {{ background-color: {titlebar_hover}; }}
         """)
@@ -895,10 +898,10 @@ class MainWindow(QMainWindow):
         
         # Fix MenuBar in Custom Title Bar
         menu_style = f"""
-        QMenuBar {{ background-color: transparent; color: {titlebar_fg}; border: none; padding: 0px; }}
+        QMenuBar {{ background-color: transparent; color: {titlebar_fg}; border: none; padding: 0px; font-family: "{ui_font_family}"; }}
         QMenuBar::item {{ background-color: transparent; padding: 5px 10px; border-radius: 4px; }}
         QMenuBar::item:selected {{ background-color: {titlebar_hover}; }}
-        QMenu {{ background-color: {menu_bg}; color: {menu_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px; margin: 0px; }}
+        QMenu {{ background-color: {menu_bg}; color: {menu_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px; margin: 0px; font-family: "{ui_font_family}"; }}
         QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; margin: 1px 0px; }}
         QMenu::item:selected {{ background-color: {menu_sel}; color: {menu_sel_fg}; }}
         QMenu::separator {{ height: 1px; background: {float_border}; margin: 4px 8px; }}
@@ -911,7 +914,7 @@ class MainWindow(QMainWindow):
         self.update_status_bar(self.last_status_message)
 
         style = f"""
-        QWidget {{ font-family: "Inter", "Segoe UI", "Microsoft JhengHei UI", sans-serif; }}
+        QWidget {{ font-family: "{ui_font_family}", "Segoe UI", "Microsoft JhengHei UI", sans-serif; }}
         QMainWindow, QDialog, QMessageBox {{ background-color: {bg_color}; color: {fg_color}; }}
         QDockWidget {{ background-color: {bg_color}; color: {fg_color}; }}
         QMainWindow::separator {{ background-color: transparent; width: 4px; }}

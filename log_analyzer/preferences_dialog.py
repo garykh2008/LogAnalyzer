@@ -164,11 +164,12 @@ class PreferencesDialog(ModernDialog):
         # Manually populate monospaced fonts to filter out problematic legacy raster fonts
         # that cause DirectWrite warnings (Fixedsys, Terminal, etc.)
         all_families = QFontDatabase.families()
-        blacklist = {"Fixedsys", "Terminal", "System", "Modern", "Roman", "Script", "Ms Serif", "Ms Sans Serif", "Small Fonts"}
+        blacklist = {"fixedsys", "terminal", "system", "modern", "roman", "script", 
+                     "ms serif", "ms sans serif", "small fonts", "courier"}
         
         safe_fonts = []
         for f in all_families:
-            if f in blacklist or f.startswith("@"): continue
+            if f.lower() in blacklist or f.startswith("@"): continue
             if QFontDatabase.isFixedPitch(f):
                 safe_fonts.append(f)
         
@@ -255,6 +256,39 @@ class PreferencesDialog(ModernDialog):
         self.ui_font_spin.setValue(self.config.ui_font_size)
         self.ui_font_spin.valueChanged.connect(lambda v: setattr(self.config, 'ui_font_size', v))
         theme_layout.addWidget(self.ui_font_spin)
+
+        # UI Font Family
+        theme_layout.addWidget(QLabel("UI Font Family:"))
+        self.ui_font_combo = QComboBox()
+        
+        # Populate with safe system fonts (case-insensitive blacklist check)
+        all_families = QFontDatabase.families()
+        blacklist = {"fixedsys", "terminal", "system", "modern", "roman", "script", 
+                     "ms serif", "ms sans serif", "small fonts", "courier"}
+        safe_fonts = sorted([f for f in all_families if f.lower() not in blacklist and not f.startswith("@")])
+        
+        for f in safe_fonts:
+            self.ui_font_combo.addItem(f)
+            # Preview font in the dropdown
+            self.ui_font_combo.setItemData(self.ui_font_combo.count() - 1, QFont(f, 11), Qt.FontRole)
+        
+        current_ui_font = self.config.ui_font_family
+        if current_ui_font in safe_fonts:
+            self.ui_font_combo.setCurrentText(current_ui_font)
+        else:
+            self.ui_font_combo.addItem(current_ui_font)
+            self.ui_font_combo.setItemData(self.ui_font_combo.count() - 1, QFont(current_ui_font, 11), Qt.FontRole)
+            self.ui_font_combo.setCurrentText(current_ui_font)
+            
+        # Initial stylesheet update for combo box font
+        self.ui_font_combo.setStyleSheet(f"font-family: \"{current_ui_font}\"; font-size: 14px;")
+            
+        def on_ui_font_changed(text):
+            self.config.ui_font_family = text
+            self.ui_font_combo.setStyleSheet(f"font-family: \"{text}\"; font-size: 14px;")
+
+        self.ui_font_combo.currentTextChanged.connect(on_ui_font_changed)
+        theme_layout.addWidget(self.ui_font_combo)
         
         layout.addWidget(theme_group)
 
