@@ -484,6 +484,7 @@ class MainWindow(QMainWindow):
         self.config.showLineNumbersChanged.connect(self.toggle_line_numbers)
         self.config.editorLineSpacingChanged.connect(self.apply_line_spacing)
         self.config.themeChanged.connect(self.on_config_theme_changed)
+        self.config.uiFontSizeChanged.connect(lambda s: self.apply_theme())
         
         # Apply initial config state
         self.apply_editor_font(self.config.editor_font_family, self.config.editor_font_size)
@@ -800,6 +801,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'toast'): self.toast.set_theme(self.is_dark_mode)
         if hasattr(self, 'search_overlay'): self.search_overlay.apply_theme(self.is_dark_mode)
         app = QApplication.instance()
+        
+        # Base UI Font Size
+        ui_font_size = self.config.ui_font_size
 
         if self.is_dark_mode:
             bg_color, fg_color, selection_bg, selection_fg = "#1e1e1e", "#d4d4d4", "#264f78", "#ffffff"
@@ -857,6 +861,17 @@ class MainWindow(QMainWindow):
         self.delegate.set_theme_config(log_gutter_bg, log_gutter_fg, log_border)
         self.v_scrollbar.set_theme(self.is_dark_mode)
         
+        # Base UI Font Size
+        ui_font_size = self.config.ui_font_size
+        
+        if hasattr(self, 'toast'): self.toast.set_theme(self.is_dark_mode, max(12, ui_font_size))
+        
+        # Welcome Label Scaling
+        if hasattr(self, 'welcome_label'):
+            f = self.welcome_label.font()
+            f.setPixelSize(ui_font_size + 8)
+            self.welcome_label.setFont(f)
+
         self.list_view.viewport().update()
         
         # Update Window Controls Icons
@@ -868,7 +883,7 @@ class MainWindow(QMainWindow):
         # Style Custom Title Bar
         self.title_bar.setStyleSheet(f"""
             #title_bar {{ background-color: {titlebar_bg}; border-bottom: 1px solid {float_border}; }}
-            #title_bar QLabel {{ color: {titlebar_fg}; }}
+            #title_bar QLabel {{ color: {titlebar_fg}; font-size: {ui_font_size + 2}px; }}
             QToolButton {{ background-color: transparent; border: none; border-radius: 0px; }}
             QToolButton:hover {{ background-color: {titlebar_hover}; }}
         """)
@@ -901,9 +916,9 @@ class MainWindow(QMainWindow):
         QDockWidget {{ background-color: {bg_color}; color: {fg_color}; }}
         QMainWindow::separator {{ background-color: transparent; width: 4px; }}
         QMainWindow::separator:hover {{ background-color: {float_border}; }}
-        QWidget {{ color: {fg_color}; font-size: 12px; }}
+        QWidget {{ color: {fg_color}; font-size: {ui_font_size}px; }}
         #activity_bar {{ background-color: {activity_bg}; border: none; spacing: 10px; padding-top: 5px; }}
-        #activity_bar QToolButton {{ background-color: transparent; border: none; border-left: 3px solid transparent; border-radius: 0px; margin: 0px; font-size: 12px; }}
+        #activity_bar QToolButton {{ background-color: transparent; border: none; border-left: 3px solid transparent; border-radius: 0px; margin: 0px; font-size: {ui_font_size}px; }}
         #activity_bar QToolButton:hover {{ background-color: {hover_bg}; }}
         #activity_bar QToolButton:checked {{ border-left: 3px solid {bar_bg}; background-color: {hover_bg}; }}
         QDockWidget#FilterDock, QDockWidget#NotesDock, QDockWidget#LogListDock {{ color: {fg_color}; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; titlebar-close-icon: none; titlebar-normal-icon: none; }}

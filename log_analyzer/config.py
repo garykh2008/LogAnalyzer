@@ -10,6 +10,7 @@ class ConfigManager(QObject):
     # Signals to notify UI of changes
     fontChanged = Signal(object) # Emits QFont
     themeChanged = Signal(str)   # Emits "Dark", "Light", or "System"
+    uiFontSizeChanged = Signal(int) # Emits size
     editorFontChanged = Signal(str, int) # Emits font_family, font_size
     editorLineSpacingChanged = Signal(int) # Emits spacing
     showLineNumbersChanged = Signal(bool)
@@ -47,10 +48,7 @@ class ConfigManager(QObject):
         current = self.ui_font_size
         if current != value:
             self.settings.setValue("appearance/ui_font_size", value)
-            # We might need to construct a QFont to emit, or just let main window handle it
-            # For now, let's just emit the new size or a QFont object
-            # Ideally, main.py sets the app font.
-            pass 
+            self.uiFontSizeChanged.emit(value)
 
     # 2. Log Editor / View
     @property

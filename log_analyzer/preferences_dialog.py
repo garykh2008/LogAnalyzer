@@ -70,6 +70,7 @@ class PreferencesDialog(ModernDialog):
         # Determine mode from config directly (or signal arg)
         current_theme = theme_name if theme_name else self.config.theme
         is_dark = (current_theme == "Dark")
+        ui_font_size = self.config.ui_font_size
 
         if is_dark:
             sidebar_bg = "#252526"
@@ -99,6 +100,7 @@ class PreferencesDialog(ModernDialog):
                 outline: none;
                 border-right: 1px solid {sidebar_border};
                 padding-top: 10px;
+                font-size: {ui_font_size}px;
             }}
             QListWidget::item {{
                 height: 36px;
@@ -117,7 +119,7 @@ class PreferencesDialog(ModernDialog):
         
         self.pages.setStyleSheet(f"""
             QStackedWidget {{ background-color: {content_bg}; color: {content_fg}; }}
-            QLabel#section_header {{ font-size: 16px; font-weight: bold; color: {header_fg}; margin-bottom: 10px; }}
+            QLabel#section_header {{ font-size: {ui_font_size + 4}px; font-weight: bold; color: {header_fg}; margin-bottom: 10px; }}
         """)
 
     def create_general_page(self):
@@ -245,6 +247,15 @@ class PreferencesDialog(ModernDialog):
         
         theme_layout.addWidget(QLabel("Application Theme:"))
         theme_layout.addWidget(self.theme_combo)
+        
+        # UI Font Size
+        theme_layout.addWidget(QLabel("UI Font Size:"))
+        self.ui_font_spin = QSpinBox()
+        self.ui_font_spin.setRange(8, 24)
+        self.ui_font_spin.setValue(self.config.ui_font_size)
+        self.ui_font_spin.valueChanged.connect(lambda v: setattr(self.config, 'ui_font_size', v))
+        theme_layout.addWidget(self.ui_font_spin)
+        
         layout.addWidget(theme_group)
 
         return page

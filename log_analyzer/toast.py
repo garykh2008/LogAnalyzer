@@ -7,7 +7,7 @@ import sys
 class ToastNotification(QWidget):
     closed = Signal()
 
-    def __init__(self, parent, message, type_str="info", duration=3000, is_dark=True):
+    def __init__(self, parent, message, type_str="info", duration=3000, is_dark=True, font_size=13):
         # On Linux, parent is centralWidget (Child Widget mode)
         # On Windows, parent is None (Independent Window mode)
         super().__init__(parent)
@@ -50,7 +50,7 @@ class ToastNotification(QWidget):
                 border: 1px solid {border_color};
                 border-left: 4px solid {cfg['border']};
             }}
-            QLabel {{ color: {text_color}; background: transparent; font-family: "Segoe UI", "Inter", sans-serif; font-size: 13px; }}
+            QLabel {{ color: {text_color}; background: transparent; font-family: "Segoe UI", "Inter", sans-serif; font-size: {font_size}px; }}
         """)
 
         self.shadow = QGraphicsDropShadowEffect(self.content_frame)
@@ -93,10 +93,12 @@ class Toast(QObject):
         super().__init__(parent)
         self.parent_window = parent # MainWindow
         self.is_dark_mode = True
+        self.font_size = 13
         self.notifications = []
 
-    def set_theme(self, is_dark):
+    def set_theme(self, is_dark, font_size=None):
         self.is_dark_mode = is_dark
+        if font_size: self.font_size = font_size
 
     def show_message(self, message, duration=3000, type_str="info"):
         if len(self.notifications) >= 5:
@@ -105,7 +107,7 @@ class Toast(QObject):
 
         # Use centralWidget as parent on Linux to keep toast inside window but below title bar
         p = self.parent_window.centralWidget() if sys.platform == "linux" else None
-        notif = ToastNotification(p, message, type_str, duration, self.is_dark_mode)
+        notif = ToastNotification(p, message, type_str, duration, self.is_dark_mode, self.font_size)
         
         self.notifications.append(notif)
         notif.closed.connect(lambda: self._remove_notification(notif))
