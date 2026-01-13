@@ -29,7 +29,7 @@ class PreferencesDialog(ModernDialog):
         # Add categories
         self.sidebar.addItem("General")
         self.sidebar.addItem("Log View")
-        # self.sidebar.addItem("Appearance") # TODO: Implement Appearance settings
+        self.sidebar.addItem("Appearance")
         self.sidebar.currentRowChanged.connect(self.change_page)
 
         # 2. Content Area (Stacked Widget)
@@ -38,7 +38,7 @@ class PreferencesDialog(ModernDialog):
         # Add pages
         self.pages.addWidget(self.create_general_page())
         self.pages.addWidget(self.create_log_view_page())
-        # self.pages.addWidget(self.create_appearance_page())
+        self.pages.addWidget(self.create_appearance_page())
 
         main_layout.addWidget(self.sidebar)
         main_layout.addWidget(self.pages)
@@ -51,6 +51,7 @@ class PreferencesDialog(ModernDialog):
         # Select first item
         self.sidebar.setCurrentRow(0)
         
+        self.config.themeChanged.connect(self.apply_theme)
         self.apply_theme()
 
     def change_page(self, index):
@@ -61,14 +62,14 @@ class PreferencesDialog(ModernDialog):
         label.setObjectName("section_header")
         return label
 
-    def apply_theme(self):
+    def apply_theme(self, theme_name=None):
         super().apply_theme()
         
         if not hasattr(self, 'sidebar'): return
 
-        is_dark = True
-        if self.parent() and hasattr(self.parent(), 'is_dark_mode'):
-            is_dark = self.parent().is_dark_mode
+        # Determine mode from config directly (or signal arg)
+        current_theme = theme_name if theme_name else self.config.theme
+        is_dark = (current_theme == "Dark")
 
         if is_dark:
             sidebar_bg = "#252526"
@@ -198,6 +199,14 @@ class PreferencesDialog(ModernDialog):
         self.font_size_spin.valueChanged.connect(self.update_editor_font)
         font_layout.addWidget(self.font_size_spin)
 
+        # Line Spacing
+        font_layout.addWidget(QLabel("Line Spacing (px):"))
+        self.line_spacing_spin = QSpinBox()
+        self.line_spacing_spin.setRange(0, 50)
+        self.line_spacing_spin.setValue(self.config.editor_line_spacing)
+        self.line_spacing_spin.valueChanged.connect(lambda v: setattr(self.config, 'editor_line_spacing', v))
+        font_layout.addWidget(self.line_spacing_spin)
+
         layout.addWidget(font_group)
 
         # -- Display Settings --
@@ -210,6 +219,33 @@ class PreferencesDialog(ModernDialog):
         display_layout.addWidget(self.line_numbers_cb)
 
         layout.addWidget(display_group)
+
+        return page
+
+    def create_appearance_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setAlignment(Qt.AlignTop)
+
+        layout.addWidget(self.create_section_header("Appearance Settings"))
+
+        # -- Theme Settings --
+        theme_group = QGroupBox("Theme")
+        theme_layout = QVBoxLayout(theme_group)
+
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(["Dark", "Light"])
+        
+        # Set current selection based on config
+        current_theme = self.config.theme
+        self.theme_combo.setCurrentText(current_theme)
+        
+        self.theme_combo.currentTextChanged.connect(lambda t: setattr(self.config, 'theme', t))
+        
+        theme_layout.addWidget(QLabel("Application Theme:"))
+        theme_layout.addWidget(self.theme_combo)
+        layout.addWidget(theme_group)
 
         return page
 

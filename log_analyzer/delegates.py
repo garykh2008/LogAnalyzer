@@ -95,6 +95,10 @@ class LogDelegate(QStyledItemDelegate):
         self.gutter_fg = QColor(100, 100, 100)
         self.border_color = QColor("#3c3c3c")
         self.show_line_numbers = True
+        self.line_spacing = 0
+
+    def set_line_spacing(self, spacing):
+        self.line_spacing = spacing
 
     def set_theme_config(self, gutter_bg, gutter_fg, border_color):
         if gutter_bg: self.gutter_bg = QColor(gutter_bg)
@@ -164,7 +168,7 @@ class LogDelegate(QStyledItemDelegate):
                 painter.save()
                 painter.setPen(self.gutter_fg)
                 # Right padding 12px
-                painter.drawText(line_bg_rect.adjusted(0, 0, -12, 0), Qt.AlignRight | Qt.AlignTop, line_num_str)
+                painter.drawText(line_bg_rect.adjusted(0, 0, -12, 0), Qt.AlignRight | Qt.AlignVCenter, line_num_str)
                 painter.restore()
 
             # 2. Text (Scrolls with the content)
@@ -195,7 +199,10 @@ class LogDelegate(QStyledItemDelegate):
                 if should_highlight:
                     self._paint_highlighted_text(painter, text_rect, text, option)
                 else:
-                    painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignTop, text)
+                    # Calculate vertical center for standard text
+                    fm = option.fontMetrics
+                    y_center = text_rect.top() + (text_rect.height() - fm.height()) // 2 + fm.ascent()
+                    painter.drawText(text_rect.left(), y_center, text)
 
 
         finally:
@@ -213,7 +220,10 @@ class LogDelegate(QStyledItemDelegate):
 
         start = 0
         x = rect.left()
-        y = rect.top() + option.fontMetrics.ascent()
+        
+        # Center text vertically
+        fm = option.fontMetrics
+        y = rect.top() + (rect.height() - fm.height()) // 2 + fm.ascent()
 
         # Use current pen (set in paint method) as base text color
         base_pen = painter.pen()
@@ -258,7 +268,7 @@ class LogDelegate(QStyledItemDelegate):
         
         # Total width = line number column + text width + margins
         text_width = option.fontMetrics.horizontalAdvance(text)
-        return QSize(line_num_width + 8 + text_width + 20, option.fontMetrics.height())
+        return QSize(line_num_width + 8 + text_width + 20, option.fontMetrics.height() + self.line_spacing)
 
 class FilterDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):

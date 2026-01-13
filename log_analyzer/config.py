@@ -11,12 +11,13 @@ class ConfigManager(QObject):
     fontChanged = Signal(object) # Emits QFont
     themeChanged = Signal(str)   # Emits "Dark", "Light", or "System"
     editorFontChanged = Signal(str, int) # Emits font_family, font_size
+    editorLineSpacingChanged = Signal(int) # Emits spacing
     showLineNumbersChanged = Signal(bool)
     
     def __init__(self):
         super().__init__()
-        # Organization and App names are set in main.py, so QSettings() works automatically
-        self.settings = QSettings()
+        # Explicitly set names to ensure consistency regardless of global app state
+        self.settings = QSettings("LogAnalyzer", "Log Analyzer Qt")
         
     def get(self, key, default=None):
         return self.settings.value(key, default)
@@ -29,7 +30,7 @@ class ConfigManager(QObject):
     # 1. Appearance
     @property
     def theme(self):
-        return self.settings.value("appearance/theme", "Dark")
+        return self.settings.value("appearance/theme", "Light")
 
     @theme.setter
     def theme(self, value):
@@ -39,7 +40,7 @@ class ConfigManager(QObject):
 
     @property
     def ui_font_size(self):
-        return int(self.settings.value("appearance/ui_font_size", 10))
+        return int(self.settings.value("appearance/ui_font_size", 12))
 
     @ui_font_size.setter
     def ui_font_size(self, value):
@@ -58,7 +59,7 @@ class ConfigManager(QObject):
 
     @property
     def editor_font_size(self):
-        return int(self.settings.value("editor/font_size", 10))
+        return int(self.settings.value("editor/font_size", 12))
 
     def set_editor_font(self, family, size):
         changed = False
@@ -71,6 +72,16 @@ class ConfigManager(QObject):
         
         if changed:
             self.editorFontChanged.emit(family, size)
+
+    @property
+    def editor_line_spacing(self):
+        return int(self.settings.value("editor/line_spacing", 0))
+
+    @editor_line_spacing.setter
+    def editor_line_spacing(self, spacing):
+        if self.editor_line_spacing != spacing:
+            self.settings.setValue("editor/line_spacing", spacing)
+            self.editorLineSpacingChanged.emit(spacing)
 
     @property
     def show_line_numbers(self):

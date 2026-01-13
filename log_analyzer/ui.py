@@ -100,7 +100,7 @@ class MainWindow(QMainWindow):
 
         self.settings = QSettings("LogAnalyzer", "QtApp")
         self.config = get_config() # Initialize ConfigManager
-        self.is_dark_mode = self.settings.value("dark_mode", True, type=bool)
+        self.is_dark_mode = self.settings.value("dark_mode", False, type=bool)
         self.setAcceptDrops(True)
         self.last_status_message = "Ready"
         self.current_filter_file = None
@@ -482,10 +482,13 @@ class MainWindow(QMainWindow):
         # Config Connections
         self.config.editorFontChanged.connect(self.apply_editor_font)
         self.config.showLineNumbersChanged.connect(self.toggle_line_numbers)
+        self.config.editorLineSpacingChanged.connect(self.apply_line_spacing)
+        self.config.themeChanged.connect(self.on_config_theme_changed)
         
         # Apply initial config state
         self.apply_editor_font(self.config.editor_font_family, self.config.editor_font_size)
         self.toggle_line_numbers(self.config.show_line_numbers)
+        self.apply_line_spacing(self.config.editor_line_spacing)
 
         self.apply_theme()
 
@@ -494,6 +497,9 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def apply_editor_font(self, family, size):
+        # Update via stylesheet to override global app stylesheet inheritance
+        self.list_view.setStyleSheet(f"font-family: \"{family}\"; font-size: {size}pt;")
+        
         font = QFont(family, size)
         font.setStyleHint(QFont.Monospace)
         self.list_view.setFont(font)
@@ -771,6 +777,22 @@ class MainWindow(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
+    def on_config_theme_changed(self, theme):
+        is_dark = (theme == "Dark")
+        if self.is_dark_mode != is_dark:
+            self.is_dark_mode = is_dark
+            self.settings.setValue("dark_mode", self.is_dark_mode)
+            self.apply_theme()
+            self.refresh_filter_tree()
+            if self.current_engine and self.filters:
+                self.recalc_filters(True)
+
+    def apply_line_spacing(self, spacing):
+        self.delegate.set_line_spacing(spacing)
+        # Force QListView to recalculate layout/size hints
+        self.list_view.model().layoutChanged.emit() 
+        self.list_view.viewport().update()
+        self.update_scrollbar_range()
 
     def apply_theme(self):
         self.notes_manager.set_theme(self.is_dark_mode)
@@ -889,7 +911,7 @@ class MainWindow(QMainWindow):
         #FilterDock QWidget, #NotesDock QWidget, #LogListDock QWidget {{ background-color: {sidebar_bg}; }}
         #FilterDock QTreeWidget, #NotesDock QTreeWidget, #LogListDock QTreeWidget {{ background-color: {sidebar_bg}; border: none; }}
         {menu_style}
-        QListView {{ background-color: {bg_color}; color: {fg_color}; border: none; outline: 0; font-size: 11pt; font-family: "JetBrains Mono", "Consolas", monospace; }}
+        QListView {{ background-color: {bg_color}; color: {fg_color}; border: none; outline: 0; }}
         QListView::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
                 QTreeWidget {{ background-color: {tree_bg}; border: none; color: {fg_color}; outline: 0; }}
                 QTreeWidget::item {{ padding: 4px; border: none; }}
@@ -1908,12 +1930,8 @@ class MainWindow(QMainWindow):
             self.is_scrolling = False
 
     def toggle_theme(self):
-        self.is_dark_mode = not self.is_dark_mode
-        self.settings.setValue("dark_mode", self.is_dark_mode)
-        self.apply_theme()
-        self.refresh_filter_tree()
-        if self.current_engine and self.filters:
-            self.recalc_filters(True)
+        new_theme = "Light" if self.is_dark_mode else "Dark"
+        self.config.theme = new_theme
 
     def toggle_show_filtered_only_from_status(self):
         self.show_filtered_action.setChecked(not self.show_filtered_action.isChecked())
