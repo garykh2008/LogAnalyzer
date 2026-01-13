@@ -94,11 +94,15 @@ class LogDelegate(QStyledItemDelegate):
         self.gutter_bg = None
         self.gutter_fg = QColor(100, 100, 100)
         self.border_color = QColor("#3c3c3c")
+        self.show_line_numbers = True
 
     def set_theme_config(self, gutter_bg, gutter_fg, border_color):
         if gutter_bg: self.gutter_bg = QColor(gutter_bg)
         if gutter_fg: self.gutter_fg = QColor(gutter_fg)
         if border_color: self.border_color = QColor(border_color)
+
+    def set_show_line_numbers(self, show):
+        self.show_line_numbers = show
 
     def set_hover_color(self, color):
         self.hover_color = QColor(color)
@@ -112,6 +116,7 @@ class LogDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index):
         painter.save()
+        painter.setFont(option.font) # Ensure custom font is used for drawing
         try:
             # Get horizontal scroll offset to keep line numbers fixed
             scroll_x = option.widget.horizontalScrollBar().value() if option.widget else 0
@@ -132,15 +137,18 @@ class LogDelegate(QStyledItemDelegate):
 
             # --- Fixed Line Number Column ---
             raw_index = index.data(Qt.UserRole + 1)
-            digits = len(str(self.max_line_number))
-            char_w = option.fontMetrics.horizontalAdvance('8')
-            # Increase padding: Left (10px) + digits*char_w + Right (10px)
-            line_num_width = max(45, digits * char_w + 20)
+            
+            line_num_width = 0
+            if self.show_line_numbers:
+                digits = len(str(self.max_line_number))
+                char_w = option.fontMetrics.horizontalAdvance('8')
+                # Increase padding: Left (10px) + digits*char_w + Right (10px)
+                line_num_width = max(45, digits * char_w + 20)
             
             # The line number column rect should be shifted by scroll_x to stay on the left
             line_bg_rect = QRectF(option.rect.left() + scroll_x, option.rect.top(), line_num_width, option.rect.height())
             
-            if raw_index is not None:
+            if self.show_line_numbers and raw_index is not None:
                 line_num_str = str(raw_index + 1)
                 
                 # Draw Line Num Column Background
@@ -242,9 +250,11 @@ class LogDelegate(QStyledItemDelegate):
             return QSize(option.rect.width(), option.fontMetrics.height())
         
         # Calculate line number column width
-        digits = len(str(self.max_line_number))
-        char_w = option.fontMetrics.horizontalAdvance('8')
-        line_num_width = max(45, digits * char_w + 20)
+        line_num_width = 0
+        if self.show_line_numbers:
+            digits = len(str(self.max_line_number))
+            char_w = option.fontMetrics.horizontalAdvance('8')
+            line_num_width = max(45, digits * char_w + 20)
         
         # Total width = line number column + text width + margins
         text_width = option.fontMetrics.horizontalAdvance(text)

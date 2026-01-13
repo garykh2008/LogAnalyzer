@@ -25,6 +25,8 @@ from .components import CustomTitleBar, DimmerOverlay, BadgeToolButton, Clickabl
 from .modern_dialog import ModernDialog
 from .modern_messagebox import ModernMessageBox
 from .scrollbar_map import SearchScrollBar
+from .preferences_dialog import PreferencesDialog
+from .config import get_config
 
 class FilterTreeWidget(QTreeWidget):
     def __init__(self, on_drop_callback=None, parent=None):
@@ -97,6 +99,7 @@ class MainWindow(QMainWindow):
         self.resize(1200, 800)
 
         self.settings = QSettings("LogAnalyzer", "QtApp")
+        self.config = get_config() # Initialize ConfigManager
         self.is_dark_mode = self.settings.value("dark_mode", True, type=bool)
         self.setAcceptDrops(True)
         self.last_status_message = "Ready"
@@ -199,6 +202,17 @@ class MainWindow(QMainWindow):
         self.activity_bar.addWidget(self.btn_side_loglist)
         self.activity_bar.addWidget(self.btn_side_filter)
         self.activity_bar.addWidget(self.btn_side_notes)
+        
+        # Add Spacer and Settings Button
+        empty = QWidget()
+        empty.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.activity_bar.addWidget(empty)
+        
+        self.btn_settings = QToolButton()
+        self.btn_settings.setFixedSize(48, 48)
+        self.btn_settings.setToolTip("Settings")
+        self.btn_settings.clicked.connect(self.open_preferences)
+        self.activity_bar.addWidget(self.btn_settings)
 
         # Feature configuration based on platform
         dock_features = QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
@@ -348,9 +362,7 @@ class MainWindow(QMainWindow):
         
         self.list_view.selectionModel().currentChanged.connect(self.on_view_selection_changed)
 
-        font = QFont("Consolas", 11)
-        font.setStyleHint(QFont.Monospace)
-        self.list_view.setFont(font)
+        # Font is set via self.apply_editor_font call later in __init__
 
         # --- Main Layout ---
         central_widget = QWidget()
@@ -467,7 +479,31 @@ class MainWindow(QMainWindow):
         self.search_overlay.searchChanged.connect(self._perform_search)
         self.search_overlay.closed.connect(self._on_search_closed)
 
+        # Config Connections
+        self.config.editorFontChanged.connect(self.apply_editor_font)
+        self.config.showLineNumbersChanged.connect(self.toggle_line_numbers)
+        
+        # Apply initial config state
+        self.apply_editor_font(self.config.editor_font_family, self.config.editor_font_size)
+        self.toggle_line_numbers(self.config.show_line_numbers)
+
         self.apply_theme()
+
+    def open_preferences(self):
+        dialog = PreferencesDialog(self)
+        dialog.exec()
+
+    def apply_editor_font(self, family, size):
+        font = QFont(family, size)
+        font.setStyleHint(QFont.Monospace)
+        self.list_view.setFont(font)
+        # Update layout since row heights might change
+        self.list_view.viewport().update()
+        self.update_scrollbar_range()
+
+    def toggle_line_numbers(self, show):
+        self.delegate.set_show_line_numbers(show)
+        self.list_view.viewport().update()
 
     def _create_menu(self):
         # Use the menu bar we already embedded in the custom title bar
@@ -957,6 +993,7 @@ class MainWindow(QMainWindow):
         self.btn_side_loglist.setIcon(get_svg_icon("file-text", icon_color))
         self.btn_side_filter.setIcon(get_svg_icon("filter", icon_color))
         self.btn_side_notes.setIcon(get_svg_icon("book-open", icon_color))
+        self.btn_settings.setIcon(get_svg_icon("settings", icon_color))
         
         self.open_action.setIcon(get_svg_icon("file-text", icon_color))
         self.recent_menu.setIcon(get_svg_icon("folder", icon_color))
