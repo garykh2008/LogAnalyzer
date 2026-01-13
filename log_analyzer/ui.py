@@ -1050,7 +1050,12 @@ class MainWindow(QMainWindow):
         # Clear notes and refresh notes view
         self.notes_manager.notes.clear()
         self.notes_manager.dirty_files.clear() # Reset dirty state
+        self.notes_manager.loaded_files.clear() # Reset loaded state
         self.notes_manager.refresh_list()
+        
+        # Reset badges
+        self.btn_side_notes.set_badge(0)
+        self.btn_side_filter.set_badge(0)
         
         self.welcome_widget.show()
         self.central_stack.setCurrentIndex(0)

@@ -86,6 +86,7 @@ class NotesManager(QObject):
         self.notes = {} # {(filepath, raw_index): content}
         self.is_dark_mode = True
         self.dirty_files = set()
+        self.loaded_files = set()
         
         self.setup_ui()
 
@@ -200,17 +201,18 @@ class NotesManager(QObject):
         """Cleans up internal state when a file is closed."""
         if filepath in self.dirty_files:
             self.dirty_files.remove(filepath)
+        if filepath in self.loaded_files:
+            self.loaded_files.remove(filepath)
 
     def load_notes_for_file(self, log_filepath):
         """Automatically called when a log is loaded for the first time."""
         if not log_filepath: return
         
-        # If we already have notes for this file in memory, don't reload from disk
-        # to avoid overwriting unsaved changes.
-        for (fp, _) in self.notes.keys():
-            if fp == log_filepath:
-                self.refresh_list()
-                return
+        if log_filepath in self.loaded_files:
+            self.refresh_list()
+            return
+
+        self.loaded_files.add(log_filepath)
 
         base, _ = os.path.splitext(log_filepath)
         note_path = base + ".note"
