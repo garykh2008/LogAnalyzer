@@ -20,19 +20,10 @@
     - [x] **Micro-interactions**: Add Hover/Pressed states to all buttons.
     - [x] **Animations**: Smooth Quintic transitions for Toast notifications.
 
-## Phase 3: Core Architecture Refactoring (In Progress)
+## Phase 3: Core Architecture Refactoring (Completed)
 - [x] **Split MainWindow (God Class)**:
     - [x] Extract `LogController` (File management, Core Search logic).
     - [x] Extract `FilterController` (Filter management, Engine interaction, Caching).
     - [x] Extract `SearchController` (History, UI Navigation state).
-    - [ ] Extract `UI Components` (LogWorkspace, SidebarPanels) to reduce `ui.py` size.
 
-## Phase 4: New Features (Upcoming)
-- [ ] **Live Monitoring (Tail -f)**:
-    - [ ] Update Rust engine to support partial reads/updates.
-    - [ ] Add FileWatcher in Python.
-- [ ] **Multi-Tab Workspace**:
-    - [ ] Refactor central view into a `LogWorkspace` widget.
-    - [ ] Implement `QTabWidget` container.
-- [ ] **Timeline View**:
-    - [ ] Create histogram visualization for log density/errors.
+*(Remaining items moved to `future_work.md`)*
