@@ -2,35 +2,36 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 from PySide6.QtCore import Qt
 from .components import CustomTitleBar
 
+
 class ModernDialog(QDialog):
     def __init__(self, parent=None, title="Dialog", fixed_size=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        
+
         # Main Layout
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
-        
+
         # Title Bar
         self.title_bar = CustomTitleBar(self, title=title, hide_icon=True, show_minimize=False, show_maximize=False)
         self.title_bar.setObjectName("dialog_title_bar")
         self.main_layout.addWidget(self.title_bar)
-        
+
         # Content Area
         self.content_widget = QWidget()
         self.content_layout = QVBoxLayout(self.content_widget)
         self.content_layout.setContentsMargins(20, 20, 20, 20)
         self.content_layout.setSpacing(10)
         self.main_layout.addWidget(self.content_widget)
-        
+
         # Size Grip (Optional, usually dialogs are fixed size, but good to have)
         # self.size_grip = QSizeGrip(self)
         # self.main_layout.addWidget(self.size_grip, 0, Qt.AlignBottom | Qt.AlignRight)
 
         if fixed_size:
             self.setFixedSize(*fixed_size)
-            
+
         self.apply_theme()
 
     def setContentLayout(self, layout):
@@ -49,7 +50,7 @@ class ModernDialog(QDialog):
         from .config import get_config
         config = get_config()
         is_dark = (config.theme == "Dark")
-        
+
         # Define Colors ( synced with MainWindow )
         if is_dark:
             bg_color = "#252526"
@@ -89,13 +90,13 @@ class ModernDialog(QDialog):
                 background-color: {bg_color}; /* Cover the border */
             }}
         """)
-        
+
         # Specific hover for close button
         self.title_bar.btn_close.setStyleSheet(f"""
             QToolButton {{ background-color: transparent; border: none; border-radius: 0px; }}
             QToolButton:hover {{ background-color: {close_hover}; }}
         """)
-        
+
         # Update Icon Colors
         icon_c = fg_color
         from .resources import get_svg_icon
@@ -104,9 +105,9 @@ class ModernDialog(QDialog):
     def exec(self):
         if self.parent() and hasattr(self.parent(), "show_dimmer"):
             self.parent().show_dimmer()
-        
+
         res = super().exec()
-        
+
         if self.parent() and hasattr(self.parent(), "hide_dimmer"):
             self.parent().hide_dimmer()
         return res

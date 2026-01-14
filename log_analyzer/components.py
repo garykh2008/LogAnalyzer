@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt, Signal, QTimer, QStringListModel
 from .resources import get_svg_icon
 import os
 
+
 class CustomTitleBar(QWidget):
     def __init__(self, parent=None, title="Log Analyzer", hide_icon=False, show_minimize=True, show_maximize=True):
         super().__init__(parent)
@@ -17,7 +18,7 @@ class CustomTitleBar(QWidget):
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(20, 20)
         self.icon_label.setScaledContents(True)
-        
+
         if not hide_icon:
             icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "loganalyzer.ico")
             if os.path.exists(icon_path):
@@ -27,9 +28,9 @@ class CustomTitleBar(QWidget):
             self.layout.addWidget(self.icon_label)
         else:
             self.icon_label.hide()
-        
+
         # 2. Menu Bar Area (Menu will be inserted at index 1 externally if needed)
-        
+
         # 3. Title (We want it ABSOLUTELY centered)
         self.title_label = QLabel(title, self)
         self.title_label.setAlignment(Qt.AlignCenter)
@@ -44,7 +45,7 @@ class CustomTitleBar(QWidget):
         self.btn_min = QToolButton()
         self.btn_max = QToolButton()
         self.btn_close = QToolButton()
-        
+
         for btn in [self.btn_min, self.btn_max, self.btn_close]:
             btn.setFixedSize(46, 40)
             btn.setFocusPolicy(Qt.NoFocus)
@@ -52,7 +53,7 @@ class CustomTitleBar(QWidget):
         self.btn_min.clicked.connect(self.minimize_window)
         self.btn_max.clicked.connect(self.toggle_max_restore)
         self.btn_close.clicked.connect(self.close_window)
-        
+
         self.btn_min.setToolTip("Minimize")
         self.btn_max.setToolTip("Maximize")
         self.btn_close.setToolTip("Close")
@@ -61,12 +62,12 @@ class CustomTitleBar(QWidget):
             self.layout.addWidget(self.btn_min)
         else:
             self.btn_min.hide()
-            
+
         if show_maximize:
             self.layout.addWidget(self.btn_max)
         else:
             self.btn_max.hide()
-            
+
         self.layout.addWidget(self.btn_close)
 
     def paintEvent(self, event):
@@ -97,7 +98,7 @@ class CustomTitleBar(QWidget):
             win.showNormal()
         else:
             win.showMaximized()
-    
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.click_pos = event.globalPosition().toPoint()
@@ -134,7 +135,7 @@ class DimmerOverlay(QWidget):
             self.resize(self.parent().size())
         self.raise_()
         super().showEvent(event)
-        
+
     def mousePressEvent(self, event):
         # Consume event to block interaction with underlying window
         pass
@@ -164,17 +165,17 @@ class BadgeToolButton(QToolButton):
         if not text or str(text) == "0":
             self.badge_label.hide()
             return
-            
+
         self.badge_label.setText(str(text))
-        if bg_color: 
+        if bg_color:
             self._bg_color = bg_color
             self._update_style()
-        
+
         # Calculate width: min 16px, expand for longer text
         fm = self.badge_label.fontMetrics()
         w = max(16, fm.horizontalAdvance(str(text)) + 6)
         self.badge_label.setFixedSize(w, 16)
-        
+
         self.badge_label.show()
         self.badge_label.raise_()
         self._update_pos()
@@ -182,7 +183,7 @@ class BadgeToolButton(QToolButton):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_pos()
-        
+
     def _update_pos(self):
         if self.badge_label.isVisible():
             x = self.width() - self.badge_label.width() - 4
@@ -208,7 +209,7 @@ class LoadingSpinner(QWidget):
         self.setFixedSize(size, size)
         self._color = color
         self._angle = 0
-        
+
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._rotate)
         self.icon_pixmap = get_svg_icon("loader", self._color, size).pixmap(size, size)
@@ -231,11 +232,11 @@ class LoadingSpinner(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        
+
         painter.translate(self.width() / 2, self.height() / 2)
         painter.rotate(self._angle)
         painter.translate(-self.width() / 2, -self.height() / 2)
-        
+
         painter.drawPixmap(0, 0, self.icon_pixmap)
         painter.end()
 
@@ -243,7 +244,7 @@ class LoadingSpinner(QWidget):
 class HistoryLineEdit(QLineEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
-    
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Down:
             self.show_history()
@@ -262,8 +263,8 @@ class HistoryLineEdit(QLineEdit):
     def show_history(self):
         c = self.completer()
         if c:
-            c.setCompletionPrefix("") 
-            c.complete() 
+            c.setCompletionPrefix("")
+            c.complete()
 
 
 class SearchOverlay(QWidget):
@@ -276,71 +277,71 @@ class SearchOverlay(QWidget):
         super().__init__(parent)
         self.setFixedWidth(550)
         self.hide()
-        
+
         # Card Frame
         self.card = QFrame(self)
         self.card.setObjectName("SearchCard")
-        
+
         # Shadow
         self.shadow = QGraphicsDropShadowEffect(self.card)
         self.shadow.setBlurRadius(20)
         self.shadow.setColor(QColor(0, 0, 0, 100))
         self.shadow.setOffset(0, 4)
         self.card.setGraphicsEffect(self.shadow)
-        
+
         # Layout
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(10, 10, 10, 10)
         self.main_layout.addWidget(self.card)
-        
+
         card_layout = QHBoxLayout(self.card)
         card_layout.setContentsMargins(10, 6, 10, 6)
         card_layout.setSpacing(6)
-        
+
         # Input
         self.input = HistoryLineEdit()
         self.input.setPlaceholderText("Find...")
         self.input.setMinimumHeight(28)
         self.input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.input.returnPressed.connect(self._on_return_pressed)
-        
+
         self.history_model = QStringListModel()
         self.completer = QCompleter(self.history_model, self)
         self.completer.setCaseSensitivity(Qt.CaseInsensitive)
         self.input.setCompleter(self.completer)
-        
+
         card_layout.addWidget(self.input, 1)
-        
+
         # Buttons
         self.btn_case = QToolButton()
         self.btn_case.setCheckable(True)
         self.btn_case.setToolTip("Match Case")
         self.btn_case.setFixedSize(28, 28) # 也稍微加大按鈕
         self.btn_case.toggled.connect(self._on_search_params_changed)
-        
+
         self.btn_wrap = QToolButton()
         self.btn_wrap.setCheckable(True)
         self.btn_wrap.setChecked(True)
         self.btn_wrap.setToolTip("Wrap Search")
         self.btn_wrap.setFixedSize(28, 28)
-        
+
         self.btn_prev = QToolButton()
         self.btn_prev.setFixedSize(28, 28)
         self.btn_prev.clicked.connect(lambda: self.findPrev.emit(self.input.text(), self.btn_case.isChecked(), self.btn_wrap.isChecked()))
-        
+
         self.btn_next = QToolButton()
         self.btn_next.setFixedSize(28, 28)
         self.btn_next.clicked.connect(lambda: self.findNext.emit(self.input.text(), self.btn_case.isChecked(), self.btn_wrap.isChecked()))
-        
+
         self.info_label = QLabel()
         self.info_label.setMinimumWidth(40)
         self.info_label.setAlignment(Qt.AlignCenter)
         self.info_label.setStyleSheet("color: #888888; font-size: 11px;")
-        
+
         self.btn_close = QToolButton()
         self.btn_close.setFixedSize(28, 28)
         self.btn_close.clicked.connect(self.hide_overlay)
-        
+
         card_layout.addWidget(self.btn_case)
         card_layout.addWidget(self.btn_wrap)
         card_layout.addWidget(self.btn_prev)
@@ -356,7 +357,7 @@ class SearchOverlay(QWidget):
             history.insert(0, text)
             if len(history) > 10: history = history[:10]
             self.history_model.setStringList(history)
-            
+
         self.findNext.emit(text, self.btn_case.isChecked(), self.btn_wrap.isChecked())
 
     def _on_search_params_changed(self):
@@ -394,7 +395,7 @@ class SearchOverlay(QWidget):
             fg = "#333333"
             border = "#cccccc"
             input_bg = "#f3f3f3"
-            
+
         self.card.setStyleSheet(f"""
             #SearchCard {{
                 background-color: {bg};

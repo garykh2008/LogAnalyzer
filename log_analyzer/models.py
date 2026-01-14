@@ -1,6 +1,7 @@
 from PySide6.QtCore import QAbstractListModel, Qt, QModelIndex
 from PySide6.QtGui import QColor
 
+
 class LogModel(QAbstractListModel):
     def __init__(self, engine=None):
         super().__init__()
@@ -12,7 +13,7 @@ class LogModel(QAbstractListModel):
         self.current_filepath = None
         self.note_bg_color = QColor("#3a3d41")
         self._total_line_count = 0
-        
+
         # Virtual Viewport State
         self.viewport_start = 0
         self.viewport_size = 200 # Default buffer
@@ -39,7 +40,7 @@ class LogModel(QAbstractListModel):
         # Allow size to be slightly larger than visible to avoid flicker
         if self.viewport_start == start and self.viewport_size == size:
             return
-        
+
         self.layoutAboutToBeChanged.emit()
         self.viewport_start = start
         self.viewport_size = size
@@ -70,9 +71,9 @@ class LogModel(QAbstractListModel):
     def rowCount(self, parent=QModelIndex()):
         if not self.engine:
             return 0
-        
+
         total = len(self.filtered_indices) if self.filtered_indices is not None else self._total_line_count
-        
+
         # Virtual count: We only tell Qt we have 'viewport_size' rows (or fewer if near end)
         remaining = total - self.viewport_start
         if remaining < 0: remaining = 0
@@ -85,7 +86,7 @@ class LogModel(QAbstractListModel):
         # Map visual row (0..viewport_size) to absolute row
         row_in_viewport = index.row()
         real_row = self.viewport_start + row_in_viewport
-        
+
         # Safety check
         total = len(self.filtered_indices) if self.filtered_indices is not None else self._total_line_count
         if real_row >= total:

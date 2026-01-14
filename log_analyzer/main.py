@@ -9,10 +9,11 @@ from PySide6.QtCore import qInstallMessageHandler, QtMsgType
 from log_analyzer.ui import MainWindow
 from log_analyzer.utils import load_custom_fonts
 
+
 def qt_message_handler(mode, context, message):
     if "Point size <= 0" in message:
         return # Suppress this specific known benign warning
-    
+
     # Simple default printing for other messages
     if mode == QtMsgType.QtInfoMsg: mode_str = "Info"
     elif mode == QtMsgType.QtWarningMsg: mode_str = "Warning"
@@ -21,12 +22,13 @@ def qt_message_handler(mode, context, message):
     else: mode_str = "Debug"
     print(f"[{mode_str}] {message}")
 
+
 def main():
     # Parse CLI Arguments
     parser = argparse.ArgumentParser(description="Log Analyzer Qt")
     parser.add_argument("logs", nargs="*", help="Log files to open (supports wildcards like *.log)")
     parser.add_argument("-f", "--filter", help="Load a .tat filter file on startup")
-    
+
     # Handle @filelist for long argument lists
     args = parser.parse_args()
 
@@ -46,8 +48,8 @@ def main():
     font = QFont("Inter")
     font.setStyleStrategy(QFont.PreferAntialias)
     if "Inter" not in QFontDatabase.families():
-        font.setFamily("Segoe UI") 
-    
+        font.setFamily("Segoe UI")
+
     font.setPixelSize(12)
     app.setFont(font)
 

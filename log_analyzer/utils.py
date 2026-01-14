@@ -7,13 +7,15 @@ from PySide6.QtGui import QFontDatabase
 
 # QDir was removed here
 
+
 def hex_to_rgb(hex_str):
     hex_str = hex_str.lstrip('#')
     if not hex_str: return (0, 0, 0)
     if len(hex_str) == 3: hex_str = "".join(c*2 for c in hex_str)
     try:
         return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
-    except: return (0, 0, 0)
+    except Exception: return (0, 0, 0)
+
 
 def fix_color(hex_str, default):
     if not hex_str:
@@ -22,6 +24,7 @@ def fix_color(hex_str, default):
     if not hex_str.startswith('#'):
         return '#' + hex_str
     return hex_str
+
 
 def adjust_color_for_theme(hex_color, is_background, is_dark_mode):
     """
@@ -54,6 +57,7 @@ def adjust_color_for_theme(hex_color, is_background, is_dark_mode):
 
     return hex_color
 
+
 def set_windows_title_bar_color(win_id, is_dark):
     """
     Sets the Windows title bar color to match the theme (Dark/Light).
@@ -66,16 +70,20 @@ def set_windows_title_bar_color(win_id, is_dark):
         ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ctypes.byref(value), ctypes.sizeof(value))
     except Exception: pass
 
+
 def bool_to_tat(value):
     return 'y' if value else 'n'
+
 
 def is_true(value):
     if value is None: return False
     return str(value).lower() in ('1', 'y', 'yes', 'true')
 
+
 def color_to_tat(hex_color):
     if not hex_color: return ""
     return hex_color.replace("#", "")
+
 
 def load_tat_filters(filepath):
     filters = []
@@ -99,6 +107,7 @@ def load_tat_filters(filepath):
         print(f"Error loading TAT file: {e}")
         return None
     return filters
+
 
 def save_tat_filters(filepath, filters):
     try:
@@ -133,6 +142,7 @@ def save_tat_filters(filepath, filters):
         print(f"Error saving TAT file: {e}")
         return False
 
+
 def load_custom_fonts():
     """
     Loads custom fonts from 'fonts' directory within the package.
@@ -140,7 +150,7 @@ def load_custom_fonts():
     """
     base_dir = os.path.dirname(os.path.abspath(__file__))
     font_dir = os.path.join(base_dir, "fonts")
-    
+
     if not os.path.exists(font_dir):
         return
 
@@ -151,9 +161,7 @@ def load_custom_fonts():
             id = QFontDatabase.addApplicationFont(font_path)
             if id == -1:
                 print(f"Failed to load font: {filename}")
-            else:
-                families = QFontDatabase.applicationFontFamilies(id)
-                # Successfully loaded font families
+
 
 def adjust_color_for_theme(hex_color, is_background, is_dark_mode):
     """
@@ -186,6 +194,7 @@ def adjust_color_for_theme(hex_color, is_background, is_dark_mode):
 
     return hex_color
 
+
 def set_windows_title_bar_color(win_id, is_dark):
     """
     Sets the Windows title bar color to match the theme (Dark/Light).
@@ -198,16 +207,20 @@ def set_windows_title_bar_color(win_id, is_dark):
         ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ctypes.byref(value), ctypes.sizeof(value))
     except Exception: pass
 
+
 def bool_to_tat(value):
     return 'y' if value else 'n'
+
 
 def is_true(value):
     if value is None: return False
     return str(value).lower() in ('1', 'y', 'yes', 'true')
 
+
 def color_to_tat(hex_color):
     if not hex_color: return ""
     return hex_color.replace("#", "")
+
 
 def load_tat_filters(filepath):
     filters = []
@@ -231,6 +244,7 @@ def load_tat_filters(filepath):
         print(f"Error loading TAT file: {e}")
         return None
     return filters
+
 
 def save_tat_filters(filepath, filters):
     try:

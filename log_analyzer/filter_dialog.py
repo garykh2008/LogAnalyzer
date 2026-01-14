@@ -5,12 +5,13 @@ from PySide6.QtCore import Qt
 from .utils import adjust_color_for_theme
 from .modern_dialog import ModernDialog
 
+
 class FilterDialog(ModernDialog):
 
     def __init__(self, parent=None, filter_data=None):
         # Increased height slightly, removed fixed size constraint to allow layout to breathe if needed
         super().__init__(parent, title="Edit Filter" if filter_data else "Add Filter", fixed_size=(500, 320))
-        
+
         self.filter_data = filter_data or {}
 
         # Use the existing content_layout from ModernDialog
@@ -34,7 +35,7 @@ class FilterDialog(ModernDialog):
         self.chk_regex.setChecked(self.filter_data.get("is_regex", False))
         self.chk_exclude = QCheckBox("Exclude")
         self.chk_exclude.setChecked(self.filter_data.get("is_exclude", False))
-        
+
         opts_layout.addWidget(self.chk_regex)
         opts_layout.addWidget(self.chk_exclude)
         opts_layout.addStretch()
@@ -45,11 +46,11 @@ class FilterDialog(ModernDialog):
         f = lbl_style.font(); f.setBold(True)
         lbl_style.setFont(f)
         self.content_layout.addWidget(lbl_style)
-        
+
         # Style Row: [Text Color] [Bg Color] [Preview Area]
         style_layout = QHBoxLayout()
         style_layout.setSpacing(10)
-        
+
         self.btn_fg = QPushButton("Text")
         self.btn_fg.setFixedWidth(80)
         self.btn_fg.setMinimumHeight(32)
@@ -63,17 +64,17 @@ class FilterDialog(ModernDialog):
 
         self.btn_fg.clicked.connect(self._pick_fg)
         self.btn_bg.clicked.connect(self._pick_bg)
-        
+
         # Preview Label (Acts as the third column)
         self.lbl_preview = QLabel("Preview")
         self.lbl_preview.setAlignment(Qt.AlignCenter)
         self.lbl_preview.setMinimumHeight(32)
         self.lbl_preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        
+
         style_layout.addWidget(self.btn_fg)
         style_layout.addWidget(self.btn_bg)
         style_layout.addWidget(self.lbl_preview)
-        
+
         self.content_layout.addLayout(style_layout)
 
         self.content_layout.addStretch() # Push buttons to bottom
@@ -87,10 +88,10 @@ class FilterDialog(ModernDialog):
         # Initial Update
         self._update_btn_styles()
         self._update_preview()
-        
+
     def apply_theme(self):
         super().apply_theme() # Apply base modern dialog styles
-        
+
         # Ensure buttons show correct theme adjusted preview
         self._update_btn_styles()
         self._update_preview()
@@ -113,7 +114,7 @@ class FilterDialog(ModernDialog):
     def _update_preview(self):
         if not hasattr(self, 'lbl_preview') or not hasattr(self, 'pattern_edit'): return
         txt = self.pattern_edit.text() or "Preview Text"
-        
+
         # Use theme-adjusted colors for preview to match actual list view look
         is_dark = False
         if self.parent() and hasattr(self.parent(), 'is_dark_mode'):
@@ -121,7 +122,7 @@ class FilterDialog(ModernDialog):
 
         display_fg = adjust_color_for_theme(self.fg_color, False, is_dark)
         display_bg = adjust_color_for_theme(self.bg_color, True, is_dark)
-        
+
         self.lbl_preview.setText(txt)
         self.lbl_preview.setStyleSheet(f"background-color: {display_bg}; color: {display_fg}; border: 1px solid #888; border-radius: 4px; font-family: 'Inter', 'Consolas'; font-size: 14px;")
 

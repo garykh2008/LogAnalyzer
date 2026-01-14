@@ -1,5 +1,6 @@
 from PySide6.QtGui import QColor
 
+
 class ThemeManager:
     """
     Centralizes color palettes and QSS generation for LogAnalyzer.
@@ -19,30 +20,30 @@ class ThemeManager:
             "selection_fg": "#ffffff",
             "hover_bg": "rgba(255, 255, 255, 30)",
             "hover_qcolor": QColor(255, 255, 255, 30),
-            
+
             "scrollbar_bg": "#1e1e1e",
             "scrollbar_handle": "#424242",
             "scrollbar_hover": "#4f4f4f",
-            
+
             "menu_bg": "#252526",
             "menu_fg": "#cccccc",
             "menu_sel": "#094771",
             "menu_sel_fg": "#ffffff",
-            
+
             "bar_bg": "#007acc",
             "bar_fg": "#ffffff",
             "input_bg": "#3c3c3c",
             "input_fg": "#cccccc",
-            
+
             "float_bg": "#252526",
             "float_border": "#303031",
             "dock_title_bg": "#2d2d2d",
             "tree_bg": "#252526",
-            
+
             "tab_bg": "#2d2d2d",
             "tab_fg": "#858585",
             "tab_sel_bg": "#1e1e1e",
-            
+
             "activity_bg": "#181818",
             "sidebar_bg": "#252526",
             "header_bg": "#1e1e1e",
@@ -50,12 +51,12 @@ class ThemeManager:
             "dialog_fg": "#cccccc",
             "checkbox_active": "#007acc",
             "accent_hover": "#1f8ad2",
-            
+
             "titlebar_bg": "#181818",
             "titlebar_fg": "#cccccc",
             "titlebar_hover": "#333333",
             "close_hover": "#c42b1c",
-            
+
             # Log View Specific
             "log_gutter_bg": "#1e1e1e",
             "log_gutter_fg": "#858585",
@@ -65,9 +66,9 @@ class ThemeManager:
             "dock_header_bg": "#252526",
             "dock_content_bg": "#252526",
             "dock_border": "#303031",
-            
+
             # Checkbox border
-            "cb_border": "#3c3c3c" 
+            "cb_border": "#3c3c3c"
         }
 
         self.light_palette = {
@@ -77,30 +78,30 @@ class ThemeManager:
             "selection_fg": "#000000",
             "hover_bg": "rgba(0, 0, 0, 20)",
             "hover_qcolor": QColor(0, 0, 0, 20),
-            
+
             "scrollbar_bg": "#f3f3f3",
             "scrollbar_handle": "#c1c1c1",
             "scrollbar_hover": "#a8a8a8",
-            
+
             "menu_bg": "#f3f3f3",
             "menu_fg": "#333333",
             "menu_sel": "#add6ff",
             "menu_sel_fg": "#000000",
-            
+
             "bar_bg": "#007acc",
             "bar_fg": "#ffffff",
             "input_bg": "#ffffff",
             "input_fg": "#000000",
-            
+
             "float_bg": "#ffffff",
             "float_border": "#e5e5e5",
             "dock_title_bg": "#f3f3f3",
             "tree_bg": "#f3f3f3",
-            
+
             "tab_bg": "#e1e1e1",
             "tab_fg": "#666666",
             "tab_sel_bg": "#ffffff",
-            
+
             "activity_bg": "#e8e8e8",
             "sidebar_bg": "#f3f3f3",
             "header_bg": "#ffffff",
@@ -108,13 +109,13 @@ class ThemeManager:
             "dialog_fg": "#000000",
             "checkbox_active": "#007acc",
             "accent_hover": "#0062a3",
-            
+
             # Custom Title Bar Colors (Light)
             "titlebar_bg": "#e8e8e8",
             "titlebar_fg": "#333333",
             "titlebar_hover": "#d0d0d0",
             "close_hover": "#c42b1c",
-            
+
             # Log View Specific
             "log_gutter_bg": "#ffffff",
             "log_gutter_fg": "#237893",
@@ -124,7 +125,7 @@ class ThemeManager:
             "dock_header_bg": "#f3f3f3",
             "dock_content_bg": "#f3f3f3",
             "dock_border": "#e5e5e5",
-            
+
             # Checkbox border
             "cb_border": "#bbbbbb"
         }
@@ -144,10 +145,10 @@ class ThemeManager:
 
     def get_stylesheet(self, font_family: str, font_size: int) -> str:
         p = self.palette
-        
+
         # Standardize Font Family string (handle spaces and fallbacks)
         ui_font = f'"{font_family}", "Inter", "Segoe UI", "Microsoft JhengHei UI", sans-serif'
-        
+
         # Menu Style Template
         menu_style = f"""
         QMenuBar {{ background-color: transparent; color: {p['titlebar_fg']}; border: none; padding: 0px; font-family: {ui_font}; }}
@@ -162,7 +163,7 @@ class ThemeManager:
 
         # Checkbox SVG Logic
         cb_svg = f"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E"
-        
+
         cb_style = f"""
         QCheckBox {{ spacing: 8px; }}
         QCheckBox::indicator, QTreeView::indicator {{ 
@@ -285,7 +286,7 @@ class ThemeManager:
             sel_bg, sel_fg = "#264f78", "#ffffff"
         else:
             sel_bg, sel_fg = "#add6ff", "#000000"
-            
+
         return f"""
             QTreeWidget {{ background-color: {p['dock_content_bg']}; border: none; }}
             QTreeWidget::item {{ padding: 4px; border: none; }}

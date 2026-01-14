@@ -4,6 +4,7 @@ try:
 except ImportError:
     HAS_RUST = False
 
+
 class MockLogEngine:
     """Fallback engine for UI development when Rust extension is missing."""
     def __init__(self, filepath=None):
@@ -50,6 +51,7 @@ class MockLogEngine:
         except Exception:
             pass
         return results
+
 
 def get_engine(filepath):
     if HAS_RUST:

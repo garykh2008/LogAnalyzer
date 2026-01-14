@@ -3,6 +3,7 @@ from PySide6.QtGui import QPalette, QColor, QPainter
 from PySide6.QtCore import QSize, QRectF, Qt, QRect, Signal, QEvent
 from .resources import get_svg_icon
 
+
 class LogListDelegate(QStyledItemDelegate):
     close_requested = Signal(str) # Emits filepath
 
@@ -26,7 +27,7 @@ class LogListDelegate(QStyledItemDelegate):
             elif state & QStyle.State_MouseOver:
                 alpha = 30 if option.palette.base().color().lightness() < 128 else 20
                 bg_color = QColor(255, 255, 255, alpha) if option.palette.base().color().lightness() < 128 else QColor(0, 0, 0, alpha)
-            
+
             if bg_color:
                 painter.fillRect(option.rect, bg_color)
 
@@ -37,11 +38,11 @@ class LogListDelegate(QStyledItemDelegate):
             # Draw SVG 'X' only on hover
             if state & QStyle.State_MouseOver:
                 painter.setRenderHint(QPainter.Antialiasing)
-                
+
                 # Get SVG icon with current text color
                 icon_color = option.palette.text().color().name()
                 icon = get_svg_icon("x-close", icon_color)
-                
+
                 # Draw icon centered in close_rect
                 icon_size = 14
                 target_rect = QRect(
@@ -80,6 +81,7 @@ class LogListDelegate(QStyledItemDelegate):
         s = super().sizeHint(option, index)
         return QSize(s.width() + 24, max(28, s.height()))
 
+
 class LogDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -89,7 +91,7 @@ class LogDelegate(QStyledItemDelegate):
         self.search_match_color = QColor("#653306")
         self.search_match_text_color = QColor("#ffffff")
         self.max_line_number = 1000
-        
+
         # Theme config
         self.gutter_bg = None
         self.gutter_fg = QColor(100, 100, 100)
@@ -124,10 +126,10 @@ class LogDelegate(QStyledItemDelegate):
         try:
             # Get horizontal scroll offset to keep line numbers fixed
             scroll_x = option.widget.horizontalScrollBar().value() if option.widget else 0
-            
+
             # 1. Background
             state = option.state
-            
+
             # First, draw model-provided background (if any)
             model_bg = index.data(Qt.BackgroundRole)
             if model_bg and isinstance(model_bg, QColor):
@@ -141,29 +143,29 @@ class LogDelegate(QStyledItemDelegate):
 
             # --- Fixed Line Number Column ---
             raw_index = index.data(Qt.UserRole + 1)
-            
+
             line_num_width = 0
             if self.show_line_numbers:
                 digits = len(str(self.max_line_number))
                 char_w = option.fontMetrics.horizontalAdvance('8')
                 # Increase padding: Left (10px) + digits*char_w + Right (10px)
                 line_num_width = max(45, digits * char_w + 20)
-            
+
             # The line number column rect should be shifted by scroll_x to stay on the left
             line_bg_rect = QRectF(option.rect.left() + scroll_x, option.rect.top(), line_num_width, option.rect.height())
-            
+
             if self.show_line_numbers and raw_index is not None:
                 line_num_str = str(raw_index + 1)
-                
+
                 # Draw Line Num Column Background
                 # If gutter_bg is None, use base (content) color for blending
                 fill_color = self.gutter_bg if self.gutter_bg else option.palette.color(QPalette.Base)
                 painter.fillRect(line_bg_rect, fill_color)
-                
+
                 # Draw Right Border
                 painter.setPen(self.border_color)
                 painter.drawLine(line_bg_rect.topRight(), line_bg_rect.bottomRight())
-                
+
                 # Draw Line Num Text (Right Aligned with padding)
                 painter.save()
                 painter.setPen(self.gutter_fg)
@@ -195,7 +197,7 @@ class LogDelegate(QStyledItemDelegate):
                         if self.search_query in text: should_highlight = True
                     else:
                         if self.search_query.lower() in text.lower(): should_highlight = True
-                
+
                 if should_highlight:
                     self._paint_highlighted_text(painter, text_rect, text, option)
                 else:
@@ -210,7 +212,7 @@ class LogDelegate(QStyledItemDelegate):
 
     def _paint_highlighted_text(self, painter, rect, text, option):
         query = self.search_query
-        
+
         if self.search_case_sensitive:
             search_text = text
             search_query = query
@@ -220,7 +222,7 @@ class LogDelegate(QStyledItemDelegate):
 
         start = 0
         x = rect.left()
-        
+
         # Center text vertically
         fm = option.fontMetrics
         y = rect.top() + (rect.height() - fm.height()) // 2 + fm.ascent()
@@ -258,17 +260,18 @@ class LogDelegate(QStyledItemDelegate):
         text = index.data(Qt.DisplayRole)
         if not text:
             return QSize(option.rect.width(), option.fontMetrics.height())
-        
+
         # Calculate line number column width
         line_num_width = 0
         if self.show_line_numbers:
             digits = len(str(self.max_line_number))
             char_w = option.fontMetrics.horizontalAdvance('8')
             line_num_width = max(45, digits * char_w + 20)
-        
+
         # Total width = line number column + text width + margins
         text_width = option.fontMetrics.horizontalAdvance(text)
         return QSize(line_num_width + 8 + text_width + 20, option.fontMetrics.height() + self.line_spacing)
+
 
 class FilterDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
@@ -286,16 +289,16 @@ class FilterDelegate(QStyledItemDelegate):
             bg_color = None
             if brush and hasattr(brush, 'color'):
                 bg_color = brush.color()
-            
+
             if bg_color and bg_color.isValid():
                 painter.fillRect(option.rect, bg_color)
-            
+
             # 2. Draw Hover/Selection Overlay
             # Use specific color or fall back to theme base color to determine lightness
             effective_bg = bg_color if (bg_color and bg_color.isValid()) else option.palette.color(QPalette.Base)
             is_dark_bg = effective_bg.lightness() < 128
             has_custom_bg = bg_color and bg_color.isValid()
-            
+
             if option.state & QStyle.State_Selected:
                 # Tint the background with blue, but use lower alpha for custom colors
                 alpha = 40 if has_custom_bg else 80
@@ -308,10 +311,10 @@ class FilterDelegate(QStyledItemDelegate):
 
             # 3. Draw default content
             super().paint(painter, option, index)
-            
+
             # 4. Draw Bottom Border
             painter.setPen(self.border_color)
             painter.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
-            
+
         finally:
             painter.restore()

@@ -231,23 +231,24 @@ SVG_ICONS = {
     """
 }
 
+
 def get_svg_icon(name, color_str="#d4d4d4", size=24):
     """Generates a QIcon from an internal SVG string with dynamic color."""
     svg_str = SVG_ICONS.get(name)
     if not svg_str:
         return QIcon()
-    
+
     # Replace 'currentColor' with the actual theme color
     colored_svg = svg_str.replace('currentColor', color_str)
-    
+
     byte_array = QByteArray(colored_svg.encode('utf-8'))
     renderer = QSvgRenderer(byte_array)
-    
+
     pixmap = QPixmap(QSize(size, size))
     pixmap.fill(Qt.transparent)
-    
+
     painter = QPainter(pixmap)
     renderer.render(painter)
     painter.end()
-    
+
     return QIcon(pixmap)

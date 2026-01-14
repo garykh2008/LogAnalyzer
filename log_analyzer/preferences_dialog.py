@@ -8,6 +8,7 @@ from log_analyzer.modern_dialog import ModernDialog
 from log_analyzer.config import get_config
 from log_analyzer.resources import get_svg_icon
 
+
 class PreferencesDialog(ModernDialog):
     def __init__(self, parent=None):
         super().__init__(parent, title="Preferences", fixed_size=(750, 600))
@@ -31,17 +32,17 @@ class PreferencesDialog(ModernDialog):
         self.sidebar.setFixedWidth(200)
         self.sidebar.setFrameShape(QFrame.NoFrame)
         self.sidebar.setSpacing(4)
-        
+
         # Add categories with icons
         self.add_sidebar_item("General", "settings")
         self.add_sidebar_item("Log View", "file-text")
         self.add_sidebar_item("Appearance", "sun-moon")
-        
+
         self.sidebar.currentRowChanged.connect(self.change_page)
 
         # 2. Content Area (Stacked Widget)
         self.pages = QStackedWidget()
-        
+
         # Add pages
         self.pages.addWidget(self.create_general_page())
         self.pages.addWidget(self.create_log_view_page())
@@ -56,19 +57,19 @@ class PreferencesDialog(ModernDialog):
         bottom_bar.setFixedHeight(70)
         bottom_layout = QHBoxLayout(bottom_bar)
         bottom_layout.setContentsMargins(25, 0, 25, 0)
-        
+
         self.btn_reset = QPushButton("Reset to Defaults")
         self.btn_reset.setObjectName("btn_reset")
         self.btn_reset.setMinimumWidth(160)
         self.btn_reset.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.btn_reset.clicked.connect(self.on_reset_clicked)
-        
+
         self.btn_close = QPushButton("Close")
         self.btn_close.setObjectName("btn_close")
         self.btn_close.setDefault(True)
         self.btn_close.clicked.connect(self.accept)
         self.btn_close.setMinimumWidth(100)
-        
+
         bottom_layout.addWidget(self.btn_reset)
         bottom_layout.addStretch()
         bottom_layout.addWidget(self.btn_close)
@@ -78,14 +79,14 @@ class PreferencesDialog(ModernDialog):
 
         self.content_layout.setContentsMargins(0, 0, 0, 0)
         self.content_layout.addWidget(container)
-        
+
         self.sidebar.setCurrentRow(0)
-        
+
         # Signals for dynamic UI updates
         self.config.themeChanged.connect(self.apply_theme)
         self.config.uiFontSizeChanged.connect(lambda s: self.apply_theme())
         self.config.uiFontFamilyChanged.connect(lambda f: self.apply_theme())
-        
+
         self.apply_theme()
 
     def add_sidebar_item(self, text, icon_name):
@@ -99,39 +100,39 @@ class PreferencesDialog(ModernDialog):
         row = QWidget()
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 10, 0, 10)
-        
+
         text_container = QWidget()
         text_layout = QVBoxLayout(text_container)
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(2)
-        
+
         title_label = QLabel(title)
         title_label.setObjectName("setting_title")
-        
+
         desc_label = QLabel(description)
         desc_label.setObjectName("setting_desc")
         desc_label.setWordWrap(True)
-        
+
         text_layout.addWidget(title_label)
         text_layout.addWidget(desc_label)
-        
+
         layout.addWidget(text_container, 1)
         layout.addWidget(widget)
         layout.setAlignment(widget, Qt.AlignVCenter)
-        
+
         # Add separator line below
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         line.setFrameShadow(QFrame.Plain)
         line.setObjectName("separator")
-        
+
         container = QWidget()
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
         container_layout.addWidget(row)
         container_layout.addWidget(line)
-        
+
         return container
 
     def change_page(self, index):
@@ -145,7 +146,7 @@ class PreferencesDialog(ModernDialog):
 
     def apply_theme(self, theme_name=None):
         super().apply_theme()
-        
+
         if not hasattr(self, 'sidebar'): return
 
         current_theme = theme_name if theme_name else self.config.theme
@@ -204,7 +205,7 @@ class PreferencesDialog(ModernDialog):
                 background-color: {sidebar_hover};
             }}
         """)
-        
+
         # Update sidebar icons
         for i in range(self.sidebar.count()):
             item = self.sidebar.item(i)
@@ -212,7 +213,7 @@ class PreferencesDialog(ModernDialog):
             if icon_name:
                 color = sidebar_sel_fg if item.isSelected() else sidebar_fg
                 item.setIcon(get_svg_icon(icon_name, color))
-        
+
         self.pages.setStyleSheet(f"""
             QStackedWidget {{
                 background-color: {content_bg}; 
@@ -273,11 +274,11 @@ class PreferencesDialog(ModernDialog):
     def on_reset_clicked(self):
         from log_analyzer.modern_messagebox import ModernMessageBox
         from PySide6.QtWidgets import QMessageBox
-        
-        res = ModernMessageBox.question(self, "Reset Settings", 
+
+        res = ModernMessageBox.question(self, "Reset Settings",
                                         "Are you sure you want to reset all settings to default values?",
                                         QMessageBox.Yes | QMessageBox.No)
-        
+
         if res == QMessageBox.Yes:
             self.config.reset_to_defaults()
             # Refresh all UI components in the dialog to reflect new config
@@ -287,14 +288,14 @@ class PreferencesDialog(ModernDialog):
     def refresh_ui_from_config(self):
         # 1. General
         self.encoding_combo.setCurrentText(self.config.default_encoding)
-        
+
         # 2. Log View
         self.font_combo.setCurrentText(self.config.editor_font_family)
         self.update_combo_font(self.config.editor_font_family)
         self.font_size_spin.setValue(self.config.editor_font_size)
         self.line_spacing_spin.setValue(self.config.editor_line_spacing)
         self.line_numbers_cb.setChecked(self.config.show_line_numbers)
-        
+
         # 3. Appearance
         self.theme_combo.setCurrentText(self.config.theme)
         self.ui_font_spin.setValue(self.config.ui_font_size)
@@ -316,9 +317,9 @@ class PreferencesDialog(ModernDialog):
         self.encoding_combo.setFixedWidth(150)
         self.encoding_combo.setCurrentText(self.config.default_encoding)
         self.encoding_combo.currentTextChanged.connect(lambda t: self.config.set("general/default_encoding", t))
-        
+
         layout.addWidget(self.create_setting_row(
-            "Default Encoding", 
+            "Default Encoding",
             "The character encoding used when opening log files. UTF-8 is recommended for most cases.",
             self.encoding_combo
         ))
@@ -338,19 +339,19 @@ class PreferencesDialog(ModernDialog):
         self.font_combo = QComboBox()
         self.font_combo.setFixedWidth(200)
         all_families = QFontDatabase.families()
-        blacklist = {"fixedsys", "terminal", "system", "modern", "roman", "script", 
+        blacklist = {"fixedsys", "terminal", "system", "modern", "roman", "script",
                      "ms serif", "ms sans serif", "small fonts", "courier"}
         safe_fonts = sorted([f for f in all_families if f.lower() not in blacklist and not f.startswith("@") and QFontDatabase.isFixedPitch(f)])
-        
+
         for f in safe_fonts:
             self.font_combo.addItem(f)
             self.font_combo.setItemData(self.font_combo.count() - 1, QFont(f, 11), Qt.FontRole)
-        
+
         current_font = self.config.editor_font_family
         self.font_combo.setCurrentText(current_font)
         self.update_combo_font(current_font)
         self.font_combo.currentTextChanged.connect(self.on_font_combo_changed)
-        
+
         layout.addWidget(self.create_setting_row(
             "Font Family",
             "Choose the typeface for the log content. Monospaced fonts are recommended.",
@@ -363,7 +364,7 @@ class PreferencesDialog(ModernDialog):
         self.font_size_spin.setFixedWidth(100)
         self.font_size_spin.setValue(self.config.editor_font_size)
         self.font_size_spin.valueChanged.connect(self.update_editor_font)
-        
+
         layout.addWidget(self.create_setting_row(
             "Font Size",
             "Adjust the text size of the log entries.",
@@ -376,7 +377,7 @@ class PreferencesDialog(ModernDialog):
         self.line_spacing_spin.setFixedWidth(100)
         self.line_spacing_spin.setValue(self.config.editor_line_spacing)
         self.line_spacing_spin.valueChanged.connect(lambda v: setattr(self.config, 'editor_line_spacing', v))
-        
+
         layout.addWidget(self.create_setting_row(
             "Line Spacing",
             "Additional vertical space between lines in pixels.",
@@ -387,7 +388,7 @@ class PreferencesDialog(ModernDialog):
         self.line_numbers_cb = QCheckBox()
         self.line_numbers_cb.setChecked(self.config.show_line_numbers)
         self.line_numbers_cb.toggled.connect(lambda c: setattr(self.config, 'show_line_numbers', c))
-        
+
         layout.addWidget(self.create_setting_row(
             "Show Line Numbers",
             "Display line counts on the left side of the log view.",
@@ -411,7 +412,7 @@ class PreferencesDialog(ModernDialog):
         self.theme_combo.setFixedWidth(150)
         self.theme_combo.setCurrentText(self.config.theme)
         self.theme_combo.currentTextChanged.connect(lambda t: setattr(self.config, 'theme', t))
-        
+
         layout.addWidget(self.create_setting_row(
             "Color Theme",
             "Switch between dark and light interface modes.",
@@ -422,24 +423,24 @@ class PreferencesDialog(ModernDialog):
         self.ui_font_combo = QComboBox()
         self.ui_font_combo.setFixedWidth(200)
         all_families = QFontDatabase.families()
-        blacklist = {"fixedsys", "terminal", "system", "modern", "roman", "script", 
+        blacklist = {"fixedsys", "terminal", "system", "modern", "roman", "script",
                      "ms serif", "ms sans serif", "small fonts", "courier"}
         safe_fonts = sorted([f for f in all_families if f.lower() not in blacklist and not f.startswith("@")])
-        
+
         for f in safe_fonts:
             self.ui_font_combo.addItem(f)
             self.ui_font_combo.setItemData(self.ui_font_combo.count() - 1, QFont(f, 11), Qt.FontRole)
-        
+
         current_ui_font = self.config.ui_font_family
         self.ui_font_combo.setCurrentText(current_ui_font)
         self.ui_font_combo.setStyleSheet(f"font-family: \"{current_ui_font}\"; font-size: {self.config.ui_font_size}px;")
-            
+
         def _on_ui_font_changed(text):
             self.config.ui_font_family = text
             self.ui_font_combo.setStyleSheet(f"font-family: \"{text}\"; font-size: {self.config.ui_font_size}px;")
 
         self.ui_font_combo.currentTextChanged.connect(_on_ui_font_changed)
-        
+
         layout.addWidget(self.create_setting_row(
             "Interface Font",
             "The typeface used for menus, buttons, and sidebars.",
@@ -452,7 +453,7 @@ class PreferencesDialog(ModernDialog):
         self.ui_font_spin.setFixedWidth(100)
         self.ui_font_spin.setValue(self.config.ui_font_size)
         self.ui_font_spin.valueChanged.connect(lambda v: setattr(self.config, 'ui_font_size', v))
-        
+
         layout.addWidget(self.create_setting_row(
             "Interface Font Size",
             "Scale the overall size of the user interface text.",

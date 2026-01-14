@@ -1,11 +1,12 @@
 from PySide6.QtCore import QObject, QSettings, Signal
 
+
 class ConfigManager(QObject):
     """
     Manages application settings using QSettings.
     Singleton-like access is recommended by passing a shared instance.
     """
-    
+
     # Signals to notify UI of changes
     fontChanged = Signal(object) # Emits QFont
     themeChanged = Signal(str)   # Emits "Dark", "Light", or "System"
@@ -14,12 +15,12 @@ class ConfigManager(QObject):
     editorFontChanged = Signal(str, int) # Emits font_family, font_size
     editorLineSpacingChanged = Signal(int) # Emits spacing
     showLineNumbersChanged = Signal(bool)
-    
+
     def __init__(self):
         super().__init__()
         # Explicitly set names to ensure consistency regardless of global app state
         self.settings = QSettings("LogAnalyzer", "Log Analyzer Qt")
-        
+
     def get(self, key, default=None):
         return self.settings.value(key, default)
 
@@ -32,15 +33,15 @@ class ConfigManager(QObject):
         self.theme = "Light"
         self.ui_font_size = 12
         self.ui_font_family = "Inter SemiBold"
-        
+
         # 2. Editor
         self.set_editor_font("Consolas", 12)
         self.editor_line_spacing = 0
         self.show_line_numbers = True
-        
+
         # 3. General
         self.default_encoding = "UTF-8"
-        
+
         # Ensure changes are saved
         self.settings.sync()
 
@@ -95,7 +96,7 @@ class ConfigManager(QObject):
         if self.editor_font_size != size:
             self.settings.setValue("editor/font_size", size)
             changed = True
-        
+
         if changed:
             self.editorFontChanged.emit(family, size)
 
@@ -130,6 +131,7 @@ class ConfigManager(QObject):
 
 # Global instance
 _config_instance = None
+
 
 def get_config():
     global _config_instance

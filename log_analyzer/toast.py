@@ -4,6 +4,7 @@ from PySide6.QtGui import QColor
 from .resources import get_svg_icon
 import sys
 
+
 class ToastNotification(QWidget):
     closed = Signal()
 
@@ -11,12 +12,12 @@ class ToastNotification(QWidget):
         # On Linux, parent is centralWidget (Child Widget mode)
         # On Windows, parent is None (Independent Window mode)
         super().__init__(parent)
-        
+
         if sys.platform != "linux":
             self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
             self.setAttribute(Qt.WA_TranslucentBackground)
             self.setAttribute(Qt.WA_ShowWithoutActivating)
-        
+
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         # UI Setup
@@ -88,6 +89,7 @@ class ToastNotification(QWidget):
         self.closed.emit()
         self.deleteLater()
 
+
 class Toast(QObject):
     def __init__(self, parent):
         super().__init__(parent)
@@ -108,10 +110,10 @@ class Toast(QObject):
         # Use centralWidget as parent on Linux to keep toast inside window but below title bar
         p = self.parent_window.centralWidget() if sys.platform == "linux" else None
         notif = ToastNotification(p, message, type_str, duration, self.is_dark_mode, self.font_size)
-        
+
         self.notifications.append(notif)
         notif.closed.connect(lambda: self._remove_notification(notif))
-        
+
         notif.show()
         notif.adjustSize()
         self.reposition_all()
@@ -123,7 +125,7 @@ class Toast(QObject):
 
     def reposition_all(self):
         if not self.parent_window: return
-        
+
         if sys.platform == "linux":
             # Position relative to centralWidget
             cw = self.parent_window.centralWidget()
@@ -137,7 +139,7 @@ class Toast(QObject):
         else:
             # Position relative to screen (Windows)
             parent_pos = self.parent_window.mapToGlobal(QPoint(0, 0))
-            base_y = parent_pos.y() + self.parent_window.height() - 60 
+            base_y = parent_pos.y() + self.parent_window.height() - 60
             center_x = parent_pos.x() + self.parent_window.width() // 2
             for notif in reversed(self.notifications):
                 w, h = notif.width(), notif.height()
@@ -146,6 +148,6 @@ class Toast(QObject):
 
     def resize_to_parent(self):
         self.reposition_all()
-    
+
     def raise_(self):
         for n in self.notifications: n.raise_()

@@ -3,18 +3,19 @@ from PySide6.QtCore import Qt
 from .modern_dialog import ModernDialog
 from .resources import get_svg_icon
 
+
 class ModernMessageBox(ModernDialog):
     def __init__(self, parent=None, title="Message", text="", icon_name="message-info", buttons=QMessageBox.Ok, default_button=None):
         super().__init__(parent, title=title, fixed_size=(400, 180)) # Slightly wider, auto height if possible
-        
+
         # Content Layout
         self.content_layout = QVBoxLayout() # Just a container
         self.content_layout.setSpacing(20)
-        
+
         # Main Area: Icon + Text
         main_area = QHBoxLayout()
         main_area.setSpacing(20)
-        
+
         # Icon
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(48, 48)
@@ -25,29 +26,29 @@ class ModernMessageBox(ModernDialog):
         elif "warn" in icon_name: icon_color = "#cca700"
         elif "error" in icon_name: icon_color = "#f44b56"
         elif "question" in icon_name: icon_color = "#3794ff"
-            
+
         self.icon_label.setPixmap(get_svg_icon(icon_name, icon_color, 48).pixmap(48, 48))
         main_area.addWidget(self.icon_label, 0, Qt.AlignTop)
-        
+
         # Text
         self.text_label = QLabel(text)
         self.text_label.setWordWrap(True)
         self.text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         # Increase font size slightly
         f = self.text_label.font(); f.setPointSize(f.pointSize() + 1); self.text_label.setFont(f)
-        
+
         main_area.addWidget(self.text_label, 1)
         self.content_layout.addLayout(main_area)
-        
+
         self.content_layout.addStretch()
-        
+
         # Buttons
         # Convert QMessageBox.StandardButtons to QDialogButtonBox.StandardButtons
         # Luckily they are usually binary compatible or we can map them
-        
+
         # Simple mapping for common buttons
         btn_box_flags = QDialogButtonBox.NoButton
-        
+
         # Mapping logic (simplified)
         if buttons & QMessageBox.Ok: btn_box_flags |= QDialogButtonBox.Ok
         if buttons & QMessageBox.Save: btn_box_flags |= QDialogButtonBox.Save
@@ -70,28 +71,28 @@ class ModernMessageBox(ModernDialog):
 
         self.button_box = QDialogButtonBox(btn_box_flags)
         self.button_box.clicked.connect(self._on_button_clicked)
-        
+
         # Set Default Button
         if default_button:
             # We need to find the QAbstractButton corresponding to the standard button
             # This is tricky because QDialogButtonBox creates them internally
             # We can try to map back
-            pass 
+            pass
 
         self.content_layout.addWidget(self.button_box)
         self.setContentLayout(self.content_layout)
-        
+
         self.result_val = 0
 
     def _on_button_clicked(self, button):
         std_btn = self.button_box.standardButton(button)
-        
+
         # Map QDialogButtonBox.StandardButton back to QMessageBox.StandardButton value
         try:
             self.result_val = QMessageBox.StandardButton(std_btn.value)
-        except:
+        except Exception:
             self.result_val = std_btn
-            
+
         self.accept()
 
     @staticmethod

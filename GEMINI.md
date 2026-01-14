@@ -41,3 +41,20 @@ Initiating a major refactoring phase to address technical debt (God Class `MainW
 1.  **Theme System**: Centralizing scattered QSS and color logic into a `ThemeManager`.
 2.  **Decoupling**: Breaking dependencies between `NotesManager` and `MainWindow`.
 3.  **Visuals**: Moving towards a VS Code-like aesthetic with layered dark themes.
+
+### ✅ Completed in V2.1 (In Progress)
+
+#### 1. Architecture Decoupling
+- **Controller Extraction**: Successfully extracted `LogController`, `FilterController`, and `SearchController` from the `MainWindow` God Class. 
+- **Business Logic Isolation**: Moved file management, search history, and filter caching into specialized controllers, significantly reducing `ui.py` complexity.
+- **Cross-file State Management**: Optimized search and filter behavior when switching between multiple logs, ensuring consistent navigation and focus.
+
+#### 2. Code Quality & Linting
+- **Static Analysis Integration**: Introduced `flake8` for project-wide linting. Cleaned up 30+ unused imports and 15+ redundant variables/redundant logic blocks.
+- **Automated Formatting**: Employed `autopep8` to standardize code style (E302 blank lines, W291 trailing whitespace), improving codebase readability and maintainability.
+- **Error Handling Refinement**: Fixed "bare except" blocks (E722) to ensure robust exception handling across the package.
+
+#### 3. Bug Fixes & UX Polishing
+- **Search Context Fixes**: Corrected an issue where search results were indexed using the previous file's line number during log switching.
+- **Log List Persistence**: Fixed selection highlight loss when reordering files via drag-and-drop in the sidebar.
+- **Focus Management**: Enhanced search workflow by automatically restoring focus to the search bar after file transitions.
