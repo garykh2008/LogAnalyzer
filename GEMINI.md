@@ -31,3 +31,13 @@ Successful transition from legacy Tkinter to a high-performance **PySide6 (Qt)**
 
 ### 🚀 Status: V2.0 Ready for Release
 The project has reached a high level of maturity, offering a seamless and powerful experience for large-scale log analysis across Windows and Linux.
+
+## Session Date: 2026年1月14日
+
+### 🎯 Objective: V2.1 Refactoring & Polishing
+Initiating a major refactoring phase to address technical debt (God Class `MainWindow`) and establish a unified styling engine (`ThemeManager`) before implementing advanced features like Tail-mode or Multi-tabs.
+
+### 📝 Current Focus
+1.  **Theme System**: Centralizing scattered QSS and color logic into a `ThemeManager`.
+2.  **Decoupling**: Breaking dependencies between `NotesManager` and `MainWindow`.
+3.  **Visuals**: Moving towards a VS Code-like aesthetic with layered dark themes.

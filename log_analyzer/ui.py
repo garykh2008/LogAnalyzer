@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
 from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics, QFontInfo, QPixmap, QPainter
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation, QSize, QItemSelectionModel, QRect
 from .models import LogModel
+from .theme_manager import ThemeManager
 from .engine_wrapper import get_engine
 from .toast import Toast
 from .delegates import LogDelegate, FilterDelegate
@@ -797,76 +798,26 @@ class MainWindow(QMainWindow):
         self.update_scrollbar_range()
 
     def apply_theme(self):
+        if not hasattr(self, 'theme_manager'):
+            self.theme_manager = ThemeManager()
+        
+        self.theme_manager.set_theme(self.is_dark_mode)
+        
+        # Propagate theme to children
         self.notes_manager.set_theme(self.is_dark_mode)
         self.model.set_theme_mode(self.is_dark_mode)
         if hasattr(self, 'toast'): self.toast.set_theme(self.is_dark_mode)
         if hasattr(self, 'search_overlay'): self.search_overlay.apply_theme(self.is_dark_mode)
-        app = QApplication.instance()
         
-        # Base UI Font Size
-        ui_font_size = self.config.ui_font_size
-
-        if self.is_dark_mode:
-            bg_color, fg_color, selection_bg, selection_fg = "#1e1e1e", "#d4d4d4", "#264f78", "#ffffff"
-            # Define hover as a QColor for delegates and a string for QSS
-            hover_qcolor = QColor(255, 255, 255, 30)
-            hover_bg = "rgba(255, 255, 255, 30)"
-            scrollbar_bg, scrollbar_handle = "#1e1e1e", "#424242"
-            scrollbar_hover, menu_bg, menu_fg, menu_sel = "#4f4f4f", "#252526", "#cccccc", "rgba(255, 255, 255, 30)"
-            menu_sel_fg = "#ffffff"
-            bar_bg, bar_fg, input_bg, input_fg = "#007acc", "#ffffff", "#3c3c3c", "#cccccc"
-            float_bg, float_border, dock_title_bg, tree_bg = "#252526", "#3c3c3c", "#2d2d2d", "#252526"
-            tab_bg, tab_fg, tab_sel_bg = "#2d2d2d", "#858585", "#1e1e1e"
-            activity_bg, sidebar_bg = "#333333", "#252526"
-            header_bg = "#1e1e1e"
-            dialog_bg, dialog_fg = "#252526", "#cccccc"
-            checkbox_active = "#007acc"
-            
-            # Custom Title Bar Colors (Dark)
-            titlebar_bg = "#181818"
-            titlebar_fg = "#cccccc"
-            titlebar_hover = "#333333"
-            close_hover = "#c42b1c"
-        else:
-            bg_color, fg_color, selection_bg, selection_fg = "#ffffff", "#000000", "#add6ff", "#000000"
-            hover_qcolor = QColor(0, 0, 0, 20)
-            hover_bg = "rgba(0, 0, 0, 20)"
-            scrollbar_bg, scrollbar_handle = "#f3f3f3", "#c1c1c1"
-            scrollbar_hover, menu_bg, menu_fg, menu_sel = "#a8a8a8", "#f3f3f3", "#333333", "rgba(0, 0, 0, 20)"
-            menu_sel_fg = "#000000"
-            bar_bg, bar_fg, input_bg, input_fg = "#007acc", "#ffffff", "#ffffff", "#000000"
-            float_bg, float_border, dock_title_bg, tree_bg = "#f3f3f3", "#bbbbbb", "#e1e1e1", "#f3f3f3"
-            tab_bg, tab_fg, tab_sel_bg = "#e1e1e1", "#666666", "#ffffff"
-            activity_bg, sidebar_bg = "#f0f0f0", "#f8f8f8"
-            header_bg = "#e5e5e5"
-            dialog_bg, dialog_fg = "#f3f3f3", "#000000"
-            checkbox_active = "#40a9ff"
-            
-            # Custom Title Bar Colors (Light)
-            titlebar_bg = "#e8e8e8"
-            titlebar_fg = "#333333"
-            titlebar_hover = "#d0d0d0"
-            close_hover = "#c42b1c"
-
-        # Log View Gutter Theme
-        if self.is_dark_mode:
-            log_gutter_bg = "#252526" 
-            log_gutter_fg = "#858585"
-            log_border = "#404040"
-        else:
-            log_gutter_bg = "#f3f3f3"
-            log_gutter_fg = "#237893"
-            log_border = "#e5e5e5"
-
-        self.delegate.set_hover_color(hover_qcolor) # Pass QColor directly
-        self.delegate.set_theme_config(log_gutter_bg, log_gutter_fg, log_border)
-        self.v_scrollbar.set_theme(self.is_dark_mode)
-        
-        # Base UI Font Size
+        # Get Palette & Config
+        p = self.theme_manager.palette
         ui_font_size = self.config.ui_font_size
         ui_font_family = self.config.ui_font_family
         
-        if hasattr(self, 'toast'): self.toast.set_theme(self.is_dark_mode, max(12, ui_font_size))
+        # Update Delegates and View
+        self.delegate.set_hover_color(p['hover_qcolor'])
+        self.delegate.set_theme_config(p['log_gutter_bg'], p['log_gutter_fg'], p['log_border'])
+        self.v_scrollbar.set_theme(self.is_dark_mode)
         
         # Welcome Label Scaling
         if hasattr(self, 'welcome_label'):
@@ -878,188 +829,75 @@ class MainWindow(QMainWindow):
         self.list_view.viewport().update()
         
         # Update Window Controls Icons
-        icon_c = titlebar_fg
+        # Use 'titlebar_fg' for window controls to ensure visibility on title bar background
+        icon_c = p['titlebar_fg']
         self.title_bar.btn_min.setIcon(get_svg_icon("window-minimize", icon_c))
         self.title_bar.btn_close.setIcon(get_svg_icon("x-close", icon_c))
         self.update_maximize_icon()
         
         # Style Custom Title Bar
-        self.title_bar.setStyleSheet(f"""
-            #title_bar {{ background-color: {titlebar_bg}; border-bottom: 1px solid {float_border}; }}
-            #title_bar QLabel {{ color: {titlebar_fg}; font-family: "{ui_font_family}"; font-size: {ui_font_size + 2}px; }}
-            QToolButton {{ background-color: transparent; border: none; border-radius: 0px; }}
-            QToolButton:hover {{ background-color: {titlebar_hover}; }}
-        """)
-        # Specific hover for close button
-        self.title_bar.btn_close.setStyleSheet(f"""
-            QToolButton {{ background-color: transparent; border: none; border-radius: 0px; }}
-            QToolButton:hover {{ background-color: {close_hover}; }}
-        """)
-        
-        # Fix MenuBar in Custom Title Bar
-        menu_style = f"""
-        QMenuBar {{ background-color: transparent; color: {titlebar_fg}; border: none; padding: 0px; font-family: "{ui_font_family}"; }}
-        QMenuBar::item {{ background-color: transparent; padding: 5px 10px; border-radius: 4px; }}
-        QMenuBar::item:selected {{ background-color: {titlebar_hover}; }}
-        QMenu {{ background-color: {menu_bg}; color: {menu_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px; margin: 0px; font-family: "{ui_font_family}"; }}
-        QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; margin: 1px 0px; }}
-        QMenu::item:selected {{ background-color: {menu_sel}; color: {menu_sel_fg}; }}
-        QMenu::separator {{ height: 1px; background: {float_border}; margin: 4px 8px; }}
-        QToolTip {{ color: {fg_color}; background-color: {menu_bg}; border: 1px solid {float_border}; padding: 5px; border-radius: 0px; }}
-        """
+        self.title_bar.setStyleSheet(self.theme_manager.get_title_bar_style(ui_font_family, ui_font_size))
+        self.title_bar.btn_close.setStyleSheet(self.theme_manager.get_close_btn_style())
         
         self._set_windows_title_bar_color(self.is_dark_mode)
         for widget in QApplication.topLevelWidgets():
             if widget.isWindow(): set_windows_title_bar_color(widget.winId(), self.is_dark_mode)
         self.update_status_bar(self.last_status_message)
 
-        style = f"""
-        QWidget {{ font-family: "{ui_font_family}", "Segoe UI", "Microsoft JhengHei UI", sans-serif; }}
-        QMainWindow, QDialog, QMessageBox {{ background-color: {bg_color}; color: {fg_color}; }}
-        QDockWidget {{ background-color: {bg_color}; color: {fg_color}; }}
-        QMainWindow::separator {{ background-color: transparent; width: 4px; }}
-        QMainWindow::separator:hover {{ background-color: {float_border}; }}
-        QWidget {{ color: {fg_color}; font-size: {ui_font_size}px; }}
-        #activity_bar {{ background-color: {activity_bg}; border: none; spacing: 10px; padding-top: 5px; }}
-        #activity_bar QToolButton {{ background-color: transparent; border: none; border-left: 3px solid transparent; border-radius: 0px; margin: 0px; font-size: {ui_font_size}px; }}
-        #activity_bar QToolButton:hover {{ background-color: {hover_bg}; }}
-        #activity_bar QToolButton:checked {{ border-left: 3px solid {bar_bg}; background-color: {hover_bg}; }}
-        QDockWidget#FilterDock, QDockWidget#NotesDock, QDockWidget#LogListDock {{ color: {fg_color}; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; titlebar-close-icon: none; titlebar-normal-icon: none; }}
-        QDockWidget#FilterDock::title, QDockWidget#NotesDock::title, QDockWidget#LogListDock::title {{ background: {sidebar_bg}; padding: 10px; border: none; }}
-        #FilterDock QWidget, #NotesDock QWidget, #LogListDock QWidget {{ background-color: {sidebar_bg}; }}
-        #FilterDock QTreeWidget, #NotesDock QTreeWidget, #LogListDock QTreeWidget {{ background-color: {sidebar_bg}; border: none; }}
-        {menu_style}
-        QListView {{ background-color: {bg_color}; color: {fg_color}; border: none; outline: 0; }}
-        QListView::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
-                QTreeWidget {{ background-color: {tree_bg}; border: none; color: {fg_color}; outline: 0; }}
-                QTreeWidget::item {{ padding: 4px; border: none; }}
-                QTreeWidget::item:selected {{ background-color: {selection_bg}; color: {selection_fg}; }}
-                QTreeWidget::item:hover {{ background-color: {hover_bg}; color: {fg_color}; }}
-                
-                QHeaderView {{ background-color: {header_bg}; border: none; border-bottom: 1px solid {float_border}; }}
-                QHeaderView::section {{ background-color: {header_bg}; color: {fg_color}; border: none; border-right: none; padding: 6px 8px; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; text-align: left; }}
-                QHeaderView::section:first {{ padding-left: 0px; padding-right: 0px; text-align: center; }}
-                QHeaderView::section:last {{ padding-right: 4px; }}
-                QHeaderView::section:horizontal {{ border-right: 1px solid transparent; }} /* Fix for some qt styles needing a border property to reset */
-        
-        QTabBar {{ height: 0px; width: 0px; background: transparent; }}
-        QTabBar::tab {{ height: 0px; width: 0px; padding: 0px; margin: 0px; border: none; }}
-        QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{ background-color: {input_bg}; color: {input_fg}; border: 1px solid {float_border}; border-radius: 4px; padding: 4px 8px; }}
-        
-        QPushButton {{ background-color: {menu_bg}; color: {fg_color}; border: 1px solid {float_border}; padding: 6px 16px; border-radius: 4px; }}
-        QPushButton:hover {{ background-color: {hover_bg}; }}
-        QPushButton:pressed {{ background-color: {selection_bg}; }}
-        QPushButton:default {{ background-color: {bar_bg}; color: {bar_fg}; border: 1px solid {bar_bg}; font-weight: bold; }}
-        QPushButton:default:hover {{ background-color: {checkbox_active}; border: 1px solid {checkbox_active}; }}
-        
-        QToolButton {{ background-color: transparent; color: {input_fg}; border: 1px solid transparent; border-radius: 4px; padding: 2px; }}
-        QToolButton:hover {{ background-color: {hover_bg}; border: 1px solid {float_border}; }}
-        QToolButton:checked {{ background-color: {selection_bg}; color: {selection_fg}; border: 1px solid {menu_sel}; }}
-        QStatusBar {{ background-color: {menu_bg}; color: {menu_fg}; border-top: 1px solid {float_border}; }}
-        QStatusBar QLabel:hover {{ color: {bar_bg}; }}
-        QScrollBar:vertical {{ border: none; background: transparent; width: 10px; margin: 0px; }}
-        QScrollBar::handle:vertical {{ background: {scrollbar_handle}; min-height: 20px; border-radius: 5px; }}
-        QScrollBar::handle:vertical:hover {{ background: {scrollbar_hover}; }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; background: transparent; }}
-        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
-        QScrollBar:horizontal {{ border: none; background: transparent; height: 10px; margin: 0px; }}
-        QScrollBar::handle:horizontal {{ background: {scrollbar_handle}; min-width: 20px; border-radius: 5px; }}
-        QScrollBar::handle:horizontal:hover {{ background: {scrollbar_hover}; }}
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0px; background: transparent; }}
-        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: none; }}
-        QAbstractScrollArea::corner {{ background: transparent; border: none; }}
-        QSplitter::handle {{ background-color: {float_border}; }}
-        """
+        # Apply Global QSS
+        app = QApplication.instance()
+        app.setStyleSheet(self.theme_manager.get_stylesheet(ui_font_family, ui_font_size))
 
-        cb_border = "#555555" if not self.is_dark_mode else float_border
-        cb_style = """
-        QCheckBox { spacing: 8px; }
-        QCheckBox::indicator, QTreeView::indicator { 
-            width: 14px; height: 14px; border-radius: 3px; 
-            border: 1px solid %s; background: %s; margin: 0px; padding: 0px;
-        }
-        QTreeView::indicator { subcontrol-origin: padding; subcontrol-position: center; }
-        QCheckBox::indicator:checked, QTreeView::indicator:checked { 
-            background: %s; 
-            image: url("data:image/svg+xml,%%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%%3E%%3Cpolyline points='20 6 9 17 4 12'%%3E%%3C/polyline%%3E%%3C/svg%%3E");
-        }
-        QCheckBox::indicator:hover, QTreeView::indicator:hover { border: 1px solid %s; }
-        """ % (cb_border, input_bg, checkbox_active, menu_sel)
-        
-        style += cb_style
-        app.setStyleSheet(style)
-
-        # Refresh SVG Icons with current theme color
-        icon_color = fg_color
+        # Update Welcome Icon
         welcome_icon_color = "#888888" # Subdued color for welcome screen
         self.welcome_icon.setPixmap(get_svg_icon("activity", welcome_icon_color, size=80).pixmap(80, 80))
         
-        # Colors for Filter Dock (Sync with Notes Dock)
-        filter_header_bg = "#2d2d2d" if self.is_dark_mode else "#e1e1e1"
-        filter_content_bg = "#252526" if self.is_dark_mode else "#f3f3f3"
-        filter_border = "#404040" if self.is_dark_mode else "#e5e5e5"
+        # Style Docks (Filters & Logs)
+        self.filter_title_bar.setStyleSheet(f"background-color: {p['dock_header_bg']};")
+        self.filter_tree.setStyleSheet(self.theme_manager.get_dock_list_style(self.is_dark_mode))
+        self.filter_delegate.set_theme_config(p['dock_border'])
         
-        self.filter_title_bar.setStyleSheet(f"background-color: {filter_header_bg};")
-        self.filter_tree.setStyleSheet(f"""
-            QTreeWidget {{ background-color: {filter_content_bg}; color: {icon_color}; border: none; }}
-            QTreeWidget::item {{ padding: 4px; border: none; }} 
-            QTreeWidget::item:selected {{ background-color: transparent; color: {icon_color}; }}
-            QTreeWidget::item:hover {{ background-color: transparent; }}
-        """)
-        self.filter_delegate.set_theme_config(filter_border)
-        self.btn_add_filter.setIcon(get_svg_icon("plus", icon_color))
-        
-        # Colors for Log List Dock (Sync with others)
-        log_header_bg = "#2d2d2d" if self.is_dark_mode else "#e1e1e1"
-        log_content_bg = "#252526" if self.is_dark_mode else "#f3f3f3"
-        log_list_border = "#404040" if self.is_dark_mode else "#e5e5e5"
-        
-        self.log_title_bar.setStyleSheet(f"background-color: {log_header_bg};")
-        self.log_tree.setStyleSheet(f"""
-            QTreeWidget {{ background-color: {log_content_bg}; border: none; }}
-            QTreeWidget::item {{ padding: 4px; border: none; }}
-            QTreeWidget::item:selected {{ background-color: #264f78; color: #ffffff; }}
-            QTreeWidget::item:hover {{ background-color: {hover_bg}; }}
-        """ if self.is_dark_mode else f"""
-            QTreeWidget {{ background-color: {log_content_bg}; border: none; }}
-            QTreeWidget::item {{ padding: 4px; border: none; }}
-            QTreeWidget::item:selected {{ background-color: #add6ff; color: #000000; }}
-            QTreeWidget::item:hover {{ background-color: {hover_bg}; }}
-        """)
-        self.log_list_delegate.set_theme_config(log_list_border)
-        self.btn_open_log.setIcon(get_svg_icon("file-text", icon_color))
-        self.btn_clear_logs.setIcon(get_svg_icon("x-circle", icon_color))
+        self.log_title_bar.setStyleSheet(f"background-color: {p['dock_header_bg']};")
+        self.log_tree.setStyleSheet(self.theme_manager.get_dock_list_style(self.is_dark_mode))
+        self.log_list_delegate.set_theme_config(p['dock_border'])
 
-        self.btn_side_loglist.setIcon(get_svg_icon("file-text", icon_color))
-        self.btn_side_filter.setIcon(get_svg_icon("filter", icon_color))
-        self.btn_side_notes.setIcon(get_svg_icon("book-open", icon_color))
-        self.btn_settings.setIcon(get_svg_icon("settings", icon_color))
+        # Refresh Icons (Use fg_color for general UI icons)
+        general_icon_c = p['fg_color']
         
-        self.open_action.setIcon(get_svg_icon("file-text", icon_color))
-        self.recent_menu.setIcon(get_svg_icon("folder", icon_color))
-        self.load_filters_action.setIcon(get_svg_icon("filter", icon_color))
-        self.save_filters_action.setIcon(get_svg_icon("save", icon_color))
-        self.save_filters_as_action.setIcon(get_svg_icon("save", icon_color))
-        self.exit_action.setIcon(get_svg_icon("log-out", icon_color))
+        self.btn_add_filter.setIcon(get_svg_icon("plus", general_icon_c))
+        self.btn_open_log.setIcon(get_svg_icon("file-text", general_icon_c))
+        self.btn_clear_logs.setIcon(get_svg_icon("x-circle", general_icon_c))
+
+        self.btn_side_loglist.setIcon(get_svg_icon("file-text", general_icon_c))
+        self.btn_side_filter.setIcon(get_svg_icon("filter", general_icon_c))
+        self.btn_side_notes.setIcon(get_svg_icon("book-open", general_icon_c))
+        self.btn_settings.setIcon(get_svg_icon("settings", general_icon_c))
         
-        self.copy_action.setIcon(get_svg_icon("copy", icon_color))
-        self.find_action.setIcon(get_svg_icon("search", icon_color))
-        self.goto_action.setIcon(get_svg_icon("hash", icon_color))
+        self.open_action.setIcon(get_svg_icon("file-text", general_icon_c))
+        self.recent_menu.setIcon(get_svg_icon("folder", general_icon_c))
+        self.load_filters_action.setIcon(get_svg_icon("filter", general_icon_c))
+        self.save_filters_action.setIcon(get_svg_icon("save", general_icon_c))
+        self.save_filters_as_action.setIcon(get_svg_icon("save", general_icon_c))
+        self.exit_action.setIcon(get_svg_icon("log-out", general_icon_c))
         
-        self.toggle_log_sidebar_action.setIcon(get_svg_icon("file-text", icon_color))
-        self.toggle_filter_sidebar_action.setIcon(get_svg_icon("filter", icon_color))
-        self.toggle_notes_sidebar_action.setIcon(get_svg_icon("book-open", icon_color))
-        self.show_filtered_action.setIcon(get_svg_icon("eye", icon_color))
-        self.toggle_theme_action.setIcon(get_svg_icon("sun-moon", icon_color))
+        self.copy_action.setIcon(get_svg_icon("copy", general_icon_c))
+        self.find_action.setIcon(get_svg_icon("search", general_icon_c))
+        self.goto_action.setIcon(get_svg_icon("hash", general_icon_c))
         
-        self.add_note_action.setIcon(get_svg_icon("plus", icon_color))
-        self.remove_note_action.setIcon(get_svg_icon("trash", icon_color))
-        self.save_notes_action.setIcon(get_svg_icon("save", icon_color))
-        self.export_notes_action.setIcon(get_svg_icon("external-link", icon_color))
+        self.toggle_log_sidebar_action.setIcon(get_svg_icon("file-text", general_icon_c))
+        self.toggle_filter_sidebar_action.setIcon(get_svg_icon("filter", general_icon_c))
+        self.toggle_notes_sidebar_action.setIcon(get_svg_icon("book-open", general_icon_c))
+        self.show_filtered_action.setIcon(get_svg_icon("eye", general_icon_c))
+        self.toggle_theme_action.setIcon(get_svg_icon("sun-moon", general_icon_c))
         
-        self.shortcuts_action.setIcon(get_svg_icon("keyboard", icon_color))
-        self.doc_action.setIcon(get_svg_icon("external-link", icon_color))
-        self.about_action.setIcon(get_svg_icon("info", icon_color))
+        self.add_note_action.setIcon(get_svg_icon("plus", general_icon_c))
+        self.remove_note_action.setIcon(get_svg_icon("trash", general_icon_c))
+        self.save_notes_action.setIcon(get_svg_icon("save", general_icon_c))
+        self.export_notes_action.setIcon(get_svg_icon("external-link", general_icon_c))
+        
+        self.shortcuts_action.setIcon(get_svg_icon("keyboard", general_icon_c))
+        self.doc_action.setIcon(get_svg_icon("external-link", general_icon_c))
+        self.about_action.setIcon(get_svg_icon("info", general_icon_c))
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
