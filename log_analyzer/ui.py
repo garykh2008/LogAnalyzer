@@ -1121,7 +1121,6 @@ class MainWindow(QMainWindow):
         filepath = os.path.abspath(filepath)
         
         if filepath in self.loaded_logs:
-            self.log_controller.set_current_log(filepath)
             self._switch_to_log(filepath)
             return
 
