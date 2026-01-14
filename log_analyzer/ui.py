@@ -612,12 +612,14 @@ class MainWindow(QMainWindow):
         menu_bar = self.custom_menu_bar
 
         file_menu = menu_bar.addMenu("&File")
+        file_menu.setWindowFlags(file_menu.windowFlags() | Qt.NoDropShadowWindowHint)
         self.open_action = QAction("&Open Log...", self)
         self.open_action.setShortcut("Ctrl+O")
         self.open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(self.open_action)
 
         self.recent_menu = file_menu.addMenu("Open Recent")
+        self.recent_menu.setWindowFlags(self.recent_menu.windowFlags() | Qt.NoDropShadowWindowHint)
         self.recent_menu.setIcon(get_svg_icon("folder"))
         self.update_recent_menu()
 
@@ -641,6 +643,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.exit_action)
 
         edit_menu = menu_bar.addMenu("&Edit")
+        edit_menu.setWindowFlags(edit_menu.windowFlags() | Qt.NoDropShadowWindowHint)
         self.copy_action = QAction("&Copy", self)
         self.copy_action.setShortcut(QKeySequence.Copy)
         self.copy_action.triggered.connect(self.copy_selection)
@@ -658,6 +661,7 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.goto_action)
 
         view_menu = menu_bar.addMenu("&View")
+        view_menu.setWindowFlags(view_menu.windowFlags() | Qt.NoDropShadowWindowHint)
         self.toggle_log_sidebar_action = QAction("Log Files", self)
         self.toggle_log_sidebar_action.setShortcut("Ctrl+Shift+L")
         self.toggle_log_sidebar_action.triggered.connect(lambda: self.toggle_sidebar(2))
@@ -686,6 +690,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.toggle_theme_action)
 
         notes_menu = menu_bar.addMenu("&Notes")
+        notes_menu.setWindowFlags(notes_menu.windowFlags() | Qt.NoDropShadowWindowHint)
         self.add_note_action = QAction("Add/Edit Note", self)
         self.add_note_action.setShortcut("C")
         self.add_note_action.triggered.connect(self.add_note_at_current)
@@ -715,6 +720,7 @@ class MainWindow(QMainWindow):
         self.addAction(self.prev_action)
 
         help_menu = menu_bar.addMenu("&Help")
+        help_menu.setWindowFlags(help_menu.windowFlags() | Qt.NoDropShadowWindowHint)
         self.shortcuts_action = QAction("Keyboard Shortcuts", self)
         self.shortcuts_action.triggered.connect(self.show_shortcuts)
         help_menu.addAction(self.shortcuts_action)
@@ -1287,6 +1293,7 @@ class MainWindow(QMainWindow):
     def show_log_list_context_menu(self, pos):
         item = self.log_tree.itemAt(pos)
         menu = QMenu(self)
+        menu.setWindowFlags(menu.windowFlags() | Qt.NoDropShadowWindowHint)
         ic = "#d4d4d4" if self.is_dark_mode else "#333333"
 
         if item:
@@ -1321,6 +1328,7 @@ class MainWindow(QMainWindow):
 
     def show_context_menu(self, pos):
         menu = QMenu(self)
+        menu.setWindowFlags(menu.windowFlags() | Qt.NoDropShadowWindowHint)
         icon_color = "#d4d4d4" if self.is_dark_mode else "#333333"
         copy_action = QAction(get_svg_icon("copy", icon_color), "Copy", self)
         copy_action.triggered.connect(self.copy_selection)
@@ -1602,7 +1610,9 @@ class MainWindow(QMainWindow):
         self.filter_controller.move_filter(idx, len(self.filters) - 1)
 
     def show_filter_menu(self, pos):
-        item = self.filter_tree.itemAt(pos); menu = QMenu(self)
+        item = self.filter_tree.itemAt(pos)
+        menu = QMenu(self)
+        menu.setWindowFlags(menu.windowFlags() | Qt.NoDropShadowWindowHint)
         ic = "#d4d4d4" if self.is_dark_mode else "#333333"
         menu.addAction(get_svg_icon("plus", ic), "Add Filter", self.add_filter_dialog)
         if item:

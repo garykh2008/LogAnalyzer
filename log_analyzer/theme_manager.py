@@ -36,7 +36,7 @@ class ThemeManager:
             "input_fg": "#cccccc",
 
             "float_bg": "#252526",
-            "float_border": "#303031",
+            "float_border": "#505050",
             "dock_title_bg": "#2d2d2d",
             "tree_bg": "#252526",
 
@@ -154,8 +154,8 @@ class ThemeManager:
         QMenuBar {{ background-color: transparent; color: {p['titlebar_fg']}; border: none; padding: 0px; font-family: {ui_font}; }}
         QMenuBar::item {{ background-color: transparent; padding: 5px 10px; border-radius: 4px; }}
         QMenuBar::item:selected {{ background-color: {p['titlebar_hover']}; }}
-        QMenu {{ background-color: {p['menu_bg']}; color: {p['menu_fg']}; border: 1px solid {p['float_border']}; border-radius: 4px; padding: 4px; margin: 0px; font-family: {ui_font}; }}
-        QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; margin: 1px 0px; }}
+        QMenu {{ background-color: {p['menu_bg']}; color: {p['menu_fg']}; border: 1px solid {p['float_border']}; border-radius: 0px; padding: 4px; margin: 0px; font-family: {ui_font}; }}
+        QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 0px; margin: 1px 0px; }}
         QMenu::item:selected {{ background-color: {p['menu_sel']}; color: {p['menu_sel_fg']}; }}
         QMenu::separator {{ height: 1px; background: {p['float_border']}; margin: 4px 8px; }}
         QToolTip {{ color: {p['fg_color']}; background-color: {p['menu_bg']}; border: 1px solid {p['float_border']}; padding: 5px; border-radius: 0px; }}
