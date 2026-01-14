@@ -7,23 +7,17 @@ import bisect
 
 class LogController(QObject):
     """
-    Handles Log file management and Search logic.
+    Handles Log file management.
     """
     log_loaded = Signal(str) # filepath
     log_closed = Signal(str) # filepath
-    search_results_ready = Signal(list, str) # results, query
-    match_found = Signal(int) # raw_index
-
+    
     def __init__(self):
         super().__init__()
         self.loaded_logs = {} # {path: engine}
         self.log_order = [] # Ordered paths
         self.current_log_path = None
         self.current_engine = None
-        
-        self.search_results = []
-        self.last_query = ""
-        self.last_case_sensitive = False
 
     def load_log(self, filepath):
         if not filepath or not os.path.exists(filepath): return False
@@ -48,8 +42,6 @@ class LogController(QObject):
         if filepath in self.loaded_logs:
             self.current_log_path = filepath
             self.current_engine = self.loaded_logs[filepath]
-            self.search_results = [] # Clear search on switch? Or cache?
-            # Ideally cache search results per file, but for now reset
             return True
         return False
 
@@ -74,17 +66,28 @@ class LogController(QObject):
         for fp in logs:
             self.close_log(fp)
 
-    def search(self, query, case_sensitive=False):
-        if not self.current_engine or not query: 
+class SearchController(QObject):
+    search_results_ready = Signal(list, str) # results, query
+    
+    def __init__(self):
+        super().__init__()
+        self.search_results = []
+        self.history = []
+        self.last_query = ""
+        self.last_case_sensitive = False
+
+    def perform_search(self, engine, query, case_sensitive=False):
+        if not engine or not query: 
             self.search_results = []
             self.search_results_ready.emit([], query)
             return
 
         self.last_query = query
         self.last_case_sensitive = case_sensitive
+        self._add_to_history(query)
         
         # Perform search
-        results = self.current_engine.search(query, False, case_sensitive)
+        results = engine.search(query, False, case_sensitive)
         self.search_results = results
         self.search_results_ready.emit(results, query)
 
@@ -109,6 +112,16 @@ class LogController(QObject):
             else:
                 return None
         return self.search_results[idx]
+
+    def _add_to_history(self, query):
+        if query in self.history:
+            self.history.remove(query)
+        self.history.insert(0, query)
+        if len(self.history) > 10:
+            self.history.pop()
+
+    def get_history(self):
+        return self.history
 
 class FilterController(QObject):
     filters_changed = Signal() # Filters list changed (add/remove/reorder)

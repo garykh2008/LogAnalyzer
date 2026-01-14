@@ -1,32 +1,33 @@
 # LogAnalyzer Development Plan (V2.1 Refactoring & Enhancement)
 
-## Phase 1: Architecture & Style Foundation (Current Priority)
+## Phase 1: Architecture & Style Foundation (Completed)
 - [x] **Establish Theme Manager**:
     - [x] Create `log_analyzer/theme_manager.py`.
     - [x] Centralize color palettes (Light/Dark) definitions.
     - [x] Extract inline QSS from `ui.py` to centralized templates.
     - [x] Refactor `MainWindow.apply_theme` to use `ThemeManager`.
-    - [x] Standardize fonts (Inter for UI, JetBrains Mono/Consolas for Logs).
+    - [x] Standardize fonts (Inter SemiBold for UI, Consolas for Logs).
 - [x] **Decouple NotesManager**:
     - [x] Remove `main_window` dependency from `NotesManager`.
     - [x] Implement Signals/Slots for Note updates.
 
-## Phase 2: Visual Polishing
+## Phase 2: Visual Polishing (Completed)
 - [x] **Palette Refinement**:
-    - [x] Implement layered Dark Mode (avoiding pure black #000000).
-    - [x] Define semantic Accent Colors (e.g., VS Code Blue #007ACC).
+    - [x] Implement layered Dark Mode (L-frame with #181818, Sidebar #252526).
+    - [x] Define semantic Accent Colors (VS Code Blue #007ACC).
 - [x] **UI Component Enhancements**:
-    - [x] **Status Bar**: Convert to interactive sections (Line/Col, Encoding, Engine Status).
-    - [x] **Micro-interactions**: Add Hover/Pressed states to buttons.
-    - [ ] **Animations**: Smooth transitions for Toast and Sidebar.
+    - [x] **Status Bar**: Convert to interactive sections (Ln X, Count, Encoding).
+    - [x] **Micro-interactions**: Add Hover/Pressed states to all buttons.
+    - [x] **Animations**: Smooth Quintic transitions for Toast notifications.
 
-## Phase 3: Core Architecture Refactoring
-- [ ] **Split MainWindow (God Class)**:
-    - [ ] Extract `LogController` (File loading, Search, Engine interaction).
-    - [ ] Extract `FilterController` (Filter logic independent of UI).
-    - [ ] Extract `SearchController` (History, Navigation logic).
+## Phase 3: Core Architecture Refactoring (In Progress)
+- [x] **Split MainWindow (God Class)**:
+    - [x] Extract `LogController` (File management, Core Search logic).
+    - [x] Extract `FilterController` (Filter management, Engine interaction, Caching).
+    - [x] Extract `SearchController` (History, UI Navigation state).
+    - [ ] Extract `UI Components` (LogWorkspace, SidebarPanels) to reduce `ui.py` size.
 
-## Phase 4: New Features
+## Phase 4: New Features (Upcoming)
 - [ ] **Live Monitoring (Tail -f)**:
     - [ ] Update Rust engine to support partial reads/updates.
     - [ ] Add FileWatcher in Python.

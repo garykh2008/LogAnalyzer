@@ -8,7 +8,7 @@ from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCurso
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation, QSize, QItemSelectionModel, QRect
 from .models import LogModel
 from .theme_manager import ThemeManager
-from .controllers import LogController, FilterController
+from .controllers import LogController, FilterController, SearchController
 from .engine_wrapper import get_engine
 from .toast import Toast
 from .delegates import LogDelegate, FilterDelegate
@@ -94,13 +94,15 @@ class MainWindow(QMainWindow):
         # --- Controllers Initialization (MUST BE FIRST) ---
         self.log_controller = LogController()
         self.filter_controller = FilterController()
+        self.search_controller = SearchController()
         
         self.log_controller.log_loaded.connect(self.on_log_loaded)
         self.log_controller.log_closed.connect(self.on_log_closed)
-        self.log_controller.search_results_ready.connect(self.on_search_results_ready)
         
         self.filter_controller.filters_changed.connect(self.on_filters_changed)
         self.filter_controller.filter_results_ready.connect(self.on_filter_results_ready)
+        
+        self.search_controller.search_results_ready.connect(self.on_search_results_ready)
 
         # Frameless Window Setup
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
@@ -136,20 +138,13 @@ class MainWindow(QMainWindow):
 
         self.log_states = {} # {path: {"scroll": val, "selected_raw": idx}}
         
-        self.search_results = []
-        self.current_match_index = -1
-        # self.search_history = [] # Keep history in UI for now? Or move to controller?
-        self.search_history = []
-        # self.filters = [] # Removed
         self.show_filtered_only = False
 
-        # self.filters_modified = False # Removed
         self.selected_filter_index = -1
         self.selected_raw_index = -1
-        # self.current_log_path = None # Already initialized above
-        # self.filters_dirty_cache = True # Removed
-        # self.cached_filter_results = None # Removed
-        self.is_scrolling = False        
+        self.is_scrolling = False
+        self._suppress_search_jump = False
+
         # Dock Configuration
         if sys.platform == "linux":
             self.setDockOptions(QMainWindow.AllowTabbedDocks)
@@ -537,6 +532,14 @@ class MainWindow(QMainWindow):
         return self.log_controller.log_order
 
     @property
+    def search_results(self):
+        return self.search_controller.search_results
+
+    @property
+    def search_history(self):
+        return self.search_controller.history
+
+    @property
     def filters(self):
         return self.filter_controller.filters
 
@@ -564,6 +567,11 @@ class MainWindow(QMainWindow):
         
         self.model.update_filter_result(tag_codes, palette, filtered_indices if self.show_filtered_only else None)
         self.update_scrollbar_range()
+        
+        # Update filtered search results based on new visibility
+        self.update_filtered_search_results()
+        
+        self.refresh_filter_tree()
         
         # Cache the result for the current file
         if self.current_log_path:
@@ -1107,28 +1115,6 @@ class MainWindow(QMainWindow):
             if self.log_controller.current_log_path:
                 self._switch_to_log(self.log_controller.current_log_path)
 
-    def on_search_results_ready(self, results, query):
-        self.search_results = results
-        # Assuming is_case from overlay, or passed via signal? 
-        # For now, let's just get it from overlay since controller handled the search
-        is_case = self.search_overlay.btn_case.isChecked()
-        self.delegate.set_search_query(query, is_case)
-        self.list_view.viewport().update()
-        
-        total_lines = len(self.model.filtered_indices) if self.show_filtered_only and self.model.filtered_indices else self.current_engine.line_count()
-        self.v_scrollbar.set_search_results(self.search_results, total_lines)
-        
-        if results: 
-            # Logic to jump to first result? 
-            # Controller has find_next/prev logic, but UI needs to handle "Jump to first match after search"
-            idx = bisect.bisect_left(results, self.selected_raw_index)
-            if idx >= len(results): idx = 0
-            
-            keep_focus = self.search_overlay.input.hasFocus()
-            self._jump_to_match(idx, focus_list=not keep_focus)
-        else: 
-            self.search_overlay.set_results_info("No results")
-
     def load_log(self, filepath, is_multiple=False):
         if not filepath or not os.path.exists(filepath): return
         
@@ -1179,12 +1165,17 @@ class MainWindow(QMainWindow):
         note_count = sum(1 for (fp, ln) in self.notes_manager.notes if fp == filepath)
         self.btn_side_notes.set_badge(note_count)
         
-        self.search_results = []
-        self.current_match_index = -1
+        # Restore State (Pre-fetch selected_raw for correct search indexing)
+        state = self.log_states.get(filepath, {})
+        scroll_pos = state.get("scroll", 0)
+        selected_raw = state.get("selected_raw", -1)
+        
+        # Update internal state immediately so search calculation uses the correct index
+        self.selected_raw_index = selected_raw
+
         self.update_scrollbar_range()
         
         # Restore filter cache state for the new file
-        state = self.log_states.get(filepath, {})
         if "filter_cache" in state:
             self.filter_controller.set_cache(state["filter_cache"])
         else:
@@ -1201,16 +1192,29 @@ class MainWindow(QMainWindow):
         if self.filters: self.recalc_filters()
         else: self.refresh_filter_tree()
 
-        # Restore State
-        state = self.log_states.get(filepath, {})
-        scroll_pos = state.get("scroll", 0)
-        selected_raw = state.get("selected_raw", -1)
-        
+        # Handle Search State: Auto-search if overlay is open, otherwise clear
+        # Moved after filter calc to ensure filtered_indices are up-to-date
+        self.current_match_index = -1
+        query = self.search_overlay.input.text()
+        if not self.search_overlay.isHidden() and query:
+            is_case = self.search_overlay.btn_case.isChecked()
+            self._suppress_search_jump = True
+            self.search_controller.perform_search(self.current_engine, query, is_case)
+            self._suppress_search_jump = False
+        else:
+            self.search_controller.perform_search(self.current_engine, "") # Clear controller state
+            self.filtered_search_results = []
+            self.v_scrollbar.set_search_results([], 1)
+            self.search_overlay.set_results_info("")
+
+        # Restore UI Scroll and Selection Visuals
         self.v_scrollbar.setValue(scroll_pos)
         if selected_raw != -1:
-            # We use a slight delay or direct call to ensure model has updated viewport
-            self.selected_raw_index = selected_raw
             self._restore_selection_ui(selected_raw)
+            
+        # Restore focus to search input if overlay is active
+        if not self.search_overlay.isHidden():
+            self.search_overlay.input.setFocus()
 
     def _restore_selection_ui(self, raw_index):
         """Internal helper to set the selection highlight without necessarily re-centering."""
@@ -1358,7 +1362,10 @@ class MainWindow(QMainWindow):
 
     def _on_search_closed(self):
         self.delegate.set_search_query(None, False)
-        self.search_results = []
+        # Clear filtered results visually but keep controller state? 
+        # Usually closing search clears highlights.
+        self.search_controller.perform_search(self.current_engine, "") # Clear
+        self.filtered_search_results = []
         self.v_scrollbar.set_search_results([], 1)
         self.list_view.viewport().update()
         self.list_view.setFocus()
@@ -1371,14 +1378,14 @@ class MainWindow(QMainWindow):
             is_wrap = self.search_overlay.btn_wrap.isChecked()
 
         if not query: return
-        if self.delegate.search_query != query or not self.search_results:
+        if self.delegate.search_query != query or not self.filtered_search_results:
             if self.search_overlay.isHidden(): return
             self._perform_search(query, is_case)
             return
         
         curr_raw = self.selected_raw_index
-        idx = bisect.bisect_right(self.search_results, curr_raw)
-        if idx >= len(self.search_results):
+        idx = bisect.bisect_right(self.filtered_search_results, curr_raw)
+        if idx >= len(self.filtered_search_results):
             if is_wrap: 
                 idx = 0; self.toast.show_message("Wrapped to top", type_str="warning")
             else: return
@@ -1394,16 +1401,16 @@ class MainWindow(QMainWindow):
             is_wrap = self.search_overlay.btn_wrap.isChecked()
 
         if not query: return
-        if self.delegate.search_query != query or not self.search_results:
+        if self.delegate.search_query != query or not self.filtered_search_results:
             if self.search_overlay.isHidden(): return
             self._perform_search(query, is_case)
             return
             
         curr_raw = self.selected_raw_index
-        idx = bisect.bisect_left(self.search_results, curr_raw) - 1
+        idx = bisect.bisect_left(self.filtered_search_results, curr_raw) - 1
         if idx < 0:
             if is_wrap: 
-                idx = len(self.search_results)-1; self.toast.show_message("Wrapped to bottom", type_str="warning")
+                idx = len(self.filtered_search_results)-1; self.toast.show_message("Wrapped to bottom", type_str="warning")
             else: return
 
         keep_focus = self.search_overlay.input.hasFocus()
@@ -1412,30 +1419,29 @@ class MainWindow(QMainWindow):
     def _perform_search(self, query, is_case=None):
         if is_case is None:
             is_case = self.search_overlay.btn_case.isChecked()
-        self.log_controller.search(query, is_case)
+        self.search_controller.perform_search(self.current_engine, query, is_case)
 
     def on_search_results_ready(self, results, query):
-        # Filter results if needed
-        if self.show_filtered_only and self.model.filtered_indices:
-            visible_set = set(self.model.filtered_indices)
-            results = [r for r in results if r in visible_set]
-
-        self.search_results = results
+        # results argument is raw results from controller
         
         # Get case sensitivity from overlay as it's the source of truth for UI state
         is_case = self.search_overlay.btn_case.isChecked()
         self.delegate.set_search_query(query, is_case)
         self.list_view.viewport().update()
         
-        total_lines = len(self.model.filtered_indices) if self.show_filtered_only and self.model.filtered_indices else self.current_engine.line_count()
-        self.v_scrollbar.set_search_results(self.search_results, total_lines)
+        self.update_filtered_search_results()
         
-        if results: 
-            idx = bisect.bisect_left(results, self.selected_raw_index)
-            if idx >= len(results): idx = 0
+        if self.filtered_search_results: 
+            # Jump to first visible result relative to current selection
+            idx = bisect.bisect_left(self.filtered_search_results, self.selected_raw_index)
+            if idx >= len(self.filtered_search_results): idx = 0
             
-            keep_focus = self.search_overlay.input.hasFocus()
-            self._jump_to_match(idx, focus_list=not keep_focus)
+            self.search_overlay.set_results_info(f"{idx + 1} / {len(self.filtered_search_results)}")
+            
+            if not self._suppress_search_jump:
+                keep_focus = self.search_overlay.input.hasFocus()
+                target_raw = self.filtered_search_results[idx]
+                self.jump_to_raw_index(target_raw, focus_list=not keep_focus)
         else: 
             self.search_overlay.set_results_info("No results")
 
@@ -1480,11 +1486,11 @@ class MainWindow(QMainWindow):
                 self.selected_raw_index = raw_index # Ensure state is synced
 
     def _jump_to_match(self, result_index, focus_list=True):
-        if not self.search_results or result_index < 0 or result_index >= len(self.search_results): return
-        raw_row = self.search_results[result_index]
+        if not self.filtered_search_results or result_index < 0 or result_index >= len(self.filtered_search_results): return
+        raw_row = self.filtered_search_results[result_index]
         self.jump_to_raw_index(raw_row, focus_list)
         if hasattr(self, 'search_overlay'):
-            self.search_overlay.set_results_info(f"{result_index + 1} / {len(self.search_results)}")
+            self.search_overlay.set_results_info(f"{result_index + 1} / {len(self.filtered_search_results)}")
 
     @property
     def filters_modified(self):
@@ -1746,6 +1752,17 @@ class MainWindow(QMainWindow):
             self.filter_controller.apply_filters(self.current_engine)
         finally:
             self.hide_busy()
+
+    def update_filtered_search_results(self):
+        raw_results = self.search_controller.search_results
+        if self.show_filtered_only and self.model.filtered_indices:
+            visible_set = set(self.model.filtered_indices)
+            self.filtered_search_results = [r for r in raw_results if r in visible_set]
+        else:
+            self.filtered_search_results = list(raw_results)
+            
+        total = len(self.model.filtered_indices) if self.show_filtered_only and self.model.filtered_indices else (self.current_engine.line_count() if self.current_engine else 0)
+        self.v_scrollbar.set_search_results(self.filtered_search_results, total)
 
     def show_goto_dialog(self):
         total = self.current_engine.line_count() if self.current_engine else 0
