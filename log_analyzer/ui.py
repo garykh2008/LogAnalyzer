@@ -1862,8 +1862,8 @@ class MainWindow(QMainWindow):
         is_max = self.isMaximized()
         icon_name = "window-restore" if is_max else "window-maximize"
         
-        # Recalculate titlebar_fg based on mode (logic copied from apply_theme)
-        fg = "#cccccc" if self.is_dark_mode else "#333333"
+        # Get color from current theme manager
+        fg = self.theme_manager.get_color('titlebar_fg') if hasattr(self, 'theme_manager') else "#cccccc"
         
         self.title_bar.btn_max.setIcon(get_svg_icon(icon_name, fg))
         self.title_bar.btn_max.setToolTip("Restore" if is_max else "Maximize")

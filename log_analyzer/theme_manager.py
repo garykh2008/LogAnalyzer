@@ -145,12 +145,15 @@ class ThemeManager:
     def get_stylesheet(self, font_family: str, font_size: int) -> str:
         p = self.palette
         
+        # Standardize Font Family string (handle spaces and fallbacks)
+        ui_font = f'"{font_family}", "Inter", "Segoe UI", "Microsoft JhengHei UI", sans-serif'
+        
         # Menu Style Template
         menu_style = f"""
-        QMenuBar {{ background-color: transparent; color: {p['titlebar_fg']}; border: none; padding: 0px; font-family: "{font_family}"; }}
+        QMenuBar {{ background-color: transparent; color: {p['titlebar_fg']}; border: none; padding: 0px; font-family: {ui_font}; }}
         QMenuBar::item {{ background-color: transparent; padding: 5px 10px; border-radius: 4px; }}
         QMenuBar::item:selected {{ background-color: {p['titlebar_hover']}; }}
-        QMenu {{ background-color: {p['menu_bg']}; color: {p['menu_fg']}; border: 1px solid {p['float_border']}; border-radius: 4px; padding: 4px; margin: 0px; font-family: "{font_family}"; }}
+        QMenu {{ background-color: {p['menu_bg']}; color: {p['menu_fg']}; border: 1px solid {p['float_border']}; border-radius: 4px; padding: 4px; margin: 0px; font-family: {ui_font}; }}
         QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 3px; margin: 1px 0px; }}
         QMenu::item:selected {{ background-color: {p['menu_sel']}; color: {p['menu_sel_fg']}; }}
         QMenu::separator {{ height: 1px; background: {p['float_border']}; margin: 4px 8px; }}
@@ -176,7 +179,7 @@ class ThemeManager:
 
         # Main Style
         style = f"""
-        QWidget {{ font-family: "{font_family}", "Segoe UI", "Microsoft JhengHei UI", sans-serif; }}
+        QWidget {{ font-family: {ui_font}; }}
         QMainWindow, QDialog, QMessageBox {{ background-color: {p['bg_color']}; color: {p['fg_color']}; }}
         QDockWidget {{ background-color: {p['bg_color']}; color: {p['fg_color']}; }}
         QMainWindow::separator {{ background-color: transparent; width: 4px; }}

@@ -46,14 +46,7 @@ class NoteDialog(ModernDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         
         self.text_edit = QTextEdit()
-        
-        # Set consistent font
-        font = QFont("Inter")
-        if not QFontInfo(font).exactMatch() and QFontInfo(font).family() != "Inter":
-             font.setFamily("Segoe UI")
-        font.setPixelSize(14)
-        self.text_edit.setFont(font)
-        
+        # Remove hardcoded font, will inherit from stylesheet
         self.text_edit.setPlainText(initial_text)
         layout.addWidget(self.text_edit)
 

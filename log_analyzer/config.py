@@ -32,7 +32,7 @@ class ConfigManager(QObject):
         # 1. Appearance
         self.theme = "Light"
         self.ui_font_size = 12
-        self.ui_font_family = "Inter"
+        self.ui_font_family = "Inter SemiBold"
         
         # 2. Editor
         self.set_editor_font("Consolas", 12)
@@ -71,7 +71,7 @@ class ConfigManager(QObject):
 
     @property
     def ui_font_family(self):
-        return self.settings.value("appearance/ui_font_family", "Inter")
+        return self.settings.value("appearance/ui_font_family", "Inter SemiBold")
 
     @ui_font_family.setter
     def ui_font_family(self, value):
