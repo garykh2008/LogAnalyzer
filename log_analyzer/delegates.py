@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
-from PySide6.QtGui import QPalette, QColor, QPainter
+from PySide6.QtGui import QPalette, QColor, QPainter, QFont
 from PySide6.QtCore import QSize, QRectF, Qt, QRect, Signal, QEvent
 from .resources import get_svg_icon
 
@@ -310,11 +310,35 @@ class FilterDelegate(QStyledItemDelegate):
                 painter.fillRect(option.rect, overlay)
 
             # 3. Draw default content
-            super().paint(painter, option, index)
-
-            # 4. Draw Bottom Border
-            painter.setPen(self.border_color)
-            painter.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
-
         finally:
             painter.restore()
+
+
+class FontPreviewDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        painter.save()
+        
+        # Draw background (standard style)
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(option.rect, option.palette.highlight())
+            painter.setPen(option.palette.highlightedText().color())
+        else:
+            painter.fillRect(option.rect, option.palette.base())
+            painter.setPen(option.palette.text().color())
+
+        # Get font name
+        font_family = index.data(Qt.DisplayRole)
+        if font_family:
+            # Use the specific font for preview
+            preview_font = QFont(font_family, 10)
+            painter.setFont(preview_font)
+            
+            # Draw text
+            text_rect = option.rect.adjusted(5, 0, -5, 0)
+            painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, font_family)
+            
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        return QSize(option.rect.width(), 28)
+

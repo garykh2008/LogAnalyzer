@@ -7,6 +7,7 @@ from PySide6.QtGui import QFont, QFontDatabase
 from log_analyzer.modern_dialog import ModernDialog
 from log_analyzer.config import get_config
 from log_analyzer.resources import get_svg_icon
+from log_analyzer.delegates import FontPreviewDelegate
 
 
 class PreferencesDialog(ModernDialog):
@@ -62,11 +63,14 @@ class PreferencesDialog(ModernDialog):
         self.btn_reset.setObjectName("btn_reset")
         self.btn_reset.setMinimumWidth(160)
         self.btn_reset.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self.btn_reset.setAutoDefault(False)
+        self.btn_reset.setDefault(False)
         self.btn_reset.clicked.connect(self.on_reset_clicked)
 
         self.btn_close = QPushButton("Close")
         self.btn_close.setObjectName("btn_close")
-        self.btn_close.setDefault(True)
+        self.btn_close.setAutoDefault(False)
+        self.btn_close.setDefault(False)
         self.btn_close.clicked.connect(self.accept)
         self.btn_close.setMinimumWidth(100)
 
@@ -338,6 +342,7 @@ class PreferencesDialog(ModernDialog):
         # 1. Font Family
         self.font_combo = QComboBox()
         self.font_combo.setFixedWidth(200)
+        self.font_combo.setItemDelegate(FontPreviewDelegate(self.font_combo))
         all_families = QFontDatabase.families()
         blacklist = {"fixedsys", "terminal", "system", "modern", "roman", "script",
                      "ms serif", "ms sans serif", "small fonts", "courier"}
@@ -345,7 +350,6 @@ class PreferencesDialog(ModernDialog):
 
         for f in safe_fonts:
             self.font_combo.addItem(f)
-            self.font_combo.setItemData(self.font_combo.count() - 1, QFont(f, 11), Qt.FontRole)
 
         current_font = self.config.editor_font_family
         self.font_combo.setCurrentText(current_font)
@@ -422,6 +426,7 @@ class PreferencesDialog(ModernDialog):
         # 2. UI Font Family
         self.ui_font_combo = QComboBox()
         self.ui_font_combo.setFixedWidth(200)
+        self.ui_font_combo.setItemDelegate(FontPreviewDelegate(self.ui_font_combo))
         all_families = QFontDatabase.families()
         blacklist = {"fixedsys", "terminal", "system", "modern", "roman", "script",
                      "ms serif", "ms sans serif", "small fonts", "courier"}
@@ -429,7 +434,6 @@ class PreferencesDialog(ModernDialog):
 
         for f in safe_fonts:
             self.ui_font_combo.addItem(f)
-            self.ui_font_combo.setItemData(self.ui_font_combo.count() - 1, QFont(f, 11), Qt.FontRole)
 
         current_ui_font = self.config.ui_font_family
         self.ui_font_combo.setCurrentText(current_ui_font)
