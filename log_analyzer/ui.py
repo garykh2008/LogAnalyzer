@@ -815,9 +815,23 @@ class MainWindow(QMainWindow):
             self.update_scrollbar_range()
             return False
         if hasattr(self, 'list_view') and obj == self.list_view and event.type() == QEvent.Wheel:
+            modifiers = event.modifiers()
             delta = event.angleDelta().y()
-            self.v_scrollbar.setValue(self.v_scrollbar.value() + (-delta / 40))
-            return True
+
+            if modifiers & Qt.ControlModifier:
+                # Zoom In/Out
+                if delta > 0:
+                    new_size = min(36, self.config.editor_font_size + 1)
+                else:
+                    new_size = max(8, self.config.editor_font_size - 1)
+
+                if new_size != self.config.editor_font_size:
+                    self.config.set_editor_font(self.config.editor_font_family, new_size)
+                    # self.apply_editor_font is connected to config change signal
+                return True
+            else:
+                self.v_scrollbar.setValue(self.v_scrollbar.value() + (-delta / 40))
+                return True
 
         # Handle key events for both Log View and Filter Tree
         if event.type() == QEvent.KeyPress:
