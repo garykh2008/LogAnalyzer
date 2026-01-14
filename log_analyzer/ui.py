@@ -180,6 +180,7 @@ class MainWindow(QMainWindow):
         self.activity_bar.setAllowedAreas(Qt.LeftToolBarArea)
         self.activity_bar.setOrientation(Qt.Vertical)
         self.activity_bar.setIconSize(QSize(28, 28))
+        self.activity_bar.setContextMenuPolicy(Qt.PreventContextMenu)
         self.addToolBar(Qt.LeftToolBarArea, self.activity_bar)
 
         self.btn_side_loglist = QToolButton()
@@ -989,7 +990,7 @@ class MainWindow(QMainWindow):
         self.copy_action.setIcon(get_svg_icon("copy", general_icon_c))
         self.find_action.setIcon(get_svg_icon("search", general_icon_c))
         self.goto_action.setIcon(get_svg_icon("hash", general_icon_c))
-
+        
         self.toggle_log_sidebar_action.setIcon(get_svg_icon("file-text", general_icon_c))
         self.toggle_filter_sidebar_action.setIcon(get_svg_icon("filter", general_icon_c))
         self.toggle_notes_sidebar_action.setIcon(get_svg_icon("book-open", general_icon_c))
