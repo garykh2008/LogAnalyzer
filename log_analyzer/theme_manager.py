@@ -14,7 +14,7 @@ class ThemeManager:
     def _init_palettes(self):
         self.dark_palette = {
             "bg_color": "#1e1e1e",
-            "fg_color": "#d4d4d4",
+            "fg_color": "#cccccc",
             "selection_bg": "#264f78",
             "selection_fg": "#ffffff",
             "hover_bg": "rgba(255, 255, 255, 30)",
@@ -26,7 +26,7 @@ class ThemeManager:
             
             "menu_bg": "#252526",
             "menu_fg": "#cccccc",
-            "menu_sel": "rgba(255, 255, 255, 30)",
+            "menu_sel": "#094771",
             "menu_sel_fg": "#ffffff",
             
             "bar_bg": "#007acc",
@@ -35,7 +35,7 @@ class ThemeManager:
             "input_fg": "#cccccc",
             
             "float_bg": "#252526",
-            "float_border": "#3c3c3c",
+            "float_border": "#303031",
             "dock_title_bg": "#2d2d2d",
             "tree_bg": "#252526",
             
@@ -43,7 +43,7 @@ class ThemeManager:
             "tab_fg": "#858585",
             "tab_sel_bg": "#1e1e1e",
             
-            "activity_bg": "#333333",
+            "activity_bg": "#181818",
             "sidebar_bg": "#252526",
             "header_bg": "#1e1e1e",
             "dialog_bg": "#252526",
@@ -56,14 +56,14 @@ class ThemeManager:
             "close_hover": "#c42b1c",
             
             # Log View Specific
-            "log_gutter_bg": "#252526",
+            "log_gutter_bg": "#1e1e1e",
             "log_gutter_fg": "#858585",
-            "log_border": "#404040",
+            "log_border": "#303031",
 
-             # Filter/Dock Specific (Mapped to generic names for consistency)
-            "dock_header_bg": "#2d2d2d",
+             # Filter/Dock Specific
+            "dock_header_bg": "#252526",
             "dock_content_bg": "#252526",
-            "dock_border": "#404040",
+            "dock_border": "#303031",
             
             # Checkbox border
             "cb_border": "#3c3c3c" 
@@ -71,7 +71,7 @@ class ThemeManager:
 
         self.light_palette = {
             "bg_color": "#ffffff",
-            "fg_color": "#000000",
+            "fg_color": "#333333",
             "selection_bg": "#add6ff",
             "selection_fg": "#000000",
             "hover_bg": "rgba(0, 0, 0, 20)",
@@ -83,7 +83,7 @@ class ThemeManager:
             
             "menu_bg": "#f3f3f3",
             "menu_fg": "#333333",
-            "menu_sel": "rgba(0, 0, 0, 20)",
+            "menu_sel": "#add6ff",
             "menu_sel_fg": "#000000",
             
             "bar_bg": "#007acc",
@@ -91,21 +91,21 @@ class ThemeManager:
             "input_bg": "#ffffff",
             "input_fg": "#000000",
             
-            "float_bg": "#f3f3f3",
-            "float_border": "#bbbbbb",
-            "dock_title_bg": "#e1e1e1",
+            "float_bg": "#ffffff",
+            "float_border": "#e5e5e5",
+            "dock_title_bg": "#f3f3f3",
             "tree_bg": "#f3f3f3",
             
             "tab_bg": "#e1e1e1",
             "tab_fg": "#666666",
             "tab_sel_bg": "#ffffff",
             
-            "activity_bg": "#f0f0f0",
-            "sidebar_bg": "#f8f8f8",
-            "header_bg": "#e5e5e5",
+            "activity_bg": "#e8e8e8",
+            "sidebar_bg": "#f3f3f3",
+            "header_bg": "#ffffff",
             "dialog_bg": "#f3f3f3",
             "dialog_fg": "#000000",
-            "checkbox_active": "#40a9ff",
+            "checkbox_active": "#007acc",
             
             "titlebar_bg": "#e8e8e8",
             "titlebar_fg": "#333333",
@@ -113,17 +113,17 @@ class ThemeManager:
             "close_hover": "#c42b1c",
             
             # Log View Specific
-            "log_gutter_bg": "#f3f3f3",
+            "log_gutter_bg": "#ffffff",
             "log_gutter_fg": "#237893",
             "log_border": "#e5e5e5",
 
              # Filter/Dock Specific
-            "dock_header_bg": "#e1e1e1",
+            "dock_header_bg": "#f3f3f3",
             "dock_content_bg": "#f3f3f3",
             "dock_border": "#e5e5e5",
             
             # Checkbox border
-            "cb_border": "#555555"
+            "cb_border": "#bbbbbb"
         }
 
     @property
@@ -183,9 +183,10 @@ class ThemeManager:
         #activity_bar {{ background-color: {p['activity_bg']}; border: none; spacing: 10px; padding-top: 5px; }}
         #activity_bar QToolButton {{ background-color: transparent; border: none; border-left: 3px solid transparent; border-radius: 0px; margin: 0px; font-size: {font_size}px; }}
         #activity_bar QToolButton:hover {{ background-color: {p['hover_bg']}; }}
-        #activity_bar QToolButton:checked {{ border-left: 3px solid {p['bar_bg']}; background-color: {p['hover_bg']}; }}
+        #activity_bar QToolButton:checked {{ border-left: 3px solid {p['bar_bg']}; background-color: {p['sidebar_bg']}; }}
+        #activity_bar QToolButton:checked QLabel {{ color: #ffffff; }}
         
-        QDockWidget#FilterDock, QDockWidget#NotesDock, QDockWidget#LogListDock {{ color: {p['fg_color']}; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; titlebar-close-icon: none; titlebar-normal-icon: none; }}
+        QDockWidget#FilterDock, QDockWidget#NotesDock, QDockWidget#LogListDock {{ color: {p['fg_color']}; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; titlebar-close-icon: none; titlebar-normal-icon: none; border-bottom: 1px solid {p['float_border']}; }}
         QDockWidget#FilterDock::title, QDockWidget#NotesDock::title, QDockWidget#LogListDock::title {{ background: {p['sidebar_bg']}; padding: 10px; border: none; }}
         #FilterDock QWidget, #NotesDock QWidget, #LogListDock QWidget {{ background-color: {p['sidebar_bg']}; }}
         #FilterDock QTreeWidget, #NotesDock QTreeWidget, #LogListDock QTreeWidget {{ background-color: {p['sidebar_bg']}; border: none; }}
@@ -219,6 +220,7 @@ class ThemeManager:
         
         QToolButton {{ background-color: transparent; color: {p['input_fg']}; border: 1px solid transparent; border-radius: 4px; padding: 2px; }}
         QToolButton:hover {{ background-color: {p['hover_bg']}; border: 1px solid {p['float_border']}; }}
+        QToolButton:pressed {{ background-color: {p['selection_bg']}; }}
         QToolButton:checked {{ background-color: {p['selection_bg']}; color: {p['selection_fg']}; border: 1px solid {p['menu_sel']}; }}
         
         QStatusBar {{ background-color: {p['menu_bg']}; color: {p['menu_fg']}; border-top: 1px solid {p['float_border']}; }}
@@ -250,6 +252,16 @@ class ThemeManager:
             #title_bar QLabel {{ color: {p['titlebar_fg']}; font-family: "{font_family}"; font-size: {font_size + 2}px; }}
             QToolButton {{ background-color: transparent; border: none; border-radius: 0px; }}
             QToolButton:hover {{ background-color: {p['titlebar_hover']}; }}
+        """
+
+    def get_dock_title_style(self):
+        p = self.palette
+        return f"""
+            .QWidget {{ background-color: {p['dock_header_bg']}; border-bottom: 1px solid {p['dock_border']}; }}
+            QLabel {{ border: none; }}
+            QToolButton {{ border: none; background: transparent; border-radius: 4px; padding: 2px; }}
+            QToolButton:hover {{ background-color: {p['hover_bg']}; }}
+            QToolButton:pressed {{ background-color: {p['selection_bg']}; }}
         """
 
     def get_close_btn_style(self):

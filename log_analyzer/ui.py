@@ -855,11 +855,11 @@ class MainWindow(QMainWindow):
         self.welcome_icon.setPixmap(get_svg_icon("activity", welcome_icon_color, size=80).pixmap(80, 80))
         
         # Style Docks (Filters & Logs)
-        self.filter_title_bar.setStyleSheet(f"background-color: {p['dock_header_bg']};")
+        self.filter_title_bar.setStyleSheet(self.theme_manager.get_dock_title_style())
         self.filter_tree.setStyleSheet(self.theme_manager.get_dock_list_style(self.is_dark_mode))
         self.filter_delegate.set_theme_config(p['dock_border'])
         
-        self.log_title_bar.setStyleSheet(f"background-color: {p['dock_header_bg']};")
+        self.log_title_bar.setStyleSheet(self.theme_manager.get_dock_title_style())
         self.log_tree.setStyleSheet(self.theme_manager.get_dock_list_style(self.is_dark_mode))
         self.log_list_delegate.set_theme_config(p['dock_border'])
 

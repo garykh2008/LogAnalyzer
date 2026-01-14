@@ -167,34 +167,34 @@ class NotesManager(QObject):
         if self.dock.isFloating():
             set_windows_title_bar_color(self.dock.winId(), is_dark)
         
+        # Get Palette and styles from ThemeManager if available
+        theme_manager = getattr(self.parent, 'theme_manager', None)
+        if theme_manager:
+            p = theme_manager.palette
+            icon_color = p['fg_color']
+            header_style = theme_manager.get_dock_title_style()
+            tree_style = theme_manager.get_dock_list_style(is_dark)
+            line_bg = p['dock_content_bg']
+            line_fg = p['log_gutter_fg']
+            border_color = p['dock_border']
+        else:
+            # Fallback colors
+            icon_color = "#d4d4d4" if is_dark else "#333333"
+            header_bg = "#2d2d2d" if is_dark else "#e1e1e1"
+            header_style = f"background-color: {header_bg};"
+            content_bg = "#252526" if is_dark else "#f3f3f3"
+            tree_style = f"QTreeWidget {{ background-color: {content_bg}; color: {icon_color}; border: none; }}"
+            line_bg = content_bg
+            line_fg = "#858585" if is_dark else "#237893"
+            border_color = "#404040" if is_dark else "#e5e5e5"
+        
         # Update Icons
-        icon_color = "#d4d4d4" if is_dark else "#333333"
         self.btn_save.setIcon(get_svg_icon("save", icon_color))
         self.btn_export.setIcon(get_svg_icon("external-link", icon_color))
         
-        # Define Colors
-        header_bg = "#2d2d2d" if is_dark else "#e1e1e1" # Distinct Title Color
-        content_bg = "#252526" if is_dark else "#f3f3f3" # Sidebar BG (NOT Editor BG)
-        line_bg = content_bg # Gutter matches Sidebar
-        line_fg = "#858585" if is_dark else "#237893" # Line number text
-        border_color = "#404040" if is_dark else "#e5e5e5" # Subtle vertical border
-        
-        # Update Title Bar Style
-        self.title_bar.setStyleSheet(f"background-color: {header_bg};")
-        
-        # Update Tree Background (Content Area matches Sidebar)
-        # We need to override global styles for this specific tree
-        self.tree.setStyleSheet(f"""
-            QTreeWidget {{ background-color: {content_bg}; color: {icon_color}; border: none; }}
-            QTreeWidget::item {{ padding: 4px; border: none; border-bottom: 1px solid {border_color}; }}
-            QTreeWidget::item:selected {{ background-color: #264f78; color: #ffffff; }}
-            QTreeWidget::item:hover {{ background-color: rgba(255, 255, 255, 30); color: {icon_color}; }}
-        """ if is_dark else f"""
-            QTreeWidget {{ background-color: {content_bg}; color: {icon_color}; border: none; }}
-            QTreeWidget::item {{ padding: 4px; border: none; border-bottom: 1px solid {border_color}; }}
-            QTreeWidget::item:selected {{ background-color: #add6ff; color: #000000; }}
-            QTreeWidget::item:hover {{ background-color: rgba(0, 0, 0, 20); color: {icon_color}; }}
-        """)
+        # Update UI Elements
+        self.title_bar.setStyleSheet(header_style)
+        self.tree.setStyleSheet(tree_style)
         
         # Set Delegate for Line Column
         self.tree.setItemDelegate(NoteLineDelegate(QColor(line_bg), QColor(line_fg), QColor(border_color), self.tree))
