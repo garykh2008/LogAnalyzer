@@ -192,15 +192,14 @@ class BadgeToolButton(QToolButton):
 
 class ClickableLabel(QLabel):
     clicked = Signal()
-
     def __init__(self, text="", parent=None):
         super().__init__(text, parent)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.PointingHandCursor) # Always show hand cursor to indicate interactivity
 
-    def mousePressEvent(self, event):
+    def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
-        super().mousePressEvent(event)
+        super().mouseReleaseEvent(event)
 
 
 class LoadingSpinner(QWidget):

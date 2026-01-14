@@ -419,22 +419,46 @@ class MainWindow(QMainWindow):
         status_container = QWidget()
         status_layout = QHBoxLayout(status_container)
         status_layout.setContentsMargins(10, 0, 10, 0)
-        status_layout.setSpacing(20)
+        status_layout.setSpacing(10)
         
-        self.status_mode_label = ClickableLabel("Full Log View")
-        self.status_mode_label.setToolTip("Click to toggle Filtered Only mode (Ctrl+H)")
+        # Left Side: Spinner & Main Message
+        self.spinner = LoadingSpinner(size=14, color="#3794ff")
+        self.status_message_label = QLabel("Ready")
+        
+        # Right Side: Interactive Sections
+        self.status_mode_label = ClickableLabel("Full Log")
+        self.status_mode_label.setToolTip("Toggle Filtered View (Ctrl+H)")
         self.status_mode_label.clicked.connect(self.toggle_show_filtered_only_from_status)
         
         self.status_count_label = ClickableLabel("0 lines")
-        self.status_count_label.setToolTip("Click to Go to Line (Ctrl+G)")
+        self.status_count_label.setToolTip("Go to Line (Ctrl+G)")
         self.status_count_label.clicked.connect(self.show_goto_dialog)
         
-        self.spinner = LoadingSpinner(size=14, color="#3794ff")
+        self.status_pos_label = ClickableLabel("Ln 1")
+        self.status_pos_label.setToolTip("Current Line")
         
+        self.status_enc_label = ClickableLabel("UTF-8")
+        self.status_enc_label.setToolTip("File Encoding")
+        
+        # Add widgets
+        status_layout.addWidget(self.spinner)
+        status_layout.addWidget(self.status_message_label)
+        status_layout.addStretch()
+        
+        # Helper to add separator
+        def add_sep():
+            sep = QFrame()
+            sep.setFrameShape(QFrame.VLine)
+            sep.setFrameShadow(QFrame.Sunken)
+            sep.setFixedHeight(14)
+            sep.setStyleSheet("color: gray;") 
+            # We will style this properly in theme manager later or use a simple widget
+            status_layout.addWidget(sep)
+
         status_layout.addWidget(self.status_mode_label)
         status_layout.addWidget(self.status_count_label)
-        status_layout.addWidget(self.spinner)
-        status_layout.addStretch()
+        status_layout.addWidget(self.status_pos_label)
+        status_layout.addWidget(self.status_enc_label)
         
         self.status_bar.addWidget(status_container, 1)
         
@@ -1604,6 +1628,9 @@ class MainWindow(QMainWindow):
         if self.show_filtered_only and self.model.filtered_indices:
             if abs_row < len(self.model.filtered_indices): raw = self.model.filtered_indices[abs_row]
         self.selected_raw_index = raw
+        
+        if hasattr(self, 'status_pos_label'):
+            self.status_pos_label.setText(f"Ln {raw + 1}")
 
     def update_scrollbar_range(self):
         if not self.current_engine: return
@@ -1797,16 +1824,19 @@ class MainWindow(QMainWindow):
         self.toggle_show_filtered_only()
 
     def update_status_bar(self, message=None):
+        if message:
+            self.status_message_label.setText(message)
+            
         if not hasattr(self, 'status_mode_label'): return
         
-        mode_text = "Filtered View" if self.show_filtered_only else "Full Log View"
+        mode_text = "Filtered" if self.show_filtered_only else "Full Log"
         self.status_mode_label.setText(mode_text)
         
         total_count = self.current_engine.line_count() if self.current_engine else 0
         
         if self.show_filtered_only:
             filtered_count = len(self.model.filtered_indices) if self.model.filtered_indices else 0
-            self.status_count_label.setText(f"{filtered_count:,} lines (Total {total_count:,})")
+            self.status_count_label.setText(f"{filtered_count:,} / {total_count:,} lines")
         else:
             self.status_count_label.setText(f"{total_count:,} lines")
 

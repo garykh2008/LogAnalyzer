@@ -224,7 +224,8 @@ class ThemeManager:
         QToolButton:checked {{ background-color: {p['selection_bg']}; color: {p['selection_fg']}; border: 1px solid {p['menu_sel']}; }}
         
         QStatusBar {{ background-color: {p['menu_bg']}; color: {p['menu_fg']}; border-top: 1px solid {p['float_border']}; }}
-        QStatusBar QLabel:hover {{ color: {p['bar_bg']}; }}
+        QStatusBar QLabel {{ padding: 2px 6px; border-radius: 3px; }}
+        QStatusBar QLabel:hover {{ background-color: {p['hover_bg']}; }}
         
         QScrollBar:vertical {{ border: none; background: transparent; width: 10px; margin: 0px; }}
         QScrollBar::handle:vertical {{ background: {p['scrollbar_handle']}; min-height: 20px; border-radius: 5px; }}

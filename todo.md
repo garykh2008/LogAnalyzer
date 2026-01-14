@@ -15,8 +15,8 @@
 - [x] **Palette Refinement**:
     - [x] Implement layered Dark Mode (avoiding pure black #000000).
     - [x] Define semantic Accent Colors (e.g., VS Code Blue #007ACC).
-- [ ] **UI Component Enhancements**:
-    - [ ] **Status Bar**: Convert to interactive sections (Line/Col, Encoding, Engine Status).
+- [x] **UI Component Enhancements**:
+    - [x] **Status Bar**: Convert to interactive sections (Line/Col, Encoding, Engine Status).
     - [ ] **Micro-interactions**: Add Hover/Pressed states to buttons.
     - [ ] **Animations**: Smooth transitions for Toast and Sidebar.
 
