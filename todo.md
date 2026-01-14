@@ -17,7 +17,7 @@
     - [x] Define semantic Accent Colors (e.g., VS Code Blue #007ACC).
 - [x] **UI Component Enhancements**:
     - [x] **Status Bar**: Convert to interactive sections (Line/Col, Encoding, Engine Status).
-    - [ ] **Micro-interactions**: Add Hover/Pressed states to buttons.
+    - [x] **Micro-interactions**: Add Hover/Pressed states to buttons.
     - [ ] **Animations**: Smooth transitions for Toast and Sidebar.
 
 ## Phase 3: Core Architecture Refactoring

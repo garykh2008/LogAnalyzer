@@ -49,6 +49,7 @@ class ThemeManager:
             "dialog_bg": "#252526",
             "dialog_fg": "#cccccc",
             "checkbox_active": "#007acc",
+            "accent_hover": "#1f8ad2",
             
             "titlebar_bg": "#181818",
             "titlebar_fg": "#cccccc",
@@ -106,7 +107,9 @@ class ThemeManager:
             "dialog_bg": "#f3f3f3",
             "dialog_fg": "#000000",
             "checkbox_active": "#007acc",
+            "accent_hover": "#0062a3",
             
+            # Custom Title Bar Colors (Light)
             "titlebar_bg": "#e8e8e8",
             "titlebar_fg": "#333333",
             "titlebar_hover": "#d0d0d0",
@@ -216,7 +219,7 @@ class ThemeManager:
         QPushButton:hover {{ background-color: {p['hover_bg']}; }}
         QPushButton:pressed {{ background-color: {p['selection_bg']}; }}
         QPushButton:default {{ background-color: {p['bar_bg']}; color: {p['bar_fg']}; border: 1px solid {p['bar_bg']}; font-weight: bold; }}
-        QPushButton:default:hover {{ background-color: {p['checkbox_active']}; border: 1px solid {p['checkbox_active']}; }}
+        QPushButton:default:hover {{ background-color: {p['accent_hover']}; border: 1px solid {p['accent_hover']}; }}
         
         QToolButton {{ background-color: transparent; color: {p['input_fg']}; border: 1px solid transparent; border-radius: 4px; padding: 2px; }}
         QToolButton:hover {{ background-color: {p['hover_bg']}; border: 1px solid {p['float_border']}; }}

@@ -77,12 +77,12 @@ class ToastNotification(QWidget):
         else:
             self.setWindowOpacity(0.0)
             self.anim = QPropertyAnimation(self, b"windowOpacity")
-            self.anim.setDuration(250); self.anim.setStartValue(0.0); self.anim.setEndValue(1.0); self.anim.setEasingCurve(QEasingCurve.OutCubic); self.anim.start()
+            self.anim.setDuration(300); self.anim.setStartValue(0.0); self.anim.setEndValue(1.0); self.anim.setEasingCurve(QEasingCurve.OutQuint); self.anim.start()
             self.timer = QTimer(self)
             self.timer.setSingleShot(True); self.timer.timeout.connect(self.fade_out); self.timer.start(duration)
 
     def fade_out(self):
-        self.anim.setStartValue(1.0); self.anim.setEndValue(0.0); self.anim.setDuration(250); self.anim.finished.connect(self.close_notification); self.anim.start()
+        self.anim.setStartValue(1.0); self.anim.setEndValue(0.0); self.anim.setDuration(300); self.anim.setEasingCurve(QEasingCurve.InQuint); self.anim.finished.connect(self.close_notification); self.anim.start()
 
     def close_notification(self):
         self.closed.emit()
