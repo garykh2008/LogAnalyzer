@@ -4,7 +4,8 @@ import sys
 import ctypes
 from xml.dom import minidom
 from PySide6.QtGui import QFontDatabase
-from PySide6.QtCore import QDir
+
+# QDir was removed here
 
 def hex_to_rgb(hex_str):
     hex_str = hex_str.lstrip('#')

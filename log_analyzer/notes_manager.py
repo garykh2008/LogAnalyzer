@@ -1,9 +1,9 @@
 from PySide6.QtWidgets import (QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView, 
-                               QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QDialog, 
-                               QTextEdit, QLabel, QMessageBox, QMenu, QToolButton, QStyledItemDelegate)
-from PySide6.QtCore import Qt, Signal, QObject, QSize
+                               QWidget, QVBoxLayout, QPushButton, QHBoxLayout, 
+                               QTextEdit, QLabel, QMenu, QToolButton, QStyledItemDelegate)
+from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QColor, QAction, QFont, QFontInfo
-from .utils import adjust_color_for_theme, set_windows_title_bar_color
+from .utils import set_windows_title_bar_color
 from .resources import get_svg_icon
 from .modern_dialog import ModernDialog
 from .modern_messagebox import ModernMessageBox

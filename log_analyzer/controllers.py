@@ -1,8 +1,7 @@
-from PySide6.QtCore import QObject, Signal, QTimer
+from PySide6.QtCore import QObject, Signal
 from .engine_wrapper import get_engine
 from .utils import load_tat_filters, save_tat_filters
 import os
-import time
 import bisect
 
 class LogController(QObject):

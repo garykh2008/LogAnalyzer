@@ -1,6 +1,6 @@
-from PySide6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QToolButton, QStyleOption, QStyle, QApplication, QLineEdit, QFrame, QVBoxLayout, QGraphicsOpacityEffect, QGraphicsDropShadowEffect, QComboBox, QSizePolicy, QCompleter)
+from PySide6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QToolButton, QStyleOption, QStyle, QApplication, QLineEdit, QFrame, QVBoxLayout, QGraphicsDropShadowEffect, QSizePolicy, QCompleter)
 from PySide6.QtGui import QIcon, QPainter, QFont, QColor
-from PySide6.QtCore import Qt, QRect, Signal, QTimer, QPropertyAnimation, QEasingCurve, QStringListModel
+from PySide6.QtCore import Qt, Signal, QTimer, QStringListModel
 from .resources import get_svg_icon
 import os
 

@@ -1,8 +1,6 @@
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget, QSizeGrip
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPalette
 from .components import CustomTitleBar
-from .utils import adjust_color_for_theme
 
 class ModernDialog(QDialog):
     def __init__(self, parent=None, title="Dialog", fixed_size=None):

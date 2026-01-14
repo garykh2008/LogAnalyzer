@@ -1,26 +1,23 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
-                               QLabel, QFileDialog, QMenuBar, QMenu, QStatusBar, QAbstractItemView, QApplication,
-                               QHBoxLayout, QLineEdit, QToolButton, QComboBox, QSizePolicy, QGraphicsDropShadowEffect,
-                               QGraphicsOpacityEffect, QCheckBox, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView,
-                               QDialog, QMessageBox, QScrollBar, QPushButton, QStackedLayout, QInputDialog, QFrame,
-                               QSplitter, QSpinBox, QSizeGrip, QStyleOption, QStyle)
-from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCursor, QIcon, QShortcut, QWheelEvent, QFontMetrics, QFontInfo, QPixmap, QPainter
-from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation, QSize, QItemSelectionModel, QRect
+                               QLabel, QFileDialog, QMenu, QStatusBar, QAbstractItemView, QApplication,
+                               QHBoxLayout, QToolButton, QSizePolicy, QDockWidget, QTreeWidget, QTreeWidgetItem, QHeaderView,
+                               QMessageBox, QPushButton, QStackedLayout, QFrame,
+                               QSpinBox, QSizeGrip)
+from PySide6.QtGui import QAction, QFont, QColor, QKeySequence, QIcon, QFontMetrics, QFontInfo
+from PySide6.QtCore import Qt, QSettings, QTimer, QEvent, QSize, QItemSelectionModel, QRect
 from .models import LogModel
 from .theme_manager import ThemeManager
 from .controllers import LogController, FilterController, SearchController
-from .engine_wrapper import get_engine
+
 from .toast import Toast
 from .delegates import LogDelegate, FilterDelegate
 from .filter_dialog import FilterDialog
 
 from .notes_manager import NotesManager
 from .resources import get_svg_icon
-from .utils import adjust_color_for_theme, load_tat_filters, save_tat_filters, set_windows_title_bar_color
+from .utils import adjust_color_for_theme, set_windows_title_bar_color
 import os
-import time
 import sys
-import ctypes
 import bisect
 
 from .components import CustomTitleBar, DimmerOverlay, BadgeToolButton, ClickableLabel, LoadingSpinner, SearchOverlay

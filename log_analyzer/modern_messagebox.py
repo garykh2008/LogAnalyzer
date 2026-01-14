@@ -1,7 +1,5 @@
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QDialogButtonBox, 
-                               QPushButton, QSizePolicy)
+from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QDialogButtonBox, QMessageBox)
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
 from .modern_dialog import ModernDialog
 from .resources import get_svg_icon
 

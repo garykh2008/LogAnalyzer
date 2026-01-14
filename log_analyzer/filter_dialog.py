@@ -1,9 +1,8 @@
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QCheckBox, QPushButton, QColorDialog, QDialogButtonBox, QGroupBox, QGridLayout, QFrame, QSizePolicy)
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit,
+                               QCheckBox, QPushButton, QColorDialog, QDialogButtonBox, QSizePolicy)
+from PySide6.QtGui import QColor
 from PySide6.QtCore import Qt
-from .utils import set_windows_title_bar_color, adjust_color_for_theme
-from .resources import get_svg_icon
+from .utils import adjust_color_for_theme
 from .modern_dialog import ModernDialog
 
 class FilterDialog(ModernDialog):

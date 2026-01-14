@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
-from PySide6.QtGui import QTextDocument, QAbstractTextDocumentLayout, QPalette, QColor, QIcon, QPainter
-from PySide6.QtCore import QSize, QRectF, Qt, QRect, Signal, QPoint, QEvent
+from PySide6.QtGui import QPalette, QColor, QPainter
+from PySide6.QtCore import QSize, QRectF, Qt, QRect, Signal, QEvent
 from .resources import get_svg_icon
 
 class LogListDelegate(QStyledItemDelegate):

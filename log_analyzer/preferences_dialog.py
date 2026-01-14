@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QStackedWidget,
-    QComboBox, QCheckBox, QSpinBox, QGroupBox, QFrame, QPushButton, QSizePolicy
+    QComboBox, QCheckBox, QSpinBox, QFrame, QPushButton, QSizePolicy
 )
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QFont, QFontDatabase
 from log_analyzer.modern_dialog import ModernDialog
 from log_analyzer.config import get_config

@@ -5,7 +5,7 @@ import argparse
 import glob
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont, QFontDatabase
-from PySide6.QtCore import Qt, qInstallMessageHandler, QtMsgType
+from PySide6.QtCore import qInstallMessageHandler, QtMsgType
 from log_analyzer.ui import MainWindow
 from log_analyzer.utils import load_custom_fonts
 

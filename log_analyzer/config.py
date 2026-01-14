@@ -1,5 +1,4 @@
 from PySide6.QtCore import QObject, QSettings, Signal
-from PySide6.QtGui import QFont
 
 class ConfigManager(QObject):
     """
