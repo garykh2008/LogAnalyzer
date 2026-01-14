@@ -8,7 +8,7 @@ from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCurso
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation, QSize, QItemSelectionModel, QRect
 from .models import LogModel
 from .theme_manager import ThemeManager
-from .controllers import LogController
+from .controllers import LogController, FilterController
 from .engine_wrapper import get_engine
 from .toast import Toast
 from .delegates import LogDelegate, FilterDelegate
@@ -91,6 +91,17 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         
+        # --- Controllers Initialization (MUST BE FIRST) ---
+        self.log_controller = LogController()
+        self.filter_controller = FilterController()
+        
+        self.log_controller.log_loaded.connect(self.on_log_loaded)
+        self.log_controller.log_closed.connect(self.on_log_closed)
+        self.log_controller.search_results_ready.connect(self.on_search_results_ready)
+        
+        self.filter_controller.filters_changed.connect(self.on_filters_changed)
+        self.filter_controller.filter_results_ready.connect(self.on_filter_results_ready)
+
         # Frameless Window Setup
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         
@@ -105,9 +116,7 @@ class MainWindow(QMainWindow):
         self.is_dark_mode = self.settings.value("dark_mode", False, type=bool)
         self.setAcceptDrops(True)
         self.last_status_message = "Ready"
-        self.current_filter_file = None
         self.current_log_path = None
-        self.filters_modified = False
 
         # --- Custom Title Bar Integration ---
         # 1. Force creation/retrieval of the native QMenuBar first
@@ -125,31 +134,22 @@ class MainWindow(QMainWindow):
         # 4. Set Custom Title Bar as the MainWindow's Menu Widget
         self.setMenuWidget(self.title_bar)
 
-        self.update_window_title()
-
-        # --- Multi-Log Management ---
-        self.log_controller = LogController()
-        self.log_controller.log_loaded.connect(self.on_log_loaded)
-        self.log_controller.log_closed.connect(self.on_log_closed)
-        self.log_controller.search_results_ready.connect(self.on_search_results_ready)
-        
         self.log_states = {} # {path: {"scroll": val, "selected_raw": idx}}
-        # self.current_active_log = None # Deprecated, tracked by controller
-
+        
         self.search_results = []
         self.current_match_index = -1
+        # self.search_history = [] # Keep history in UI for now? Or move to controller?
         self.search_history = []
-        self.filters = []
+        # self.filters = [] # Removed
         self.show_filtered_only = False
 
-        self.filters_modified = False
+        # self.filters_modified = False # Removed
         self.selected_filter_index = -1
         self.selected_raw_index = -1
-        self.current_log_path = None
-        self.filters_dirty_cache = True 
-        self.cached_filter_results = None 
-        self.is_scrolling = False
-        
+        # self.current_log_path = None # Already initialized above
+        # self.filters_dirty_cache = True # Removed
+        # self.cached_filter_results = None # Removed
+        self.is_scrolling = False        
         # Dock Configuration
         if sys.platform == "linux":
             self.setDockOptions(QMainWindow.AllowTabbedDocks)
@@ -536,9 +536,52 @@ class MainWindow(QMainWindow):
     def log_order(self):
         return self.log_controller.log_order
 
+    @property
+    def filters(self):
+        return self.filter_controller.filters
+
     def open_preferences(self):
         dialog = PreferencesDialog(self)
         dialog.exec()
+
+    def on_filters_changed(self):
+        self.refresh_filter_tree()
+        self.update_window_title()
+        # Invalidate per-file cache logic? 
+        # Controller manages global cache dirty state.
+        # But we also have `log_states[path]["filter_cache"]`.
+        # When filters change, we should invalidate ALL per-file caches.
+        self._invalidate_all_filter_caches(mark_modified=False) # Controller marks modified already
+        self.recalc_filters()
+
+    def on_filter_results_ready(self, res, rust_f):
+        tag_codes, filtered_indices, subset_counts = res[0], res[1], res[2]
+        
+        # UI calculates colors
+        palette = {j+2: (adjust_color_for_theme(self.filters[rf[4]]["fg_color"], False, self.is_dark_mode),
+                         adjust_color_for_theme(self.filters[rf[4]]["bg_color"], True, self.is_dark_mode))
+                   for j, rf in enumerate(rust_f)}
+        
+        self.model.update_filter_result(tag_codes, palette, filtered_indices if self.show_filtered_only else None)
+        self.update_scrollbar_range()
+        
+        # Cache the result for the current file
+        if self.current_log_path:
+            if self.current_log_path not in self.log_states:
+                self.log_states[self.current_log_path] = {}
+            self.log_states[self.current_log_path]["filter_cache"] = (res, rust_f)
+        
+        count = len(filtered_indices) if filtered_indices else 0
+        if self.show_filtered_only:
+             self.toast.show_message(f"Filtered: {count:,} lines")
+        
+        self.update_status_bar()
+        
+        enabled_count = sum(1 for f in self.filters if f["enabled"])
+        self.btn_side_filter.set_badge(enabled_count)
+        
+        # Refresh tree to show hit counts (controller updated them)
+        self.refresh_filter_tree()
 
     def apply_editor_font(self, family, size):
         # Update via stylesheet to override global app stylesheet inheritance
@@ -962,16 +1005,7 @@ class MainWindow(QMainWindow):
 
     def load_tat_filter_from_cli(self, path):
         """Internal helper for CLI to load filters without GUI interaction."""
-        loaded = load_tat_filters(path)
-        if loaded:
-            self.current_filter_file = path
-            self.filters = loaded
-            self.filters_modified = False
-            self.filters_dirty_cache = True
-            # Note: UI refresh happens when logs are loaded, 
-            # or if logs already exist, we need to refresh here.
-            self.update_window_title()
-            self.refresh_filter_tree()
+        self.filter_controller.load_from_file(path)
 
     def load_logs_from_cli(self, file_list):
         """Internal helper for CLI to load multiple logs at once."""
@@ -1149,15 +1183,13 @@ class MainWindow(QMainWindow):
         self.current_match_index = -1
         self.update_scrollbar_range()
         
-        # Reset filter cache for the new file
-        self.filters_dirty_cache = True
-        self.cached_filter_results = None
-        
-        # Try to load cached filter results if available
+        # Restore filter cache state for the new file
         state = self.log_states.get(filepath, {})
         if "filter_cache" in state:
-            self.cached_filter_results = state["filter_cache"]
-            self.filters_dirty_cache = False
+            self.filter_controller.set_cache(state["filter_cache"])
+        else:
+            # No cache for this file, force recalculation
+            self.filter_controller.invalidate_cache(mark_modified=False)
         
         # Select in tree
         items = self.log_tree.findItems(os.path.basename(filepath), Qt.MatchExactly)
@@ -1454,14 +1486,20 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'search_overlay'):
             self.search_overlay.set_results_info(f"{result_index + 1} / {len(self.search_results)}")
 
+    @property
+    def filters_modified(self):
+        return self.filter_controller.filters_modified
+
+    @property
+    def current_filter_file(self):
+        return self.filter_controller.current_filter_file
+
     def _invalidate_all_filter_caches(self, mark_modified=True):
         """Clears filter cache for all loaded logs because filter rules have changed."""
         for state in self.log_states.values():
             if "filter_cache" in state:
                 del state["filter_cache"]
-        if mark_modified:
-            self.filters_modified = True
-        self.filters_dirty_cache = True
+        # Controller handles its own cache state
 
     def on_filter_tree_reordered(self):
         new_f = []
@@ -1471,9 +1509,7 @@ class MainWindow(QMainWindow):
             idx = item.data(0, Qt.UserRole)
             new_f.append(self.filters[idx])
             item.setData(0, Qt.UserRole, i)
-        self.filters = new_f
-        self._invalidate_all_filter_caches()
-        self.update_window_title(); self.recalc_filters()
+        self.filter_controller.set_filters(new_f)
 
     def refresh_filter_tree(self):
         self.filter_tree.blockSignals(True)
@@ -1499,10 +1535,7 @@ class MainWindow(QMainWindow):
             idx = item.data(0, Qt.UserRole)
             if 0 <= idx < len(self.filters):
                 st = (item.checkState(0) == Qt.Checked)
-                if self.filters[idx]["enabled"] != st:
-                    self.filters[idx]["enabled"] = st
-                    self._invalidate_all_filter_caches()
-                    self.update_window_title(); self.recalc_filters()
+                self.filter_controller.toggle_filter(idx, st)
 
     def on_log_double_clicked(self, index):
         txt = self.model.data(index, Qt.DisplayRole)
@@ -1514,43 +1547,29 @@ class MainWindow(QMainWindow):
         idx = item.data(0, Qt.UserRole)
         dialog = FilterDialog(self, self.filters[idx])
         if dialog.exec():
-            self.filters[idx].update(dialog.get_data())
-            self._invalidate_all_filter_caches()
-            self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
+            self.filter_controller.update_filter(idx, dialog.get_data())
 
     def add_filter_dialog(self, initial_text=""):
         dialog = FilterDialog(self)
         if initial_text: dialog.pattern_edit.setText(initial_text)
         if dialog.exec():
-            flt = dialog.get_data(); flt["hits"] = 0
-            self.filters.append(flt)
-            self._invalidate_all_filter_caches()
-            self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
+            self.filter_controller.add_filter(dialog.get_data())
 
     def remove_filter(self):
         item = self.filter_tree.currentItem()
         if not item: return
-        del self.filters[item.data(0, Qt.UserRole)]
-        self._invalidate_all_filter_caches()
-        self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
+        self.filter_controller.remove_filter(item.data(0, Qt.UserRole))
 
     def move_filter_top(self):
         item = self.filter_tree.currentItem()
         if not item: return
-        idx = item.data(0, Qt.UserRole)
-        if idx > 0:
-            self.filters.insert(0, self.filters.pop(idx))
-            self._invalidate_all_filter_caches()
-            self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
+        self.filter_controller.move_filter(item.data(0, Qt.UserRole), 0)
 
     def move_filter_bottom(self):
         item = self.filter_tree.currentItem()
         if not item: return
         idx = item.data(0, Qt.UserRole)
-        if idx < len(self.filters) - 1:
-            self.filters.append(self.filters.pop(idx))
-            self._invalidate_all_filter_caches()
-            self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
+        self.filter_controller.move_filter(idx, len(self.filters) - 1)
 
     def show_filter_menu(self, pos):
         item = self.filter_tree.itemAt(pos); menu = QMenu(self)
@@ -1567,20 +1586,14 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             en = self.filters[idx]["enabled"]
             act = menu.addAction("Disable" if en else "Enable")
-            def togg(): self.filters[idx]["enabled"] = not en; self._invalidate_all_filter_caches(); self.refresh_filter_tree(); self.recalc_filters()
-            act.triggered.connect(togg)
+            act.triggered.connect(lambda: self.filter_controller.toggle_filter(idx, not en))
         menu.exec_(self.filter_tree.mapToGlobal(pos))
 
     def import_filters(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import Filters", self.settings.value("last_filter_dir", ""), "TAT (*.tat);;All (*)")
         if path:
             self.settings.setValue("last_filter_dir", os.path.dirname(path))
-            loaded = load_tat_filters(path)
-            if loaded:
-                self.current_filter_file = path  # Update current filter file path
-                self.filters = loaded; self._invalidate_all_filter_caches(mark_modified=False)
-                self.filters_modified = False
-                self.update_window_title(); self.refresh_filter_tree(); self.recalc_filters()
+            if self.filter_controller.load_from_file(path):
                 self.toast.show_message("Filters Loaded", type_str="success")
                 
                 # Auto-show Filter Panel when filters are loaded
@@ -1601,13 +1614,13 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.Save:
                 saved = False
                 if self.current_filter_file:
-                    saved = save_tat_filters(self.current_filter_file, self.filters)
+                    saved = self.filter_controller.save_to_file(self.current_filter_file)
                 else:
-                    self.save_filters_as()
-                    saved = not self.filters_modified # Check flag to verify save success
+                    saved = self.save_filters_as()
 
                 if saved:
-                    self.filters_modified = False
+                    # self.filters_modified = False # Controller handles this
+                    pass
                 else:
                     event.ignore(); return
             elif reply == QMessageBox.Discard:
@@ -1619,9 +1632,7 @@ class MainWindow(QMainWindow):
         if self.notes_manager.has_unsaved_changes():
             reply = prompt_save_changes("Unsaved Notes", "Notes have been modified. Do you want to save them for all files?")
             if reply == QMessageBox.Save:
-                self.notes_manager.save_all_notes()
-                # save_all_notes handles its own errors and sets dirty=False on success
-                if self.notes_manager.has_unsaved_changes(): # Still dirty means save failed or cancelled
+                if not self.notes_manager.save_all_notes():
                      event.ignore(); return
             elif reply == QMessageBox.Discard:
                 pass
@@ -1643,16 +1654,20 @@ class MainWindow(QMainWindow):
 
     def quick_save_filters(self):
         if self.current_filter_file:
-            if save_tat_filters(self.current_filter_file, self.filters):
-                self.filters_modified = False; self.update_window_title(); self.toast.show_message("Saved", type_str="success")
+            if self.filter_controller.save_to_file(self.current_filter_file):
+                self.update_window_title()
+                self.toast.show_message("Saved", type_str="success")
         else: self.save_filters_as()
 
     def save_filters_as(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save Filters As", self.settings.value("last_filter_dir", ""), "TAT (*.tat);;All (*)")
         if path:
             self.settings.setValue("last_filter_dir", os.path.dirname(path))
-            if save_tat_filters(path, self.filters):
-                self.current_filter_file = path; self.filters_modified = False; self.update_window_title(); self.toast.show_message("Saved", type_str="success")
+            if self.filter_controller.save_to_file(path):
+                self.update_window_title()
+                self.toast.show_message("Saved", type_str="success")
+                return True
+        return False
 
     def export_notes_to_text(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export Notes", self.settings.value("last_note_export_dir", ""), "Text (*.txt);;All (*)")
@@ -1728,45 +1743,7 @@ class MainWindow(QMainWindow):
         if not self.current_engine: return
         self.show_busy()
         try:
-            start_time = time.time()
-            was_calculated = False
-            if self.filters_dirty_cache:
-                rust_f = [(f["text"], f["is_regex"], f["is_exclude"], False, i) for i, f in enumerate(self.filters) if f["enabled"]]
-                try:
-                    res = self.current_engine.filter(rust_f)
-                    self.cached_filter_results = (res, rust_f); self.filters_dirty_cache = False
-                    
-                    # Cache the result for the current file
-                    if self.current_log_path:
-                        if self.current_log_path not in self.log_states:
-                            self.log_states[self.current_log_path] = {}
-                        self.log_states[self.current_log_path]["filter_cache"] = (res, rust_f)
-
-                    was_calculated = True
-                except: return
-            if self.cached_filter_results:
-                res, rust_f = self.cached_filter_results
-                tag_codes, filtered_indices, subset_counts = res[0], res[1], res[2]
-                for j, rf in enumerate(rust_f):
-                    if j < len(subset_counts): self.filters[rf[4]]["hits"] = subset_counts[j]
-                palette = {j+2: (adjust_color_for_theme(self.filters[rf[4]]["fg_color"], False, self.is_dark_mode),
-                                 adjust_color_for_theme(self.filters[rf[4]]["bg_color"], True, self.is_dark_mode))
-                           for j, rf in enumerate(rust_f)}
-                self.model.update_filter_result(tag_codes, palette, filtered_indices if self.show_filtered_only else None)
-                self.update_scrollbar_range()
-                if not force_color_update:
-                    self.refresh_filter_tree()
-                    elapsed = time.time() - start_time
-                    count = len(filtered_indices) if filtered_indices else 0
-                    if self.show_filtered_only:
-                         self.toast.show_message(f"Filtered: {count:,} lines ({elapsed:.3f}s)")
-                    elif was_calculated: # Only show if we actually recalculated
-                         self.toast.show_message(f"Filters updated ({elapsed:.3f}s)")
-                self.update_status_bar(f"Shows {len(filtered_indices if self.show_filtered_only else range(self.current_engine.line_count())):,} lines")
-                
-                # Update Badge
-                enabled_count = sum(1 for f in self.filters if f["enabled"])
-                self.btn_side_filter.set_badge(enabled_count)
+            self.filter_controller.apply_filters(self.current_engine)
         finally:
             self.hide_busy()
 

@@ -1,5 +1,6 @@
 from PySide6.QtCore import QObject, Signal, QTimer
 from .engine_wrapper import get_engine
+from .utils import load_tat_filters, save_tat_filters
 import os
 import time
 import bisect
@@ -108,3 +109,105 @@ class LogController(QObject):
             else:
                 return None
         return self.search_results[idx]
+
+class FilterController(QObject):
+    filters_changed = Signal() # Filters list changed (add/remove/reorder)
+    filter_results_ready = Signal(object, object) # results (tuple), rust_filters (list)
+    
+    def __init__(self):
+        super().__init__()
+        self.filters = []
+        self.filters_dirty_cache = True
+        self.cached_filter_results = None
+        self.current_filter_file = None
+        self.filters_modified = False
+
+    def add_filter(self, filter_data):
+        # Ensure hits is 0
+        filter_data["hits"] = 0
+        self.filters.append(filter_data)
+        self.invalidate_cache()
+        self.filters_changed.emit()
+
+    def update_filter(self, index, filter_data):
+        if 0 <= index < len(self.filters):
+            self.filters[index].update(filter_data)
+            self.invalidate_cache()
+            self.filters_changed.emit()
+
+    def remove_filter(self, index):
+        if 0 <= index < len(self.filters):
+            del self.filters[index]
+            self.invalidate_cache()
+            self.filters_changed.emit()
+            
+    def move_filter(self, from_index, to_index):
+        if 0 <= from_index < len(self.filters) and 0 <= to_index < len(self.filters):
+            item = self.filters.pop(from_index)
+            self.filters.insert(to_index, item)
+            self.invalidate_cache()
+            self.filters_changed.emit()
+
+    def set_filters(self, new_filters):
+        self.filters = new_filters
+        self.invalidate_cache()
+        self.filters_changed.emit()
+
+    def set_cache(self, cache):
+        """Restores a previously calculated filter result cache."""
+        self.cached_filter_results = cache
+        self.filters_dirty_cache = False
+
+    def toggle_filter(self, index, enabled):
+        if 0 <= index < len(self.filters):
+            if self.filters[index]["enabled"] != enabled:
+                self.filters[index]["enabled"] = enabled
+                self.invalidate_cache()
+                self.filters_changed.emit()
+
+    def invalidate_cache(self, mark_modified=True):
+        self.filters_dirty_cache = True
+        if mark_modified:
+            self.filters_modified = True
+
+    def apply_filters(self, engine):
+        if not engine: return
+        
+        if self.filters_dirty_cache:
+            rust_f = [(f["text"], f["is_regex"], f["is_exclude"], False, i) for i, f in enumerate(self.filters) if f["enabled"]]
+            try:
+                res = engine.filter(rust_f)
+                self.cached_filter_results = (res, rust_f)
+                self.filters_dirty_cache = False
+                
+                # Update hits locally
+                # res[2] is subset_counts
+                subset_counts = res[2]
+                for j, rf in enumerate(rust_f):
+                    original_idx = rf[4]
+                    if j < len(subset_counts):
+                        self.filters[original_idx]["hits"] = subset_counts[j]
+                
+                self.filter_results_ready.emit(res, rust_f)
+            except Exception as e:
+                print(f"Filter error: {e}")
+        elif self.cached_filter_results:
+            self.filter_results_ready.emit(*self.cached_filter_results)
+
+    def load_from_file(self, filepath):
+        loaded = load_tat_filters(filepath)
+        if loaded:
+            self.filters = loaded
+            self.current_filter_file = filepath
+            self.filters_modified = False
+            self.filters_dirty_cache = True
+            self.filters_changed.emit()
+            return True
+        return False
+
+    def save_to_file(self, filepath):
+        if save_tat_filters(filepath, self.filters):
+            self.current_filter_file = filepath
+            self.filters_modified = False
+            return True
+        return False
