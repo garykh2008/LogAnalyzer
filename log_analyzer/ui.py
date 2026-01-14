@@ -1250,7 +1250,13 @@ class MainWindow(QMainWindow):
         root = self.log_tree.invisibleRootItem()
         for i in range(root.childCount()):
             item = root.child(i)
-            new_order.append(item.data(0, Qt.UserRole))
+            path = item.data(0, Qt.UserRole)
+            new_order.append(path)
+            
+            # Ensure highlight follows the current log file
+            if self.current_log_path and path == self.current_log_path:
+                self.log_tree.setCurrentItem(item)
+
         self.log_controller.log_order = new_order
 
     def on_log_tree_clicked(self, item, column):
