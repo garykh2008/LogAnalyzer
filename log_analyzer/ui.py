@@ -1067,6 +1067,10 @@ class MainWindow(QMainWindow):
         # Reset badges
         self.btn_side_notes.set_badge(0)
         self.btn_side_filter.set_badge(0)
+        
+        # Reset Filter Hits
+        self.filter_controller.reset_hits()
+        self.refresh_filter_tree()
 
         self.welcome_widget.show()
         self.central_stack.setCurrentIndex(0)

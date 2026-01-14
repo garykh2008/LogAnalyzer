@@ -310,6 +310,12 @@ class FilterDelegate(QStyledItemDelegate):
                 painter.fillRect(option.rect, overlay)
 
             # 3. Draw default content
+            super().paint(painter, option, index)
+
+            # 4. Draw Bottom Border
+            painter.setPen(self.border_color)
+            painter.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
+
         finally:
             painter.restore()
 

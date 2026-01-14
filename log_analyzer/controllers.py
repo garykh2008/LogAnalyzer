@@ -172,6 +172,22 @@ class FilterController(QObject):
         """Restores a previously calculated filter result cache."""
         self.cached_filter_results = cache
         self.filters_dirty_cache = False
+        
+        # Restore hits from cache
+        if cache:
+            res, rust_f = cache
+            # res: (tag_codes, filtered_indices, subset_counts, ...)
+            if len(res) > 2:
+                subset_counts = res[2]
+                for j, rf in enumerate(rust_f):
+                    original_idx = rf[4]
+                    if j < len(subset_counts):
+                        self.filters[original_idx]["hits"] = subset_counts[j]
+
+    def reset_hits(self):
+        for f in self.filters:
+            f["hits"] = 0
+        self.invalidate_cache(mark_modified=False)
 
     def toggle_filter(self, index, enabled):
         if 0 <= index < len(self.filters):
