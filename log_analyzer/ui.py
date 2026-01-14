@@ -169,6 +169,8 @@ class MainWindow(QMainWindow):
         self.model.set_notes_ref(self.notes_manager.notes)
         self.notes_manager.notes_updated.connect(self.on_notes_updated)
         self.notes_manager.navigation_requested.connect(self.jump_to_raw_index)
+        self.notes_manager.export_requested.connect(self.export_notes_to_text)
+        self.notes_manager.message_requested.connect(lambda msg, t="info": self.toast.show_message(msg, type_str=t))
 
         self.list_view.setUniformItemSizes(False) # Allow variable widths for horizontal scrolling
 
@@ -966,7 +968,7 @@ class MainWindow(QMainWindow):
         self.notes_manager.notes.clear()
         self.notes_manager.dirty_files.clear() # Reset dirty state
         self.notes_manager.loaded_files.clear() # Reset loaded state
-        self.notes_manager.refresh_list()
+        self.notes_manager.set_current_log_path(None)
         
         # Reset badges
         self.btn_side_notes.set_badge(0)
@@ -1056,6 +1058,7 @@ class MainWindow(QMainWindow):
         self.model.set_engine(self.current_engine, filepath)
         
         self.notes_manager.load_notes_for_file(filepath)
+        self.notes_manager.set_current_log_path(filepath)
         count = self.current_engine.line_count()
         self.delegate.set_max_line_number(count)
         self.update_window_title()
@@ -1579,7 +1582,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Export Notes", self.settings.value("last_note_export_dir", ""), "Text (*.txt);;All (*)")
         if path:
             self.settings.setValue("last_note_export_dir", os.path.dirname(path))
-            self.notes_manager.export_to_text(path)
+            self.notes_manager.export_to_text(path, self.current_engine)
 
     def update_window_title(self):
         p = [os.path.basename(self.current_log_path)] if self.current_log_path else []

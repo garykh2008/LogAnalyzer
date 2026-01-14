@@ -7,9 +7,9 @@
     - [x] Extract inline QSS from `ui.py` to centralized templates.
     - [x] Refactor `MainWindow.apply_theme` to use `ThemeManager`.
     - [ ] Standardize fonts (Inter for UI, JetBrains Mono/Consolas for Logs).
-- [ ] **Decouple NotesManager**:
-    - [ ] Remove `main_window` dependency from `NotesManager`.
-    - [ ] Implement Signals/Slots for Note updates.
+- [x] **Decouple NotesManager**:
+    - [x] Remove `main_window` dependency from `NotesManager`.
+    - [x] Implement Signals/Slots for Note updates.
 
 ## Phase 2: Visual Polishing
 - [ ] **Palette Refinement**:

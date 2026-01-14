@@ -31,7 +31,9 @@ class NoteLineDelegate(QStyledItemDelegate):
             painter.drawLine(r.left(), r.bottom(), r.right(), r.bottom())
             
             painter.setPen(self.fg_color)
-            painter.drawText(option.rect, Qt.AlignCenter, str(index.data()))
+            # Add small horizontal padding
+            text_rect = option.rect.adjusted(5, 0, -5, 0)
+            painter.drawText(text_rect, Qt.AlignCenter, str(index.data()))
         else:
             super().paint(painter, option, index)
 
@@ -79,11 +81,14 @@ class NotesManager(QObject):
     # Signals to notify MainWindow to refresh view (e.g. highlight lines)
     notes_updated = Signal()
     navigation_requested = Signal(int) # raw_index
+    export_requested = Signal()
+    message_requested = Signal(str, str) # message, type_str (optional)
 
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
         self.notes = {} # {(filepath, raw_index): content}
+        self.current_log_path = None
         self.is_dark_mode = True
         self.dirty_files = set()
         self.loaded_files = set()
@@ -91,7 +96,7 @@ class NotesManager(QObject):
         self.setup_ui()
 
     def setup_ui(self):
-        self.dock = QDockWidget("Notes", self.main_window)
+        self.dock = QDockWidget("Notes", self.parent)
         self.dock.setObjectName("NotesDock")
         self.dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
         
@@ -116,7 +121,7 @@ class NotesManager(QObject):
         self.btn_export = QToolButton()
         self.btn_export.setToolTip("Export Notes to Text...")
         self.btn_export.setFixedSize(26, 26)
-        self.btn_export.clicked.connect(lambda: self.main_window.export_notes_to_text())
+        self.btn_export.clicked.connect(self.export_requested.emit)
         
         title_layout.addWidget(self.title_label)
         title_layout.addStretch()
@@ -139,8 +144,8 @@ class NotesManager(QObject):
         self.tree.setIndentation(0)
         
         # Column resizing
-        self.tree.header().setSectionResizeMode(0, QHeaderView.Fixed)
-        self.tree.header().resizeSection(0, 50) # Fixed width for line numbers
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.tree.header().setMinimumSectionSize(60)
         self.tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
 
         self.tree.itemDoubleClicked.connect(self.on_item_double_clicked)
@@ -150,8 +155,12 @@ class NotesManager(QObject):
         layout.addWidget(self.tree)
 
         self.dock.setWidget(container)
-        self.main_window.addDockWidget(Qt.RightDockWidgetArea, self.dock)
+        # Dock addition is handled by the parent (MainWindow)
         self.dock.hide()
+
+    def set_current_log_path(self, path):
+        self.current_log_path = path
+        self.refresh_list()
 
     def set_theme(self, is_dark):
         self.is_dark_mode = is_dark
@@ -237,10 +246,9 @@ class NotesManager(QObject):
 
     def quick_save(self):
         """Saves notes for the current active file only."""
-        log_filepath = self.main_window.current_log_path
-        if not log_filepath: return
-        self._save_file_notes(log_filepath)
-        self.main_window.toast.show_message(f"Notes saved for current file")
+        if not self.current_log_path: return
+        self._save_file_notes(self.current_log_path)
+        self.message_requested.emit(f"Notes saved for current file", "success")
 
     def save_all_notes(self):
         """Saves all unsaved notes for all loaded files."""
@@ -256,7 +264,7 @@ class NotesManager(QObject):
                 success = False
         
         if success:
-            self.main_window.toast.show_message("All notes saved")
+            self.message_requested.emit("All notes saved", "success")
         return success
 
     def _save_file_notes(self, log_filepath):
@@ -292,13 +300,12 @@ class NotesManager(QObject):
             print(f"Error saving notes for {log_filepath}: {e}")
             return False
 
-    def export_to_text(self, filepath):
-        current_fp = self.main_window.current_log_path
-        if not current_fp or not filepath: return
+    def export_to_text(self, filepath, engine=None):
+        if not self.current_log_path or not filepath: return
 
         file_notes = []
         for (fp, idx), content in self.notes.items():
-            if fp == current_fp:
+            if fp == self.current_log_path:
                 file_notes.append((idx, content))
         file_notes.sort(key=lambda x: x[0])
 
@@ -308,8 +315,8 @@ class NotesManager(QObject):
                 
                 for idx, content in file_notes:
                     ts = ""
-                    if self.main_window.current_engine:
-                        line = self.main_window.current_engine.get_line(idx)
+                    if engine:
+                        line = engine.get_line(idx)
                         if line:
                             match = ts_pattern.search(line)
                             if match: ts = match.group(1)
@@ -317,15 +324,22 @@ class NotesManager(QObject):
                     clean_content = content.replace("\n", " ")
                     f.write(f"{idx + 1}\t{ts}\t{clean_content}\n")
             
-            self.main_window.toast.show_message(f"Exported to {os.path.basename(filepath)}")
+            self.message_requested.emit(f"Exported to {os.path.basename(filepath)}", "success")
         except Exception as e:
-            ModernMessageBox.critical(self.main_window, "Error", f"Export failed: {e}")
+            # We can emit an error signal or just use print for now, or assume parent is QWidget for MessageBox
+            if self.parent:
+                 ModernMessageBox.critical(self.parent, "Error", f"Export failed: {e}")
+            else:
+                 print(f"Export failed: {e}")
 
     def add_note(self, raw_index, timestamp, filepath):
+        if not filepath and self.current_log_path:
+             filepath = self.current_log_path
+             
         key = (filepath, raw_index)
         current_text = self.notes.get(key, "")
         
-        dialog = NoteDialog(self.main_window, current_text, raw_index + 1)
+        dialog = NoteDialog(self.parent, current_text, raw_index + 1)
         
         if dialog.exec():
             content = dialog.note_content
@@ -335,7 +349,6 @@ class NotesManager(QObject):
                 if key in self.notes:
                     del self.notes[key]
             
-            self.notes_dirty = True
             self.dirty_files.add(filepath)
             self.refresh_list()
             self.notes_updated.emit()
@@ -344,29 +357,29 @@ class NotesManager(QObject):
         key = (filepath, raw_index)
         if key in self.notes:
             del self.notes[key]
-            self.notes_dirty = True
             self.dirty_files.add(filepath)
             self.refresh_list()
             self.notes_updated.emit()
 
     def refresh_list(self):
         self.tree.clear()
-        current_fp = self.main_window.current_log_path
-        if not current_fp: return
+        if not self.current_log_path: return
 
         file_notes = []
         for (fp, idx), content in self.notes.items():
-            if fp == current_fp:
+            if fp == self.current_log_path:
                 file_notes.append((idx, content))
         
         file_notes.sort(key=lambda x: x[0])
 
         ts_pattern = re.compile(r'(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b)')
+        
+        engine = getattr(self.parent, 'current_engine', None)
 
         for idx, content in file_notes:
             ts = ""
-            if self.main_window.current_engine:
-                line = self.main_window.current_engine.get_line(idx)
+            if engine:
+                line = engine.get_line(idx)
                 if line:
                     match = ts_pattern.search(line)
                     if match: ts = match.group(1)
@@ -393,11 +406,11 @@ class NotesManager(QObject):
         icon_color = "#d4d4d4" if self.is_dark_mode else "#333333"
         
         edit_action = QAction(get_svg_icon("edit", icon_color), "Edit Note", self.tree)
-        edit_action.triggered.connect(lambda: self.add_note(idx, "", self.main_window.current_log_path))
+        edit_action.triggered.connect(lambda: self.add_note(idx, "", self.current_log_path))
         menu.addAction(edit_action)
         
         del_action = QAction(get_svg_icon("trash", icon_color), "Delete Note", self.tree)
-        del_action.triggered.connect(lambda: self.delete_note(idx, self.main_window.current_log_path))
+        del_action.triggered.connect(lambda: self.delete_note(idx, self.current_log_path))
         menu.addAction(del_action)
         
         menu.exec_(self.tree.mapToGlobal(pos))
