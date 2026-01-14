@@ -8,6 +8,7 @@ from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QCurso
 from PySide6.QtCore import Qt, QSettings, QTimer, Slot, QModelIndex, QEvent, QPropertyAnimation, QSize, QItemSelectionModel, QRect
 from .models import LogModel
 from .theme_manager import ThemeManager
+from .controllers import LogController
 from .engine_wrapper import get_engine
 from .toast import Toast
 from .delegates import LogDelegate, FilterDelegate
@@ -127,12 +128,14 @@ class MainWindow(QMainWindow):
         self.update_window_title()
 
         # --- Multi-Log Management ---
-        self.loaded_logs = {} # {path: engine}
-        self.log_order = [] # Ordered paths
+        self.log_controller = LogController()
+        self.log_controller.log_loaded.connect(self.on_log_loaded)
+        self.log_controller.log_closed.connect(self.on_log_closed)
+        self.log_controller.search_results_ready.connect(self.on_search_results_ready)
+        
         self.log_states = {} # {path: {"scroll": val, "selected_raw": idx}}
-        self.current_active_log = None # Selected path or MERGED_VIEW_ID
+        # self.current_active_log = None # Deprecated, tracked by controller
 
-        self.current_engine = None
         self.search_results = []
         self.current_match_index = -1
         self.search_history = []
@@ -520,6 +523,18 @@ class MainWindow(QMainWindow):
         self.apply_line_spacing(self.config.editor_line_spacing)
 
         self.apply_theme()
+
+    @property
+    def current_engine(self):
+        return self.log_controller.current_engine
+
+    @property
+    def loaded_logs(self):
+        return self.log_controller.loaded_logs
+
+    @property
+    def log_order(self):
+        return self.log_controller.log_order
 
     def open_preferences(self):
         dialog = PreferencesDialog(self)
@@ -980,11 +995,9 @@ class MainWindow(QMainWindow):
                 return
 
         # 2. Proceed with clearing
-        self.loaded_logs.clear()
-        self.log_order.clear()
+        self.log_controller.clear_all_logs()
         self.log_states.clear()
         self.update_log_tree()
-        self.current_engine = None
         self.current_log_path = None
         self.model.set_engine(None)
         
@@ -1001,6 +1014,9 @@ class MainWindow(QMainWindow):
         self.welcome_widget.show()
         self.central_stack.setCurrentIndex(0)
         self.update_window_title()
+        self.update_status_bar("Ready")
+        if hasattr(self, 'status_pos_label'):
+            self.status_pos_label.setText("Ln 0")
 
     def update_recent_menu(self):
         self.recent_menu.clear()
@@ -1034,36 +1050,73 @@ class MainWindow(QMainWindow):
         self.settings.setValue("recent_files", [])
         self.update_recent_menu()
 
-    def load_log(self, filepath, is_multiple=False):
-        if not filepath or not os.path.exists(filepath): return
-        
-        # Check for unsaved notes before loading/switching if needed (optional)
-        
-        filepath = os.path.abspath(filepath)
-        if filepath in self.loaded_logs:
-            # Just switch if already loaded
-            self._switch_to_log(filepath)
-            return
-
-        self.add_to_recent(filepath)
+    def on_log_loaded(self, filepath):
         self.central_stack.setCurrentIndex(1)
         self.welcome_widget.hide()
-        
-        self.update_status_bar(f"Loading {filepath}...")
-        self.show_busy()
-        start_time = time.time()
-        self.settings.setValue("last_dir", os.path.dirname(filepath))
-        
-        engine = get_engine(filepath)
-        self.loaded_logs[filepath] = engine
-        self.log_order.append(filepath)
         
         self.update_log_tree()
         self._switch_to_log(filepath)
         
-        count = engine.line_count()
-        self.toast.show_message(f"Loaded {count:,} lines in {time.time()-start_time:.3f}s", duration=4000, type_str="success")
+        count = self.current_engine.line_count()
+        self.toast.show_message(f"Loaded {count:,} lines", duration=4000, type_str="success")
         self.hide_busy()
+
+    def on_log_closed(self, filepath):
+        if filepath in self.log_states: del self.log_states[filepath]
+        self.update_log_tree()
+        
+        # If no logs left, clear UI
+        if not self.loaded_logs:
+            self._clear_all_logs(check_unsaved=False)
+        else:
+            # Switch to the new current log (controller already updated current_log_path)
+            if self.log_controller.current_log_path:
+                self._switch_to_log(self.log_controller.current_log_path)
+
+    def on_search_results_ready(self, results, query):
+        self.search_results = results
+        # Assuming is_case from overlay, or passed via signal? 
+        # For now, let's just get it from overlay since controller handled the search
+        is_case = self.search_overlay.btn_case.isChecked()
+        self.delegate.set_search_query(query, is_case)
+        self.list_view.viewport().update()
+        
+        total_lines = len(self.model.filtered_indices) if self.show_filtered_only and self.model.filtered_indices else self.current_engine.line_count()
+        self.v_scrollbar.set_search_results(self.search_results, total_lines)
+        
+        if results: 
+            # Logic to jump to first result? 
+            # Controller has find_next/prev logic, but UI needs to handle "Jump to first match after search"
+            idx = bisect.bisect_left(results, self.selected_raw_index)
+            if idx >= len(results): idx = 0
+            
+            keep_focus = self.search_overlay.input.hasFocus()
+            self._jump_to_match(idx, focus_list=not keep_focus)
+        else: 
+            self.search_overlay.set_results_info("No results")
+
+    def load_log(self, filepath, is_multiple=False):
+        if not filepath or not os.path.exists(filepath): return
+        
+        filepath = os.path.abspath(filepath)
+        
+        if filepath in self.loaded_logs:
+            self.log_controller.set_current_log(filepath)
+            self._switch_to_log(filepath)
+            return
+
+        self.add_to_recent(filepath)
+        self.update_status_bar(f"Loading {filepath}...")
+        self.show_busy()
+        self.settings.setValue("last_dir", os.path.dirname(filepath))
+        
+        # Use QTimer to allow UI to render the busy state before blocking load
+        QTimer.singleShot(10, lambda: self._execute_load(filepath))
+
+    def _execute_load(self, filepath):
+        if not self.log_controller.load_log(filepath):
+            self.hide_busy()
+            self.toast.show_message(f"Failed to load {filepath}", type_str="error")
 
     def _switch_to_log(self, filepath):
         if filepath not in self.loaded_logs: return
@@ -1077,8 +1130,9 @@ class MainWindow(QMainWindow):
                 "selected_raw": self.selected_raw_index
             })
 
+        self.log_controller.set_current_log(filepath)
         self.current_log_path = filepath
-        self.current_engine = self.loaded_logs[filepath]
+        # self.current_engine is now a property, no assignment needed
         self.model.set_engine(self.current_engine, filepath)
         
         self.notes_manager.load_notes_for_file(filepath)
@@ -1162,7 +1216,7 @@ class MainWindow(QMainWindow):
         for i in range(root.childCount()):
             item = root.child(i)
             new_order.append(item.data(0, Qt.UserRole))
-        self.log_order = new_order
+        self.log_controller.log_order = new_order
 
     def on_log_tree_clicked(self, item, column):
         if not item: return
@@ -1202,13 +1256,8 @@ class MainWindow(QMainWindow):
                     return
 
             self.notes_manager.close_file(filepath)
-            del self.loaded_logs[filepath]
-            self.log_order.remove(filepath)
-            if filepath in self.log_states: del self.log_states[filepath]
-            self.update_log_tree()
-            if self.current_log_path == filepath:
-                if self.log_order: self._switch_to_log(self.log_order[0])
-                else: self._clear_all_logs(check_unsaved=False)
+            self.log_controller.close_log(filepath)
+            # UI updates via on_log_closed signal
 
     def show_context_menu(self, pos):
         menu = QMenu(self)
@@ -1329,17 +1378,20 @@ class MainWindow(QMainWindow):
         self._jump_to_match(idx, focus_list=not keep_focus)
 
     def _perform_search(self, query, is_case=None):
-        if not query or not self.current_engine: return
         if is_case is None:
             is_case = self.search_overlay.btn_case.isChecked()
-            
-        results = self.current_engine.search(query, False, is_case)
-        
+        self.log_controller.search(query, is_case)
+
+    def on_search_results_ready(self, results, query):
+        # Filter results if needed
         if self.show_filtered_only and self.model.filtered_indices:
             visible_set = set(self.model.filtered_indices)
             results = [r for r in results if r in visible_set]
-            
+
         self.search_results = results
+        
+        # Get case sensitivity from overlay as it's the source of truth for UI state
+        is_case = self.search_overlay.btn_case.isChecked()
         self.delegate.set_search_query(query, is_case)
         self.list_view.viewport().update()
         
@@ -1829,10 +1881,15 @@ class MainWindow(QMainWindow):
             
         if not hasattr(self, 'status_mode_label'): return
         
+        total_count = self.current_engine.line_count() if self.current_engine else 0
+        
+        if not self.current_engine:
+            self.status_mode_label.setText("No Log")
+            self.status_count_label.setText("0 lines")
+            return
+
         mode_text = "Filtered" if self.show_filtered_only else "Full Log"
         self.status_mode_label.setText(mode_text)
-        
-        total_count = self.current_engine.line_count() if self.current_engine else 0
         
         if self.show_filtered_only:
             filtered_count = len(self.model.filtered_indices) if self.model.filtered_indices else 0
