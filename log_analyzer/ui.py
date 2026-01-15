@@ -144,6 +144,7 @@ class MainWindow(QMainWindow):
         self.selected_raw_index = -1
         self.is_scrolling = False
         self._suppress_search_jump = False
+        self._pending_view_switch_jump = False
 
         # Dock Configuration
         if sys.platform == "linux":
@@ -592,6 +593,12 @@ class MainWindow(QMainWindow):
         # Refresh tree to show hit counts (controller updated them)
         self.refresh_filter_tree()
 
+        # Restore scroll position if this update was triggered by a view switch
+        if self._pending_view_switch_jump:
+            if self.selected_raw_index != -1:
+                self.jump_to_raw_index(self.selected_raw_index, focus_list=False)
+            self._pending_view_switch_jump = False
+
     def apply_editor_font(self, family, size):
         # Update via stylesheet to override global app stylesheet inheritance
         self.list_view.setStyleSheet(f"font-family: \"{family}\"; font-size: {size}pt;")
@@ -754,6 +761,7 @@ class MainWindow(QMainWindow):
 
     def toggle_show_filtered_only(self):
         self.show_filtered_only = self.show_filtered_action.isChecked()
+        self._pending_view_switch_jump = True
         self.recalc_filters()
 
         mode_str = "Filtered View" if self.show_filtered_only else "Full Log View"
