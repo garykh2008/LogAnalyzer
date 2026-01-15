@@ -85,7 +85,7 @@ class GoToLineDialog(ModernDialog):
 
 
 class MainWindow(QMainWindow):
-    VERSION = "V2.0"
+    VERSION = "V2.1"
     APP_NAME = "Log Analyzer"
 
     def __init__(self):

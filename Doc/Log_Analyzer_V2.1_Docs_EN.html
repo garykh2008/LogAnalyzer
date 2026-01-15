@@ -4,7 +4,7 @@
 	<head>
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>Log Analyzer Documentation ( V2.0 )</title>
+		<title>Log Analyzer Documentation ( V2.1 )</title>
 		
 <style>
 	body {
@@ -48,17 +48,19 @@
 <li><a href="#status-bar-bottom">Status Bar (Bottom)</a></li>
 <li><a href="#notification-system-toasts">Notification System (Toasts)</a></li>
 <li><a href="#shortcuts">Shortcuts</a></li>
+<li><a href="#preferences">Preferences</a></li>
 </ul>
 </li>
 <li><a href="#4-release-notes">4. Release Notes</a><ul>
+<li><a href="#version-21-2026-01-15">Version 2.1 (2026-01-15)</a></li>
 <li><a href="#version-20-2026-01-12">Version 2.0 (2026-01-12)</a></li>
 </ul>
 </li>
 </ul>
 <hr />
 <h2 id="1-introduction">1. Introduction</h2>
-<p><strong>Log Analyzer V2.0</strong> represents a complete architectural overhaul, transitioning from the legacy Tkinter framework to the modern, industrial-grade <strong>Qt (PySide6)</strong> ecosystem. </p>
-<p>Designed for high-performance log analysis, V2.0 introduces a <strong>Virtual Viewport</strong> rendering engine capable of displaying millions of log lines with zero lag, a fully customizable <strong>Docking UI</strong>, and a refined user experience powered by a high-speed Rust filtering core.</p>
+<p><strong>Log Analyzer V2.1</strong> builds upon the robust Qt architecture of V2.0, focusing on refined modularity, customizable user preferences, and a polished visual experience.</p>
+<p>Designed for high-performance log analysis, it continues to leverage the <strong>Virtual Viewport</strong> and Rust-powered filtering while introducing a centralized <strong>Theme Manager</strong> and a dedicated <strong>Preferences</strong> system.</p>
 <h2 id="2-key-features">2. Key Features</h2>
 <h3 id="next-gen-performance">🚀 Next-Gen Performance</h3>
 <ul>
@@ -72,12 +74,17 @@
 <li><em>Note: On Linux, a simplified fixed-layout mode is used to ensure maximum stability.</em></li>
 </ul>
 </li>
-<li><strong>Professional Theming</strong>: Polished <strong>Dark Mode</strong> and <strong>Light Mode</strong> with consistent styling across all components, including a custom frameless title bar.</li>
-<li><strong>Distinct Line Gutter</strong>: A dedicated line number area with its own background color, visually separated from the content for better readability.</li>
+<li><strong>Refined Visuals</strong>: <ul>
+<li><strong>Flat Menu Design</strong>: Modern, frameless menus with rounded corners and optimized spacing.</li>
+<li><strong>Layered Theming</strong>: Polished Dark/Light modes with better contrast and visual hierarchy.</li>
+</ul>
+</li>
+<li><strong>Customization</strong>: A new <strong>Preferences Dialog</strong> allows you to adjust UI font sizes, editor fonts, and line spacing to suit your display setup.</li>
 </ul>
 <h3 id="advanced-visualization">📊 Advanced Visualization</h3>
 <ul>
 <li><strong>Scrollbar Minimap (Heatmap)</strong>: The vertical scrollbar track now displays color-coded markers (orange/yellow) indicating the distribution of search results across the entire file.</li>
+<li><strong>Zooming</strong>: Quickly adjust the log view font size using <strong>Ctrl + Wheel</strong>.</li>
 <li><strong>Density View</strong>: Provides a high-level overview of where matches are concentrated, allowing you to jump to interesting sections instantly.</li>
 </ul>
 <h3 id="intelligent-search-navigation">🔍 Intelligent Search &amp; Navigation</h3>
@@ -167,6 +174,10 @@
 <td style="text-align: left;">Navigate Filter Hits (Selected Filter)</td>
 </tr>
 <tr>
+<td style="text-align: left;"><strong>Ctrl + Wheel</strong></td>
+<td style="text-align: left;">Zoom Log View In / Out</td>
+</tr>
+<tr>
 <td style="text-align: left;"><strong>Double-Click</strong> (Log)</td>
 <td style="text-align: left;">Create Filter from selected text</td>
 </tr>
@@ -180,7 +191,42 @@
 </tr>
 </tbody>
 </table>
+<h3 id="preferences">Preferences</h3>
+<p>Access via the <strong>Settings (Gear)</strong> icon at the bottom of the Activity Bar.</p>
+<ul>
+<li><strong>General</strong>: <ul>
+<li><strong>Theme</strong>: Toggle between Dark and Light modes.</li>
+<li><strong>Reset to Defaults</strong>: Restore all application settings to their original state.</li>
+</ul>
+</li>
+<li><strong>Editor</strong>:<ul>
+<li><strong>Font</strong>: Select your preferred monospaced font for log viewing.</li>
+<li><strong>Font Size</strong>: Set the base font size.</li>
+<li><strong>Line Spacing</strong>: Adjust the vertical density of log lines.</li>
+<li><strong>Show Line Numbers</strong>: Toggle the gutter display.</li>
+</ul>
+</li>
+<li><strong>UI</strong>:<ul>
+<li><strong>Font Family</strong>: Customize the font used for menus, dialogs, and sidebars.</li>
+<li><strong>Font Size</strong>: Scale the entire application UI for better readability on high-DPI screens.</li>
+</ul>
+</li>
+</ul>
 <h2 id="4-release-notes">4. Release Notes</h2>
+<h3 id="version-21-2026-01-15">Version 2.1 (2026-01-15)</h3>
+<p><strong>Structural Refactoring</strong>
+*   <strong>MVC Architecture</strong>: Successfully decoupled business logic from the UI by extracting dedicated controllers (<code>LogController</code>, <code>FilterController</code>, <code>SearchController</code>), significantly improving code maintainability.
+*   <strong>Centralized Theming</strong>: Introduced <code>ThemeManager</code> to unify color palettes and QSS generation, facilitating easier theme adjustments and consistent styling across all dialogs.</p>
+<p><strong>New Features</strong>
+*   <strong>Preferences System</strong>: A comprehensive settings dialog allowing users to customize:
+    *   <strong>UI Scalability</strong>: Dynamic adjustment of UI font size and family.
+    *   <strong>Editor Appearance</strong>: Configurable line spacing and editor fonts.
+    *   <strong>System Controls</strong>: "Reset to Defaults" functionality.
+*   <strong>Zooming Support</strong>: Added <code>Ctrl + Wheel</code> shortcut for quick font size scaling in the Log View.</p>
+<p><strong>UI/UX Polish</strong>
+*   <strong>Modern Menu Design</strong>: Completely redesigned menus with a flat, frameless aesthetic, rounded corners, and optimized spacing for a cleaner look.
+*   <strong>Interactive Status Bar</strong>: Transformed the status bar into a functional command center with clickable sections for View Mode and Line Jump.
+*   <strong>Visual Refinements</strong>: Enhanced dark/light mode palettes with better contrast and layered backgrounds.</p>
 <h3 id="version-20-2026-01-12">Version 2.0 (2026-01-12)</h3>
 <p><strong>Major Architecture Overhaul</strong>
 *   <strong>Qt (PySide6) Transition</strong>: Completely rebuilt the UI for superior stability and native performance.
