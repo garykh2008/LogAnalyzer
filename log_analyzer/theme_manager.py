@@ -134,6 +134,13 @@ class ThemeManager:
     def palette(self):
         return self.dark_palette if self.is_dark else self.light_palette
 
+    @staticmethod
+    def apply_menu_theme(menu):
+        """Applies consistent styling to menus for transparency and rounded corners."""
+        from PySide6.QtCore import Qt
+        menu.setWindowFlags(menu.windowFlags() | Qt.NoDropShadowWindowHint)
+        menu.setAttribute(Qt.WA_TranslucentBackground)
+
     def get_color(self, key: str) -> str:
         return self.palette.get(key, "#ff0000")
 
@@ -151,14 +158,66 @@ class ThemeManager:
 
         # Menu Style Template
         menu_style = f"""
-        QMenuBar {{ background-color: transparent; color: {p['titlebar_fg']}; border: none; padding: 0px; font-family: {ui_font}; }}
-        QMenuBar::item {{ background-color: transparent; padding: 5px 10px; border-radius: 4px; }}
-        QMenuBar::item:selected {{ background-color: {p['titlebar_hover']}; }}
-        QMenu {{ background-color: {p['menu_bg']}; color: {p['menu_fg']}; border: 1px solid {p['float_border']}; border-radius: 0px; padding: 4px; margin: 0px; font-family: {ui_font}; }}
-        QMenu::item {{ padding: 6px 25px 6px 20px; border-radius: 0px; margin: 1px 0px; }}
-        QMenu::item:selected {{ background-color: {p['menu_sel']}; color: {p['menu_sel_fg']}; }}
-        QMenu::separator {{ height: 1px; background: {p['float_border']}; margin: 4px 8px; }}
-        QToolTip {{ color: {p['fg_color']}; background-color: {p['menu_bg']}; border: 1px solid {p['float_border']}; padding: 5px; border-radius: 0px; }}
+        QMenuBar {{
+            background-color: transparent;
+            color: {p['titlebar_fg']};
+            padding: 2px;
+            font-family: {ui_font};
+            font-size: 10pt;
+        }}
+
+        QMenuBar::item {{
+            background-color: transparent;
+            padding: 6px 12px;
+            margin: 2px;
+            border-radius: 6px;
+        }}
+
+        QMenuBar::item:selected {{
+            background-color: {p['titlebar_hover']};
+            color: {p['titlebar_fg']};
+        }}
+
+        QMenu {{
+            background-color: {p['menu_bg']};
+            color: {p['menu_fg']};
+            border: 1px solid {p['float_border']};
+            border-radius: 2px;
+            padding: 4px;
+            margin: 4px;
+            font-family: {ui_font};
+        }}
+
+        QMenu::item {{
+            padding: 4px 30px 4px 24px;
+            border-radius: 4px;
+            margin: 2px 4px;
+        }}
+        QMenu::icon {{
+            margin-left: 8px;
+        }}
+        QMenu::right-arrow {{
+            right: 8px;
+        }}
+        QMenu::item:selected {{
+            background-color: {p['menu_sel']};
+            color: {p['menu_sel_fg']};
+        }}
+
+        QMenu::separator {{
+            height: 1px;
+            background: {p['float_border']};
+            margin: 6px 15px;
+            opacity: 0.5;
+        }}
+
+        QToolTip {{
+            color: {p['fg_color']};
+            background-color: {p['menu_bg']};
+            border: 1px solid {p['float_border']};
+            padding: 8px;
+            border-radius: 6px;
+        }}
         """
 
         # Checkbox SVG Logic
@@ -166,13 +225,13 @@ class ThemeManager:
 
         cb_style = f"""
         QCheckBox {{ spacing: 8px; }}
-        QCheckBox::indicator, QTreeView::indicator {{ 
-            width: 14px; height: 14px; border-radius: 3px; 
+        QCheckBox::indicator, QTreeView::indicator {{
+            width: 14px; height: 14px; border-radius: 3px;
             border: 1px solid {p['cb_border']}; background: {p['input_bg']}; margin: 0px; padding: 0px;
         }}
         QTreeView::indicator {{ subcontrol-origin: padding; subcontrol-position: center; }}
-        QCheckBox::indicator:checked, QTreeView::indicator:checked {{ 
-            background: {p['checkbox_active']}; 
+        QCheckBox::indicator:checked, QTreeView::indicator:checked {{
+            background: {p['checkbox_active']};
             image: url("{cb_svg}");
         }}
         QCheckBox::indicator:hover, QTreeView::indicator:hover {{ border: 1px solid {p['menu_sel']}; }}
@@ -186,69 +245,69 @@ class ThemeManager:
         QMainWindow::separator {{ background-color: transparent; width: 4px; }}
         QMainWindow::separator:hover {{ background-color: {p['float_border']}; }}
         QWidget {{ color: {p['fg_color']}; font-size: {font_size}px; }}
-        
+
         #activity_bar {{ background-color: {p['activity_bg']}; border: none; spacing: 10px; padding-top: 5px; }}
         #activity_bar QToolButton {{ background-color: transparent; border: none; border-left: 3px solid transparent; border-radius: 0px; margin: 0px; font-size: {font_size}px; }}
         #activity_bar QToolButton:hover {{ background-color: {p['hover_bg']}; }}
         #activity_bar QToolButton:checked {{ border-left: 3px solid {p['bar_bg']}; background-color: {p['sidebar_bg']}; }}
         #activity_bar QToolButton:checked QLabel {{ color: #ffffff; }}
-        
+
         QDockWidget#FilterDock, QDockWidget#NotesDock, QDockWidget#LogListDock {{ color: {p['fg_color']}; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; titlebar-close-icon: none; titlebar-normal-icon: none; border-bottom: 1px solid {p['float_border']}; }}
         QDockWidget#FilterDock::title, QDockWidget#NotesDock::title, QDockWidget#LogListDock::title {{ background: {p['sidebar_bg']}; padding: 10px; border: none; }}
         #FilterDock QWidget, #NotesDock QWidget, #LogListDock QWidget {{ background-color: {p['sidebar_bg']}; }}
         #FilterDock QTreeWidget, #NotesDock QTreeWidget, #LogListDock QTreeWidget {{ background-color: {p['sidebar_bg']}; border: none; }}
-        
+
         {menu_style}
-        
+
         QListView {{ background-color: {p['bg_color']}; color: {p['fg_color']}; border: none; outline: 0; }}
         QListView::item:selected {{ background-color: {p['selection_bg']}; color: {p['selection_fg']}; }}
-        
+
         QTreeWidget {{ background-color: {p['tree_bg']}; border: none; color: {p['fg_color']}; outline: 0; }}
         QTreeWidget::item {{ padding: 4px; border: none; }}
         QTreeWidget::item:selected {{ background-color: {p['selection_bg']}; color: {p['selection_fg']}; }}
         QTreeWidget::item:hover {{ background-color: {p['hover_bg']}; color: {p['fg_color']}; }}
-        
+
         QHeaderView {{ background-color: {p['header_bg']}; border: none; border-bottom: 1px solid {p['float_border']}; }}
         QHeaderView::section {{ background-color: {p['header_bg']}; color: {p['fg_color']}; border: none; border-right: none; padding: 6px 8px; font-family: "Inter SemiBold", "Inter", "Segoe UI"; font-weight: normal; text-align: left; }}
         QHeaderView::section:first {{ padding-left: 0px; padding-right: 0px; text-align: center; }}
         QHeaderView::section:last {{ padding-right: 4px; }}
         QHeaderView::section:horizontal {{ border-right: 1px solid transparent; }}
-        
+
         QTabBar {{ height: 0px; width: 0px; background: transparent; }}
         QTabBar::tab {{ height: 0px; width: 0px; padding: 0px; margin: 0px; border: none; }}
-        
+
         QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {{ background-color: {p['input_bg']}; color: {p['input_fg']}; border: 1px solid {p['float_border']}; border-radius: 4px; padding: 4px 8px; }}
-        
+
         QPushButton {{ background-color: {p['menu_bg']}; color: {p['fg_color']}; border: 1px solid {p['float_border']}; padding: 6px 16px; border-radius: 4px; }}
         QPushButton:hover {{ background-color: {p['hover_bg']}; }}
         QPushButton:pressed {{ background-color: {p['selection_bg']}; }}
         QPushButton:default {{ background-color: {p['bar_bg']}; color: {p['bar_fg']}; border: 1px solid {p['bar_bg']}; font-weight: bold; }}
         QPushButton:default:hover {{ background-color: {p['accent_hover']}; border: 1px solid {p['accent_hover']}; }}
-        
+
         QToolButton {{ background-color: transparent; color: {p['input_fg']}; border: 1px solid transparent; border-radius: 4px; padding: 2px; }}
         QToolButton:hover {{ background-color: {p['hover_bg']}; border: 1px solid {p['float_border']}; }}
         QToolButton:pressed {{ background-color: {p['selection_bg']}; }}
         QToolButton:checked {{ background-color: {p['selection_bg']}; color: {p['selection_fg']}; border: 1px solid {p['menu_sel']}; }}
-        
+
         QStatusBar {{ background-color: {p['menu_bg']}; color: {p['menu_fg']}; border-top: 1px solid {p['float_border']}; }}
         QStatusBar QLabel {{ padding: 2px 6px; border-radius: 3px; }}
         QStatusBar QLabel:hover {{ background-color: {p['hover_bg']}; }}
-        
+
         QScrollBar:vertical {{ border: none; background: transparent; width: 10px; margin: 0px; }}
         QScrollBar::handle:vertical {{ background: {p['scrollbar_handle']}; min-height: 20px; border-radius: 5px; }}
         QScrollBar::handle:vertical:hover {{ background: {p['scrollbar_hover']}; }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; background: transparent; }}
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
-        
+
         QScrollBar:horizontal {{ border: none; background: transparent; height: 10px; margin: 0px; }}
         QScrollBar::handle:horizontal {{ background: {p['scrollbar_handle']}; min-width: 20px; border-radius: 5px; }}
         QScrollBar::handle:horizontal:hover {{ background: {p['scrollbar_hover']}; }}
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0px; background: transparent; }}
         QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: none; }}
-        
+
         QAbstractScrollArea::corner {{ background: transparent; border: none; }}
         QSplitter::handle {{ background-color: {p['float_border']}; }}
-        
+
         {cb_style}
         """
         return style

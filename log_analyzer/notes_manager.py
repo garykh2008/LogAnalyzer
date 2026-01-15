@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QColor, QAction, QFont, QFontInfo
 from .utils import set_windows_title_bar_color
 from .resources import get_svg_icon
+from .theme_manager import ThemeManager
 from .modern_dialog import ModernDialog
 from .modern_messagebox import ModernMessageBox
 import os
@@ -399,6 +400,7 @@ class NotesManager(QObject):
 
         idx = item.data(0, Qt.UserRole)
         menu = QMenu(self.tree)
+        ThemeManager.apply_menu_theme(menu)
         icon_color = "#d4d4d4" if self.is_dark_mode else "#333333"
 
         edit_action = QAction(get_svg_icon("edit", icon_color), "Edit Note", self.tree)
