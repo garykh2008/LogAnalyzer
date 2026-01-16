@@ -607,7 +607,7 @@ class MainWindow(QMainWindow):
         # Restore scroll position if this update was triggered by a view switch
         if self._pending_view_switch_jump:
             if self.selected_raw_index != -1:
-                self.jump_to_raw_index(self.selected_raw_index, focus_list=False)
+                self.jump_to_raw_index(self.selected_raw_index, focus_list=False, strict=False)
             self._pending_view_switch_jump = False
 
     def apply_editor_font(self, family, size):
@@ -1509,12 +1509,20 @@ class MainWindow(QMainWindow):
             count = sum(1 for (fp, ln) in self.notes_manager.notes if fp == self.current_log_path)
             self.btn_side_notes.set_badge(count)
 
-    def jump_to_raw_index(self, raw_index, focus_list=True):
+    def jump_to_raw_index(self, raw_index, focus_list=True, strict=True):
         view_row = raw_index
+        is_exact = True
         if self.show_filtered_only and self.model.filtered_indices:
              idx = bisect.bisect_left(self.model.filtered_indices, raw_index)
-             if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == raw_index: view_row = idx
-             else: return # Target not visible
+             if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == raw_index: 
+                 view_row = idx
+             else: 
+                 if strict: return # Target not visible
+                 # Find nearest
+                 view_row = idx
+                 if view_row >= len(self.model.filtered_indices):
+                     view_row = max(0, len(self.model.filtered_indices) - 1)
+                 is_exact = False
 
         vp_size = self.calculate_viewport_size()
         target_scroll = max(0, view_row - (vp_size // 2))
@@ -1525,16 +1533,17 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
 
         # Calculate relative index in the current viewport
-        rel_row = view_row - target_scroll
-        if 0 <= rel_row < self.model.rowCount():
-            index = self.model.index(rel_row, 0)
-            if index.isValid():
-                # Explicitly clear selection and select ONLY the target row
-                # to avoid issues when Ctrl key is held down during shortcuts.
-                self.list_view.selectionModel().setCurrentIndex(index, QItemSelectionModel.ClearAndSelect)
-                self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
-                if focus_list: self.list_view.setFocus()
-                self.selected_raw_index = raw_index # Ensure state is synced
+        if is_exact:
+            rel_row = view_row - target_scroll
+            if 0 <= rel_row < self.model.rowCount():
+                index = self.model.index(rel_row, 0)
+                if index.isValid():
+                    # Explicitly clear selection and select ONLY the target row
+                    # to avoid issues when Ctrl key is held down during shortcuts.
+                    self.list_view.selectionModel().setCurrentIndex(index, QItemSelectionModel.ClearAndSelect)
+                    self.list_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
+                    if focus_list: self.list_view.setFocus()
+                    self.selected_raw_index = raw_index # Ensure state is synced
 
     def _jump_to_match(self, result_index, focus_list=True):
         if not self.filtered_search_results or result_index < 0 or result_index >= len(self.filtered_search_results): return
