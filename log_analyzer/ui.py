@@ -39,6 +39,17 @@ class FilterTreeWidget(QTreeWidget):
             self.on_drop_callback()
 
 
+class LogListView(QListView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.suppress_scroll = False
+
+    def scrollTo(self, index, hint=QAbstractItemView.EnsureVisible):
+        if self.suppress_scroll:
+            return
+        super().scrollTo(index, hint)
+
+
 class GoToLineDialog(ModernDialog):
     def __init__(self, parent=None, max_line=1):
         super().__init__(parent, title="Go to Line", fixed_size=(300, 220))
@@ -152,7 +163,7 @@ class MainWindow(QMainWindow):
         else:
             self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
 
-        self.list_view = QListView()
+        self.list_view = LogListView()
         self.model = LogModel()
         self.list_view.setModel(self.model)
 
@@ -1881,6 +1892,7 @@ class MainWindow(QMainWindow):
 
     def on_scrollbar_value_changed(self, value):
         self.is_scrolling = True
+        self.list_view.suppress_scroll = True
         try:
             self.model.set_viewport(value, self.calculate_viewport_size())
 
@@ -1901,6 +1913,7 @@ class MainWindow(QMainWindow):
                 else:
                     self.list_view.selectionModel().clearSelection()
         finally:
+            self.list_view.suppress_scroll = False
             self.is_scrolling = False
 
     def toggle_theme(self):
