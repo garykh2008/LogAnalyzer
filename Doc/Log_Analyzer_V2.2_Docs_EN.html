@@ -4,7 +4,7 @@
 	<head>
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>Log Analyzer Documentation ( V2.1 )</title>
+		<title>Log Analyzer Documentation ( V2.2 )</title>
 		
 <style>
 	body {
@@ -52,6 +52,7 @@
 </ul>
 </li>
 <li><a href="#4-release-notes">4. Release Notes</a><ul>
+<li><a href="#version-22-2026-01-29">Version 2.2 (2026-01-29)</a></li>
 <li><a href="#version-21-2026-01-15">Version 2.1 (2026-01-15)</a></li>
 <li><a href="#version-20-2026-01-12">Version 2.0 (2026-01-12)</a></li>
 </ul>
@@ -59,7 +60,7 @@
 </ul>
 <hr />
 <h2 id="1-introduction">1. Introduction</h2>
-<p><strong>Log Analyzer V2.1</strong> builds upon the robust Qt architecture of V2.0, focusing on refined modularity, customizable user preferences, and a polished visual experience.</p>
+<p><strong>Log Analyzer V2.2</strong> builds upon the robust Qt architecture of V2.0, focusing on refined modularity, customizable user preferences, and a polished visual experience.</p>
 <p>Designed for high-performance log analysis, it continues to leverage the <strong>Virtual Viewport</strong> and Rust-powered filtering while introducing a centralized <strong>Theme Manager</strong> and a dedicated <strong>Preferences</strong> system.</p>
 <h2 id="2-key-features">2. Key Features</h2>
 <h3 id="next-gen-performance">🚀 Next-Gen Performance</h3>
@@ -213,6 +214,12 @@
 </li>
 </ul>
 <h2 id="4-release-notes">4. Release Notes</h2>
+<h3 id="version-22-2026-01-29">Version 2.2 (2026-01-29)</h3>
+<p><strong>UX &amp; Navigation</strong>
+*   <strong>Smart Context Persistence</strong>: Significantly improved behavior when switching between "Full Log" and "Filtered View" (Ctrl+H).
+    *   The application now seamlessly maintains your scroll position and selection context.
+    *   If the currently selected line is hidden by active filters, the view automatically adjusts to show the nearest visible context, preventing you from losing your place.
+*   <strong>Scroll Stability</strong>: Fixed jitter issues where the view could snap unexpectedly during slow scrolling or when selecting lines near the viewport edges.</p>
 <h3 id="version-21-2026-01-15">Version 2.1 (2026-01-15)</h3>
 <p><strong>Structural Refactoring</strong>
 *   <strong>MVC Architecture</strong>: Successfully decoupled business logic from the UI by extracting dedicated controllers (<code>LogController</code>, <code>FilterController</code>, <code>SearchController</code>), significantly improving code maintainability.
