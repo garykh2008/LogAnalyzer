@@ -17,6 +17,7 @@
     - [Shortcuts](#shortcuts)
     - [Preferences](#preferences)
   - [4. Release Notes](#4-release-notes)
+    - [Version 2.2 (2026-01-29)](#version-22-2026-01-29)
     - [Version 2.1 (2026-01-15)](#version-21-2026-01-15)
     - [Version 2.0 (2026-01-12)](#version-20-2026-01-12)
 
@@ -24,7 +25,7 @@
 
 ## 1. Introduction
 
-**Log Analyzer V2.1** builds upon the robust Qt architecture of V2.0, focusing on refined modularity, customizable user preferences, and a polished visual experience.
+**Log Analyzer V2.2** builds upon the robust Qt architecture of V2.0, focusing on refined modularity, customizable user preferences, and a polished visual experience.
 
 Designed for high-performance log analysis, it continues to leverage the **Virtual Viewport** and Rust-powered filtering while introducing a centralized **Theme Manager** and a dedicated **Preferences** system.
 
@@ -121,6 +122,14 @@ Access via the **Settings (Gear)** icon at the bottom of the Activity Bar.
     *   **Font Size**: Scale the entire application UI for better readability on high-DPI screens.
 
 ## 4. Release Notes
+
+### Version 2.2 (2026-01-29)
+
+**UX & Navigation**
+*   **Smart Context Persistence**: Significantly improved behavior when switching between "Full Log" and "Filtered View" (Ctrl+H).
+    *   The application now seamlessly maintains your scroll position and selection context.
+    *   If the currently selected line is hidden by active filters, the view automatically adjusts to show the nearest visible context, preventing you from losing your place.
+*   **Scroll Stability**: Fixed jitter issues where the view could snap unexpectedly during slow scrolling or when selecting lines near the viewport edges.
 
 ### Version 2.1 (2026-01-15)
 
