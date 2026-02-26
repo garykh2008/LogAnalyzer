@@ -1367,9 +1367,21 @@ class MainWindow(QMainWindow):
     def copy_selection(self):
         indexes = self.list_view.selectionModel().selectedIndexes()
         if not indexes: return
+        
+        # Sort by row to maintain sequence
         indexes.sort(key=lambda x: x.row())
-        text_lines = [self.model.data(idx, Qt.DisplayRole) for idx in indexes if idx.isValid()]
+        
+        # Extract text for each line, removing any existing trailing newlines
+        text_lines = []
+        for idx in indexes:
+            if idx.isValid():
+                text = self.model.data(idx, Qt.DisplayRole)
+                if text is not None:
+                    # Strip both \r and \n to handle mixed line endings consistently
+                    text_lines.append(text.rstrip('\r\n'))
+        
         if text_lines:
+            # Join with a single newline to ensure correct pasting behavior in other apps
             QApplication.clipboard().setText("\n".join(text_lines))
             self.toast.show_message(f"Copied {len(text_lines)} lines")
 
@@ -1823,7 +1835,7 @@ class MainWindow(QMainWindow):
         else:
             self.filtered_search_results = list(raw_results)
 
-        total = len(self.model.filtered_indices) if self.show_filtered_only and self.model.filtered_indices else (self.current_engine.line_count() if self.current_engine else 0)
+        total = total = len(self.model.filtered_indices) if self.show_filtered_only and self.model.filtered_indices else (self.current_engine.line_count() if self.current_engine else 0)
         self.v_scrollbar.set_search_results(self.filtered_search_results, total)
 
     def show_goto_dialog(self):
@@ -1992,5 +2004,3 @@ class MainWindow(QMainWindow):
 
     def close_app(self):
         self.close()
-
-
