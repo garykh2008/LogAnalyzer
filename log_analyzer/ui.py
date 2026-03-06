@@ -696,7 +696,8 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         help_menu.addAction(self.shortcuts_action)
         self.doc_action = QAction("Documentation", self)
         self.doc_action.triggered.connect(self.open_documentation)
-        help_menu.addAction(self.shortcuts_action)
+        help_menu.addAction(self.doc_action)
+        help_menu.addSeparator()
         self.about_action = QAction("About", self)
         self.about_action.triggered.connect(self.show_about)
         help_menu.addAction(self.about_action)
@@ -920,30 +921,30 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.btn_clear_logs.setIcon(icon_manager.load_icon("x-circle", general_icon_c, 18))
         self.btn_side_loglist.setIcon(icon_manager.load_icon("file-text", general_icon_c, 24))
         self.btn_side_filter.setIcon(icon_manager.load_icon("filter", general_icon_c, 24))
-        self.btn_side_notes.setIcon(icon_manager.load_icon("book-open", general_icon_c, 24))
+        self.btn_side_notes.setIcon(icon_manager.load_icon("edit", general_icon_c, 24))
         self.btn_settings.setIcon(icon_manager.load_icon("settings", general_icon_c, 24))
         
         self.open_action.setIcon(icon_manager.load_icon("file-text", general_icon_c, 16))
-        self.recent_menu.setIcon(icon_manager.load_icon("folder", general_icon_c, 16))
+        self.recent_menu.setIcon(icon_manager.load_icon("file-text", general_icon_c, 16))
         self.load_filters_action.setIcon(icon_manager.load_icon("filter", general_icon_c, 16))
-        self.save_filters_action = QAction(icon_manager.load_icon("save", general_icon_c, 16), "Save Filters", self)
-        self.save_filters_as_action = QAction(icon_manager.load_icon("save", general_icon_c, 16), "Save Filters As...", self)
+        self.save_filters_action.setIcon(icon_manager.load_icon("save", general_icon_c, 16))
+        self.save_filters_as_action.setIcon(icon_manager.load_icon("save", general_icon_c, 16))
         self.exit_action.setIcon(icon_manager.load_icon("log-out", general_icon_c, 16))
         self.copy_action.setIcon(icon_manager.load_icon("copy", general_icon_c, 16))
         self.find_action.setIcon(icon_manager.load_icon("search", general_icon_c, 16))
         self.goto_action.setIcon(icon_manager.load_icon("hash", general_icon_c, 16))
         self.toggle_log_sidebar_action.setIcon(icon_manager.load_icon("file-text", general_icon_c, 16))
         self.toggle_filter_sidebar_action.setIcon(icon_manager.load_icon("filter", general_icon_c, 16))
-        self.toggle_notes_sidebar_action.setIcon(icon_manager.load_icon("book-open", general_icon_c, 16))
+        self.toggle_notes_sidebar_action.setIcon(icon_manager.load_icon("edit", general_icon_c, 16))
         self.show_filtered_action.setIcon(icon_manager.load_icon("eye", general_icon_c, 16))
         self.toggle_theme_action.setIcon(icon_manager.load_icon("sun-moon", general_icon_c, 16))
         self.add_note_action.setIcon(icon_manager.load_icon("plus", general_icon_c, 16))
         self.remove_note_action.setIcon(icon_manager.load_icon("trash", general_icon_c, 16))
-        self.save_notes_action = QAction(icon_manager.load_icon("save", general_icon_c, 16), "Save Notes", self)
-        self.export_notes_action = QAction(icon_manager.load_icon("external-link", general_icon_c, 16), "Export Notes to Text...", self)
-        self.shortcuts_action = QAction(icon_manager.load_icon("keyboard", general_icon_c, 16), "Keyboard Shortcuts", self)
-        self.doc_action = QAction(icon_manager.load_icon("external-link", general_icon_c, 16), "Documentation", self)
-        self.about_action = QAction(icon_manager.load_icon("info", general_icon_c, 16), "About", self)
+        self.save_notes_action.setIcon(icon_manager.load_icon("save", general_icon_c, 16))
+        self.export_notes_action.setIcon(icon_manager.load_icon("external-link", general_icon_c, 16))
+        self.shortcuts_action.setIcon(icon_manager.load_icon("keyboard", general_icon_c, 16))
+        self.doc_action.setIcon(icon_manager.load_icon("book-open", general_icon_c, 16))
+        self.about_action.setIcon(icon_manager.load_icon("info", general_icon_c, 16))
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -1202,7 +1203,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             raw_index = abs_row
             if self.show_filtered_only and self.model.filtered_indices:
                 raw_index = self.model.filtered_indices[abs_row]
-            menu.addAction(icon_manager.load_icon("book-open", ic, 16), "Add/Edit Note", lambda: self.notes_manager.add_note(raw_index, "", self.current_log_path))
+            menu.addAction(icon_manager.load_icon("edit", ic, 16), "Add/Edit Note", lambda: self.notes_manager.add_note(raw_index, "", self.current_log_path))
         menu.exec_(self.list_view.mapToGlobal(pos))
     def copy_selection(self):
         indexes = self.list_view.selectionModel().selectedIndexes()
@@ -1441,7 +1442,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         if item:
             idx = item.data(0, Qt.UserRole)
             menu.addSeparator()
-            menu.addAction(icon_manager.load_icon("search", ic, 16), "Edit Filter", self.edit_selected_filter)
+            menu.addAction(icon_manager.load_icon("edit", ic, 16), "Edit Filter", self.edit_selected_filter)
             menu.addAction(icon_manager.load_icon("trash", ic, 16), "Remove Filter", self.remove_filter)
             menu.addSeparator()
             menu.addAction(icon_manager.load_icon("chevron-up", ic, 16), "Move to Top", self.move_filter_top)
