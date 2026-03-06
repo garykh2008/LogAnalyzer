@@ -150,6 +150,10 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.is_scrolling = False
         self._suppress_search_jump = False
         self._pending_view_switch_jump = False
+        
+        # --- View Anchor State ---
+        self._anchor_raw = 0
+        self._landed_v = -1
 
         if sys.platform == "linux":
             self.setDockOptions(QMainWindow.AllowTabbedDocks)
@@ -501,7 +505,6 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self._refresh_overlay_pos()
 
     def _refresh_overlay_pos(self):
-        # Helper to force reposition search bar after layout changes
         if hasattr(self, 'search_overlay') and not self.search_overlay.isHidden():
             QTimer.singleShot(10, lambda: self.resizeEvent(None))
 
@@ -545,23 +548,38 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             palette[j+2] = (fg, bg)
             
         self.model.update_filter_result(tag_codes, palette, filtered_indices if self.show_filtered_only else None)
-        self.update_scrollbar_range()
+        
+        # 1. Update Scrollbar Range (silent)
+        self.v_scrollbar.blockSignals(True)
+        self.update_scrollbar_range(sync_view=False)
+        self.v_scrollbar.blockSignals(False)
+        
         self.update_filtered_search_results()
         self.refresh_filter_tree()
+        
         if self.current_log_path:
             if self.current_log_path not in self.log_states:
                 self.log_states[self.current_log_path] = {}
             self.log_states[self.current_log_path]["filter_cache"] = (res, rust_f)
+        
         count = len(filtered_indices) if filtered_indices else 0
         if self.show_filtered_only:
             self.toast.show_message(f"Filtered: {count:,} lines")
         self.update_status_bar()
         enabled_count = sum(1 for f in self.filters if f["enabled"])
         self.btn_side_filter.set_badge(enabled_count)
-        self.refresh_filter_tree()
-        if self._pending_view_switch_jump:
-            if self.selected_raw_index != -1:
-                self.jump_to_raw_index(self.selected_raw_index, focus_list=False, strict=False)
+        
+        # --- VIEW RESTORE (TO FILTERED) ---
+        if self._pending_view_switch_jump and self.show_filtered_only:
+            target_v = 0
+            if self.model.filtered_indices:
+                target_v = bisect.bisect_left(self.model.filtered_indices, self._anchor_raw)
+                self._landed_v = target_v
+            
+            self.v_scrollbar.blockSignals(True)
+            self.v_scrollbar.setValue(target_v)
+            self.v_scrollbar.blockSignals(False)
+            self.on_scrollbar_value_changed(target_v)
             self._pending_view_switch_jump = False
 
     def apply_editor_font(self, family, size):
@@ -702,20 +720,39 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             self.notes_manager.delete_note(raw_index, self.current_log_path)
 
     def toggle_show_filtered_only(self):
+        v_val = self.v_scrollbar.value()
+        
+        # --- MEMORY PROTECTION: Preserve the origin point ---
+        if not self.show_filtered_only:
+            # Entering Filtered View: Set the anchor
+            self._anchor_raw = v_val
+        else:
+            # Returning to Full View: Check if user scrolled
+            if v_val != self._landed_v:
+                # User MOVED in Filtered mode. Update anchor to current visual row's raw index.
+                if self.model.filtered_indices and 0 <= v_val < len(self.model.filtered_indices):
+                    self._anchor_raw = self.model.filtered_indices[v_val]
+                else:
+                    self._anchor_raw = v_val
+            # If user DID NOT move (v_val == landed_v), we preserve the original anchor_raw.
+
         self.show_filtered_only = self.show_filtered_action.isChecked()
         self._pending_view_switch_jump = True
         self.recalc_filters()
+        
+        # --- IMMEDIATE RETURN (TO FULL) ---
+        if not self.show_filtered_only:
+            target_v = self._anchor_raw
+            
+            self.v_scrollbar.blockSignals(True)
+            self.update_scrollbar_range(sync_view=False)
+            self.v_scrollbar.setValue(target_v)
+            self.v_scrollbar.blockSignals(False)
+            self.on_scrollbar_value_changed(target_v)
+            self._pending_view_switch_jump = False
+
         mode_str = "Filtered View" if self.show_filtered_only else "Full Log View"
-        count = 0
-        if self.show_filtered_only and self.model.filtered_indices:
-            count = len(self.model.filtered_indices)
-        elif not self.show_filtered_only and self.current_engine:
-            count = self.current_engine.line_count()
-        self.toast.show_message(f"{mode_str}: {count:,} lines")
-        if hasattr(self, 'search_overlay'):
-            query = self.search_overlay.input.text()
-            if query and not self.search_overlay.isHidden():
-                self._perform_search(query)
+        self.toast.show_message(mode_str)
 
     def toggle_sidebar(self, index):
         docks = [self.filter_dock, self.notes_dock, self.log_list_dock]
@@ -902,9 +939,9 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.remove_note_action.setIcon(icon_manager.load_icon("trash", general_icon_c, 16))
         self.save_notes_action = QAction(icon_manager.load_icon("save", general_icon_c, 16), "Save Notes", self)
         self.export_notes_action = QAction(icon_manager.load_icon("external-link", general_icon_c, 16), "Export Notes to Text...", self)
-        self.shortcuts_action.setIcon(icon_manager.load_icon("keyboard", general_icon_c, 16))
-        self.doc_action.setIcon(icon_manager.load_icon("external-link", general_icon_c, 16))
-        self.about_action.setIcon(icon_manager.load_icon("info", general_icon_c, 16))
+        self.shortcuts_action = QAction(icon_manager.load_icon("keyboard", general_icon_c, 16), "Keyboard Shortcuts", self)
+        self.doc_action = QAction(icon_manager.load_icon("external-link", general_icon_c, 16), "Documentation", self)
+        self.about_action = QAction(icon_manager.load_icon("info", general_icon_c, 16), "About", self)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -1053,7 +1090,11 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         scroll_pos = state.get("scroll", 0)
         selected_raw = state.get("selected_raw", -1)
         self.selected_raw_index = selected_raw
-        self.update_scrollbar_range()
+        
+        self.v_scrollbar.blockSignals(True)
+        self.update_scrollbar_range(sync_view=False)
+        self.v_scrollbar.blockSignals(False)
+        
         if "filter_cache" in state:
             self.filter_controller.set_cache(state["filter_cache"])
         else:
@@ -1078,6 +1119,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             self.v_scrollbar.set_search_results([], 1)
             self.search_overlay.set_results_info("")
         self.v_scrollbar.setValue(scroll_pos)
+        self.on_scrollbar_value_changed(scroll_pos)
         if selected_raw != -1:
             self._restore_selection_ui(selected_raw)
         if not self.search_overlay.isHidden():
@@ -1179,7 +1221,6 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             self.last_normal_rect = self.geometry()
         self.update_scrollbar_range()
         if hasattr(self, 'search_overlay') and not self.search_overlay.isHidden():
-            # FIXED: Base position on central_area width, as overlay is its child
             parent_w = self.central_area.width()
             self.search_overlay.move(parent_w - self.search_overlay.width() - 20, 10)
         if hasattr(self, 'dimmer') and self.dimmer.isVisible():
@@ -1293,8 +1334,12 @@ class MainWindow(NativeWindowMixin, QMainWindow):
                      view_row = max(0, len(self.model.filtered_indices)-1)
                  is_exact = False
         target_scroll = max(0, view_row - (self.calculate_viewport_size() // 2))
+        
+        self.v_scrollbar.blockSignals(True)
         self.v_scrollbar.setValue(target_scroll)
+        self.v_scrollbar.blockSignals(False)
         self.on_scrollbar_value_changed(target_scroll)
+        
         QApplication.processEvents()
         if is_exact:
             rel_row = view_row - target_scroll
@@ -1486,7 +1531,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.selected_raw_index = raw
         if hasattr(self, 'status_pos_label'):
             self.status_pos_label.setText(f"Ln {raw + 1}")
-    def update_scrollbar_range(self):
+    def update_scrollbar_range(self, sync_view=True):
         if not self.current_engine:
             return
         total = self.current_engine.line_count()
@@ -1495,7 +1540,8 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         vp = self.calculate_viewport_size()
         self.v_scrollbar.setRange(0, max(0, total - vp))
         self.v_scrollbar.setPageStep(vp)
-        self.on_scrollbar_value_changed(self.v_scrollbar.value())
+        if sync_view:
+            self.on_scrollbar_value_changed(self.v_scrollbar.value())
     def navigate_filter_hit(self, reverse=False):
         if not self.current_engine or not self.model.tag_codes:
             return
