@@ -8,6 +8,7 @@ from log_analyzer.modern_dialog import ModernDialog
 from log_analyzer.config import get_config
 from log_analyzer.resources import get_svg_icon
 from log_analyzer.delegates import FontPreviewDelegate
+from log_analyzer.native_window import apply_window_rounding
 
 
 class PreferencesDialog(ModernDialog):
@@ -15,6 +16,9 @@ class PreferencesDialog(ModernDialog):
         super().__init__(parent, title="Preferences", fixed_size=(750, 600))
         self.config = get_config()
         self.init_ui()
+        
+        # Apply Windows 11 rounded corners to the dialog window
+        apply_window_rounding(self.winId())
 
     def init_ui(self):
         # Create main layout container
@@ -224,10 +228,6 @@ class PreferencesDialog(ModernDialog):
                 color: {content_fg}; 
                 font-family: \"{ui_font_family}\";
             }}
-            QComboBox, QSpinBox, QPushButton {{
-                font-family: \"{ui_font_family}\";
-                font-size: {ui_font_size}px;
-            }}
             QLabel {{ color: {content_fg}; font-family: \"{ui_font_family}\"; }}
             QLabel#section_header {{
                 font-size: {ui_font_size + 6}px; 
@@ -258,7 +258,6 @@ class PreferencesDialog(ModernDialog):
                 border-top: 1px solid {bottom_border};
                 font-family: \"{ui_font_family}\";
             }}
-            QPushButton {{ font-family: \"{ui_font_family}\"; font-size: {ui_font_size}px; }}
             QPushButton#btn_reset {{
                 background-color: transparent;
                 border: 1px solid {sidebar_border};

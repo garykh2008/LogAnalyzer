@@ -8,6 +8,7 @@ from .resources import get_svg_icon
 from .theme_manager import ThemeManager
 from .modern_dialog import ModernDialog
 from .modern_messagebox import ModernMessageBox
+from .native_window import apply_window_rounding
 import os
 import re
 import json
@@ -44,12 +45,15 @@ class NoteDialog(ModernDialog):
     def __init__(self, parent=None, initial_text="", line_num=0):
         super().__init__(parent, title=f"Note for Line {line_num}", fixed_size=(400, 240))
         self.note_content = None
+        
+        # Ensure winId exists before rounding
+        self.winId()
+        apply_window_rounding(self.winId())
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.text_edit = QTextEdit()
-        # Remove hardcoded font, will inherit from stylesheet
         self.text_edit.setPlainText(initial_text)
         layout.addWidget(self.text_edit)
 
@@ -127,6 +131,12 @@ class NotesManager(QObject):
 
         self.dock.setTitleBarWidget(self.title_bar)
 
+        # Handle rounding when floating
+        def on_top_level_changed(floating):
+            if floating:
+                apply_window_rounding(self.dock.winId())
+        self.dock.topLevelChanged.connect(on_top_level_changed)
+
         # --- Content ---
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -165,12 +175,12 @@ class NotesManager(QObject):
             set_windows_title_bar_color(self.dock.winId(), is_dark)
 
         # Get Palette and styles from ThemeManager if available
-        theme_manager = getattr(self.parent, 'theme_manager', None)
-        if theme_manager:
-            p = theme_manager.palette
+        theme_manager_ref = getattr(self.parent, 'theme_manager', None)
+        if theme_manager_ref:
+            p = theme_manager_ref.palette
             icon_color = p['fg_color']
-            header_style = theme_manager.get_dock_title_style()
-            tree_style = theme_manager.get_dock_list_style(is_dark)
+            header_style = theme_manager_ref.get_dock_title_style()
+            tree_style = theme_manager_ref.get_dock_list_style(is_dark)
             line_bg = p['dock_content_bg']
             line_fg = p['log_gutter_fg']
             border_color = p['dock_border']

@@ -58,9 +58,7 @@ class LogListDelegate(QStyledItemDelegate):
             painter.setPen(option.palette.text().color())
             painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, text)
 
-            # Draw Bottom Border
-            painter.setPen(self.border_color)
-            painter.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
+            # --- Removed Bottom Border Line ---
 
         finally:
             painter.restore()
@@ -312,9 +310,7 @@ class FilterDelegate(QStyledItemDelegate):
             # 3. Draw default content
             super().paint(painter, option, index)
 
-            # 4. Draw Bottom Border
-            painter.setPen(self.border_color)
-            painter.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
+            # --- Removed Bottom Border Line ---
 
         finally:
             painter.restore()
@@ -347,4 +343,3 @@ class FontPreviewDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         return QSize(option.rect.width(), 28)
-

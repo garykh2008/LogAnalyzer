@@ -4,6 +4,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtCore import Qt
 from .utils import adjust_color_for_theme
 from .modern_dialog import ModernDialog
+from .native_window import apply_window_rounding
 
 
 class FilterDialog(ModernDialog):
@@ -11,6 +12,10 @@ class FilterDialog(ModernDialog):
     def __init__(self, parent=None, filter_data=None):
         # Increased height slightly, removed fixed size constraint to allow layout to breathe if needed
         super().__init__(parent, title="Edit Filter" if filter_data else "Add Filter", fixed_size=(500, 320))
+
+        # Apply Windows 11 rounded corners (The ONLY addition)
+        self.winId()
+        apply_window_rounding(self.winId())
 
         self.filter_data = filter_data or {}
 

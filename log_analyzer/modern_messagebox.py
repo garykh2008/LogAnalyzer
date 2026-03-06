@@ -1,120 +1,125 @@
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QDialogButtonBox, QMessageBox)
+from PySide6.QtWidgets import QMessageBox, QPushButton, QVBoxLayout, QHBoxLayout, QLabel
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from .modern_dialog import ModernDialog
-from .resources import get_svg_icon
-
+from .theme_manager import theme_manager
+from .native_window import apply_window_rounding
+from .icon_manager import icon_manager
 
 class ModernMessageBox(ModernDialog):
-    def __init__(self, parent=None, title="Message", text="", icon_name="message-info", buttons=QMessageBox.Ok, default_button=None):
-        super().__init__(parent, title=title, fixed_size=(400, 180)) # Slightly wider, auto height if possible
+    """
+    A custom message box that inherits from ModernDialog.
+    Fixed missing icons and applied rounded corners.
+    """
+    def __init__(self, parent=None, title="Message", text="", icon_type=QMessageBox.Information, buttons=QMessageBox.Ok):
+        super().__init__(parent, title=title, fixed_size=(450, 200))
+        
+        self.winId()
+        apply_window_rounding(self.winId())
 
-        # Content Layout
-        self.content_layout = QVBoxLayout() # Just a container
-        self.content_layout.setSpacing(20)
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(20)
 
-        # Main Area: Icon + Text
-        main_area = QHBoxLayout()
-        main_area.setSpacing(20)
+        # Content Row (Icon + Text)
+        content_row = QHBoxLayout()
+        content_row.setSpacing(20)
 
-        # Icon
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(48, 48)
-        self.icon_label.setScaledContents(True)
-        # Choose color based on type
-        icon_color = "#cccccc" # Default
-        if "info" in icon_name: icon_color = "#3794ff"
-        elif "warn" in icon_name: icon_color = "#cca700"
-        elif "error" in icon_name: icon_color = "#f44b56"
-        elif "question" in icon_name: icon_color = "#3794ff"
+        self._set_msg_icon(icon_type)
+        content_row.addWidget(self.icon_label)
 
-        self.icon_label.setPixmap(get_svg_icon(icon_name, icon_color, 48).pixmap(48, 48))
-        main_area.addWidget(self.icon_label, 0, Qt.AlignTop)
-
-        # Text
         self.text_label = QLabel(text)
         self.text_label.setWordWrap(True)
-        self.text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        # Increase font size slightly
-        f = self.text_label.font(); f.setPointSize(f.pointSize() + 1); self.text_label.setFont(f)
+        self.text_label.setTextFormat(Qt.RichText)
+        # Ensure text is readable in current theme
+        self.text_label.setStyleSheet(f"color: {theme_manager.get_color('fg_primary')};")
+        content_row.addWidget(self.text_label, 1)
 
-        main_area.addWidget(self.text_label, 1)
-        self.content_layout.addLayout(main_area)
+        layout.addLayout(content_row)
 
-        self.content_layout.addStretch()
+        # Buttons Row
+        self.button_box = QHBoxLayout()
+        self.button_box.addStretch()
+        self._add_buttons(buttons)
+        layout.addLayout(self.button_box)
 
-        # Buttons
-        # Convert QMessageBox.StandardButtons to QDialogButtonBox.StandardButtons
-        # Luckily they are usually binary compatible or we can map them
+        self.setContentLayout(layout)
 
-        # Simple mapping for common buttons
-        btn_box_flags = QDialogButtonBox.NoButton
+    def _set_msg_icon(self, icon_type):
+        """Maps standard QMessageBox types to our theme icons."""
+        p = theme_manager.palette
+        icon_name = "activity" # Default
+        color = p['accent']
+        
+        if icon_type == QMessageBox.Information:
+            icon_name = "activity"
+            color = p['accent']
+        elif icon_type == QMessageBox.Warning:
+            icon_name = "warning"
+            color = "#f2c037"
+        elif icon_type == QMessageBox.Critical:
+            icon_name = "x-circle"
+            color = "#c42b1c"
+        elif icon_type == QMessageBox.Question:
+            icon_name = "hash"
+            color = p['accent']
+            
+        pixmap = icon_manager.load_pixmap(icon_name, color, 48, 48)
+        self.icon_label.setPixmap(pixmap)
 
-        # Mapping logic (simplified)
-        if buttons & QMessageBox.Ok: btn_box_flags |= QDialogButtonBox.Ok
-        if buttons & QMessageBox.Save: btn_box_flags |= QDialogButtonBox.Save
-        if buttons & QMessageBox.SaveAll: btn_box_flags |= QDialogButtonBox.SaveAll
-        if buttons & QMessageBox.Open: btn_box_flags |= QDialogButtonBox.Open
-        if buttons & QMessageBox.Yes: btn_box_flags |= QDialogButtonBox.Yes
-        if buttons & QMessageBox.YesToAll: btn_box_flags |= QDialogButtonBox.YesToAll
-        if buttons & QMessageBox.No: btn_box_flags |= QDialogButtonBox.No
-        if buttons & QMessageBox.NoToAll: btn_box_flags |= QDialogButtonBox.NoToAll
-        if buttons & QMessageBox.Abort: btn_box_flags |= QDialogButtonBox.Abort
-        if buttons & QMessageBox.Retry: btn_box_flags |= QDialogButtonBox.Retry
-        if buttons & QMessageBox.Ignore: btn_box_flags |= QDialogButtonBox.Ignore
-        if buttons & QMessageBox.Close: btn_box_flags |= QDialogButtonBox.Close
-        if buttons & QMessageBox.Cancel: btn_box_flags |= QDialogButtonBox.Cancel
-        if buttons & QMessageBox.Discard: btn_box_flags |= QDialogButtonBox.Discard
-        if buttons & QMessageBox.Help: btn_box_flags |= QDialogButtonBox.Help
-        if buttons & QMessageBox.Apply: btn_box_flags |= QDialogButtonBox.Apply
-        if buttons & QMessageBox.Reset: btn_box_flags |= QDialogButtonBox.Reset
-        if buttons & QMessageBox.RestoreDefaults: btn_box_flags |= QDialogButtonBox.RestoreDefaults
+    def _add_buttons(self, buttons):
+        if buttons & QMessageBox.Ok:
+            btn = QPushButton("OK")
+            btn.setMinimumWidth(80)
+            btn.setDefault(True)
+            btn.clicked.connect(self.accept)
+            self.button_box.addWidget(btn)
+        
+        if buttons & QMessageBox.Save:
+            btn = QPushButton("Save")
+            btn.setDefault(True)
+            btn.clicked.connect(self.accept)
+            self.button_box.addWidget(btn)
 
-        self.button_box = QDialogButtonBox(btn_box_flags)
-        self.button_box.clicked.connect(self._on_button_clicked)
+        if buttons & QMessageBox.Discard:
+            btn = QPushButton("Discard")
+            btn.clicked.connect(lambda: self.done(QMessageBox.Discard))
+            self.button_box.addWidget(btn)
 
-        # Set Default Button
-        if default_button:
-            # We need to find the QAbstractButton corresponding to the standard button
-            # This is tricky because QDialogButtonBox creates them internally
-            # We can try to map back
-            pass
+        if buttons & QMessageBox.Cancel:
+            btn = QPushButton("Cancel")
+            btn.clicked.connect(self.reject)
+            self.button_box.addWidget(btn)
 
-        self.content_layout.addWidget(self.button_box)
-        self.setContentLayout(self.content_layout)
+        if buttons & QMessageBox.Yes:
+            btn = QPushButton("Yes")
+            btn.setDefault(True)
+            btn.clicked.connect(self.accept)
+            self.button_box.addWidget(btn)
 
-        self.result_val = 0
-
-    def _on_button_clicked(self, button):
-        std_btn = self.button_box.standardButton(button)
-
-        # Map QDialogButtonBox.StandardButton back to QMessageBox.StandardButton value
-        try:
-            self.result_val = QMessageBox.StandardButton(std_btn.value)
-        except Exception:
-            self.result_val = std_btn
-
-        self.accept()
-
-    @staticmethod
-    def information(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.Ok):
-        dlg = ModernMessageBox(parent, title, text, "message-info", buttons, default_button)
-        dlg.exec()
-        return dlg.result_val
-
-    @staticmethod
-    def warning(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.Ok):
-        dlg = ModernMessageBox(parent, title, text, "message-warn", buttons, default_button)
-        dlg.exec()
-        return dlg.result_val
+        if buttons & QMessageBox.No:
+            btn = QPushButton("No")
+            btn.clicked.connect(self.reject)
+            self.button_box.addWidget(btn)
 
     @staticmethod
-    def critical(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.Ok):
-        dlg = ModernMessageBox(parent, title, text, "message-error", buttons, default_button)
-        dlg.exec()
-        return dlg.result_val
+    def information(parent, title, text):
+        dlg = ModernMessageBox(parent, title, text, QMessageBox.Information)
+        return dlg.exec()
+
+    @staticmethod
+    def warning(parent, title, text):
+        dlg = ModernMessageBox(parent, title, text, QMessageBox.Warning)
+        return dlg.exec()
+
+    @staticmethod
+    def critical(parent, title, text):
+        dlg = ModernMessageBox(parent, title, text, QMessageBox.Critical)
+        return dlg.exec()
 
     @staticmethod
     def question(parent, title, text, buttons=QMessageBox.Yes | QMessageBox.No, default_button=QMessageBox.Yes):
-        dlg = ModernMessageBox(parent, title, text, "message-question", buttons, default_button)
-        dlg.exec()
-        return dlg.result_val
+        dlg = ModernMessageBox(parent, title, text, QMessageBox.Question, buttons)
+        return dlg.exec()
