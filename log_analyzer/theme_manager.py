@@ -85,7 +85,7 @@ class ThemeManager(QObject):
             "titlebar_bg": "#181818", "titlebar_fg": "#cccccc", "titlebar_hover": "#333333", "close_hover": "#c42b1c",
             "log_gutter_bg": "#1e1e1e", "log_gutter_fg": "#858585", "log_border": "#303031",
             "dock_header_bg": "#252526", "dock_content_bg": "#252526", "dock_border": "#303031",
-            "cb_border": "#3c3c3c"
+            "cb_border": "#3c3c3c", "tooltip_bg": "#2d2d2d", "tooltip_fg": "#cccccc", "tooltip_border": "#505050"
         }
 
     def _init_light_classic_palette(self):
@@ -108,7 +108,7 @@ class ThemeManager(QObject):
             "titlebar_bg": "#e8e8e8", "titlebar_fg": "#333333", "titlebar_hover": "#d0d0d0", "close_hover": "#c42b1c",
             "log_gutter_bg": "#ffffff", "log_gutter_fg": "#237893", "log_border": "#e5e5e5",
             "dock_header_bg": "#f3f3f3", "dock_content_bg": "#f3f3f3", "dock_border": "#e5e5e5",
-            "cb_border": "#bbbbbb"
+            "cb_border": "#bbbbbb", "tooltip_bg": "#ffffff", "tooltip_fg": "#333333", "tooltip_border": "#bbbbbb"
         }
 
     def _init_nord_palette(self):
@@ -134,6 +134,9 @@ class ThemeManager(QObject):
         p["dock_header_bg"] = p["bg_secondary"]; p["dock_content_bg"] = p["bg_secondary"]; p["dock_border"] = p["border"]; p["dock_title_bg"] = p["bg_secondary"]; p["tab_bg"] = p["bg_secondary"]; p["tab_fg"] = p["fg_primary"]; p["tab_sel_bg"] = p["bg_primary"]
         p["activity_bg"] = p["bg_primary"]; p["cb_border"] = p["border"]; p["accent_hover"] = p["accent"] 
         p["hover_qcolor"] = QColor(p["hover_bg"]) if "rgba" in p["hover_bg"] else QColor(p["hover_bg"])
+        p["tooltip_bg"] = p["bg_secondary"] if is_dark else "#ffffff"
+        p["tooltip_fg"] = p["fg_primary"]
+        p["tooltip_border"] = p["border"]
         return p
 
     @staticmethod
@@ -215,6 +218,15 @@ class ThemeManager(QObject):
         QPushButton:default:hover {{ background-color: {p['accent_hover']}; border: 1px solid {p['accent_hover']}; }}
         
         QStatusBar {{ background-color: {p['menu_bg']}; color: {p['menu_fg']}; border-top: 1px solid {p['float_border']}; }}
+        
+        QToolTip {{ 
+            background-color: {p['tooltip_bg']}; 
+            color: {p['tooltip_fg']}; 
+            border: 1px solid {p['tooltip_border']}; 
+            border-radius: 0px; 
+            padding: 5px;
+        }}
+        
         {scrollbar_style}
         """
         return style
@@ -236,6 +248,12 @@ class ThemeManager(QObject):
             QToolButton {{ border: none; background: transparent; border-radius: 4px; padding: 2px; }}
             QToolButton:hover {{ background-color: {p['hover_bg']}; }}
             QToolButton:pressed {{ background-color: {p['selection_bg']}; }}
+        """
+
+    def get_close_btn_style(self):
+        return f"""
+            QToolButton {{ background-color: transparent; border: none; border-radius: 0px; }}
+            QToolButton:hover {{ background-color: {self.palette['close_hover']}; }}
         """
 
     def get_close_btn_style(self):
