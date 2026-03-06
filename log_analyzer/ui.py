@@ -59,6 +59,9 @@ class LogListView(QListView):
 class GoToLineDialog(ModernDialog):
     def __init__(self, parent=None, max_line=1):
         super().__init__(parent, title="Go to Line", fixed_size=(300, 220))
+        
+        # Apply window rounding for Windows 11 look
+        apply_window_rounding(self.winId())
 
         layout = QVBoxLayout()
         layout.setSpacing(15)
@@ -693,8 +696,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         help_menu.addAction(self.shortcuts_action)
         self.doc_action = QAction("Documentation", self)
         self.doc_action.triggered.connect(self.open_documentation)
-        help_menu.addAction(self.doc_action)
-        help_menu.addSeparator()
+        help_menu.addAction(self.shortcuts_action)
         self.about_action = QAction("About", self)
         self.about_action.triggered.connect(self.show_about)
         help_menu.addAction(self.about_action)
