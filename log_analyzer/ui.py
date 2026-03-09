@@ -769,8 +769,8 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             if dock.titleBarWidget(): dock.titleBarWidget().hide()
             if dock.widget(): dock.widget().hide()
             self.removeDockWidget(dock)
-            # Use self as parent instead of None to avoid orphan top-level window
-            dock.setParent(self)
+            # FORCE: Unparent to None to destroy the native surface layer completely
+            dock.setParent(None)
         dock.hide()
 
     def _show_dock_safely(self, dock):
