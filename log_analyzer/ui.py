@@ -1276,6 +1276,10 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             self.last_normal_rect = self.geometry()
         super().moveEvent(event)
     def show_dimmer(self):
+        if sys.platform == "linux":
+            # Re-create dimmer every time on Linux to ensure fresh native surface
+            self.dimmer = DimmerOverlay(self)
+        
         if hasattr(self, 'dimmer'):
             self.dimmer.show()
             self.dimmer.raise_()
@@ -1284,13 +1288,12 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         if hasattr(self, 'dimmer'):
             self.dimmer.hide()
             if sys.platform == "linux":
-                # Use synchronous repaint to force WM to clear composition surface
+                # Destroy the native surface completely to prevent residue
+                self.dimmer.setParent(None)
+                self.dimmer.deleteLater()
+                del self.dimmer
                 self.repaint()
-                if hasattr(self, 'title_bar'): self.title_bar.repaint()
-                if hasattr(self, 'activity_bar'): self.activity_bar.repaint()
                 QApplication.processEvents()
-                # Secondary delayed refresh to catch late-clearing surfaces
-                QTimer.singleShot(100, self.update)
 
     def show_search_bar(self): 
         self.search_overlay.show_overlay()
