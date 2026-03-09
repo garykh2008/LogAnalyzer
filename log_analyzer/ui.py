@@ -121,7 +121,11 @@ class MainWindow(NativeWindowMixin, QMainWindow):
 
         self.search_controller.search_results_ready.connect(self.on_search_results_ready)
 
-        self.setup_native_window(title_bar_height=40)
+        if sys.platform == "win32":
+            self.setup_native_window(title_bar_height=40)
+        else:
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+            self.setWindowTitle(f"{self.APP_NAME} {self.VERSION}")
 
         icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "loganalyzer.ico")
         if os.path.exists(icon_path):
@@ -275,7 +279,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, self.log_list_dock)
         self.log_list_dock.visibilityChanged.connect(self.on_log_list_dock_visibility_changed)
         self.log_list_dock.topLevelChanged.connect(self._on_dock_interaction)
-        self.log_list_dock.hide()
+        self._hide_dock_safely(self.log_list_dock)
 
         # --- Filter Dock ---
         self.filter_dock = QDockWidget("FILTERS", self)
@@ -328,7 +332,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, self.filter_dock)
         self.filter_dock.visibilityChanged.connect(self.on_filter_dock_visibility_changed)
         self.filter_dock.topLevelChanged.connect(self._on_dock_interaction)
-        self.filter_dock.hide()
+        self._hide_dock_safely(self.filter_dock)
 
         # --- Notes Dock ---
         self.notes_dock = self.notes_manager.dock
@@ -338,7 +342,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, self.notes_dock)
         self.notes_dock.visibilityChanged.connect(self.on_notes_dock_visibility_changed)
         self.notes_dock.topLevelChanged.connect(self._on_dock_interaction)
-        self.notes_dock.hide()
+        self._hide_dock_safely(self.notes_dock)
 
         self.list_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.v_scrollbar = SearchScrollBar(Qt.Vertical)
@@ -446,9 +450,9 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             self.tabifyDockWidget(self.log_list_dock, self.filter_dock)
             self.tabifyDockWidget(self.filter_dock, self.notes_dock)
 
-        self.log_list_dock.hide()
-        self.filter_dock.hide()
-        self.notes_dock.hide()
+        self._hide_dock_safely(self.log_list_dock)
+        self._hide_dock_safely(self.filter_dock)
+        self._hide_dock_safely(self.notes_dock)
 
         self.dimmer = DimmerOverlay(self)
         self.toast = Toast(self)
@@ -757,28 +761,64 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         mode_str = "Filtered View" if self.show_filtered_only else "Full Log View"
         self.toast.show_message(mode_str)
 
+    def _hide_dock_safely(self, dock):
+        """Forces a dock to hide by unparenting from layout on Linux to destroy native handles."""
+        if not dock: return
+        if sys.platform == "linux":
+            dock.setFloating(False)
+            if dock.titleBarWidget(): dock.titleBarWidget().hide()
+            if dock.widget(): dock.widget().hide()
+            self.removeDockWidget(dock)
+            # Use self as parent instead of None to avoid orphan top-level window
+            dock.setParent(self)
+        dock.hide()
+
+    def _show_dock_safely(self, dock):
+        """Forces a dock to show correctly on Linux."""
+        if not dock: return
+        if sys.platform == "linux":
+            self.addDockWidget(Qt.LeftDockWidgetArea, dock)
+            if dock.titleBarWidget(): dock.titleBarWidget().show()
+            if dock.widget(): dock.widget().show()
+        dock.show()
+        dock.raise_()
+
+    def _show_dock_exclusive(self, index):
+        """Ensures only one dock is visible by using safe hide/show strategies."""
+        docks = [self.filter_dock, self.notes_dock, self.log_list_dock]
+        if index < 0 or index >= len(docks): return
+        for i, d in enumerate(docks):
+            if i != index:
+                self._hide_dock_safely(d)
+        self._show_dock_safely(docks[index])
+        if sys.platform == "linux":
+            self.centralWidget().update()
+            QApplication.processEvents()
+
     def toggle_sidebar(self, index):
         docks = [self.filter_dock, self.notes_dock, self.log_list_dock]
         if index < 0 or index >= len(docks):
             return
         target = docks[index]
-        peers = self.tabifiedDockWidgets(target)
-        is_active = target.isVisible() and not target.visibleRegion().isEmpty()
-        if peers:
-            if is_active:
-                target.hide()
-                for p in peers:
-                    p.hide()
-            else:
-                target.show()
-                target.raise_()
+        
+        # Check current visible state carefully on Linux
+        is_active = target.isVisible() and not target.isHidden()
+        
+        # Hide all others first
+        for d in docks:
+            if d != target:
+                self._hide_dock_safely(d)
+        
+        # Toggle target
+        if is_active:
+            self._hide_dock_safely(target)
         else:
-            if target.isVisible():
-                target.hide()
-            else:
-                target.show()
-                if sys.platform != "linux":
-                    target.raise_()
+            self._show_dock_safely(target)
+        
+        if sys.platform == "linux":
+            self.centralWidget().update()
+            QApplication.processEvents()
+
 
     def eventFilter(self, obj, event):
         if obj == self.custom_menu_bar:
@@ -1147,8 +1187,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             item.setData(0, Qt.UserRole, fp)
             item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled)
         if len(self.loaded_logs) > 1:
-            self.log_list_dock.show()
-            self.log_list_dock.raise_()
+            self._show_dock_exclusive(2)
     def on_log_reordered(self):
         new_order = []
         root = self.log_tree.invisibleRootItem()
@@ -1236,10 +1275,23 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         if not self.isMaximized():
             self.last_normal_rect = self.geometry()
         super().moveEvent(event)
-    def show_dimmer(self): 
-        self.dimmer.show()
-    def hide_dimmer(self): 
-        self.dimmer.hide()
+    def show_dimmer(self):
+        if hasattr(self, 'dimmer'):
+            self.dimmer.show()
+            self.dimmer.raise_()
+
+    def hide_dimmer(self):
+        if hasattr(self, 'dimmer'):
+            self.dimmer.hide()
+            if sys.platform == "linux":
+                # Use synchronous repaint to force WM to clear composition surface
+                self.repaint()
+                if hasattr(self, 'title_bar'): self.title_bar.repaint()
+                if hasattr(self, 'activity_bar'): self.activity_bar.repaint()
+                QApplication.processEvents()
+                # Secondary delayed refresh to catch late-clearing surfaces
+                QTimer.singleShot(100, self.update)
+
     def show_search_bar(self): 
         self.search_overlay.show_overlay()
         self.resizeEvent(None)
@@ -1458,9 +1510,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             self.settings.setValue("last_filter_dir", os.path.dirname(path))
             if self.filter_controller.load_from_file(path):
                 self.toast.show_message("Filters Loaded", type_str="success")
-                if self.filter_dock.isHidden():
-                    self.filter_dock.show()
-                    self.filter_dock.raise_()
+                self._show_dock_exclusive(0)
     def closeEvent(self, event):
         if self.filters_modified:
             r = ModernMessageBox.question(self, "Unsaved Changes", "Filters modified. Save?", QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Save)

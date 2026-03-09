@@ -124,7 +124,14 @@ class DimmerOverlay(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False) # Catch mouse events
         self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAttribute(Qt.WA_TranslucentBackground) # Essential for Linux frameless
         self.hide()
+
+    def hide(self):
+        super().hide()
+        if self.parent():
+            # Force parent to repaint to clear dimmer residue on Linux
+            self.parent().update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
