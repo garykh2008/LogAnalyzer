@@ -38,8 +38,17 @@ def main():
     # Allow Ctrl+C to terminate the app from console
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
+    # FIX: Linux Window Exposure Deadlock
+    # Disable creating independent native handles for sibling widgets. 
+    # This forces all widgets to share the top-level surface, which prevents 
+    # the Linux compositor from getting confused by frameless sub-windows.
+    if sys.platform == "linux":
+        from PySide6.QtCore import Qt
+        QApplication.setAttribute(Qt.AA_DontCreateNativeWidgetSiblings)
+
     # 1. High DPI Scaling is enabled by default in Qt 6 / PySide6.
     app = QApplication(sys.argv)
+
 
     # 2. Load Custom Fonts (Inter)
     load_custom_fonts()

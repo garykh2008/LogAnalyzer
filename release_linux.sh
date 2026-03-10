@@ -77,6 +77,7 @@ pyinstaller --noconfirm --noconsole --onefile --clean \
     --specpath "$TEMP_WORK" \
     --add-data "$ABS_PATH/Doc:Doc" \
     --add-data "$ABS_PATH/log_analyzer/fonts:log_analyzer/fonts" \
+    --add-data "$ABS_PATH/log_analyzer/assets:log_analyzer/assets" \
     --add-data "$ABS_PATH/loganalyzer.ico:." \
     --icon="$ABS_PATH/loganalyzer.ico" \
     --hidden-import log_engine_rs \
