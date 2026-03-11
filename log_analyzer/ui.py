@@ -783,17 +783,29 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         dock.show()
         dock.raise_()
 
-    def _show_dock_exclusive(self, index):
-        """Ensures only one dock is visible by using safe hide/show strategies."""
+    def _activate_dock(self, target):
+        """Intelligently shows a dock by hiding others in the SAME area only (Windows only)."""
+        if not target: return
         docks = [self.filter_dock, self.notes_dock, self.log_list_dock]
-        if index < 0 or index >= len(docks): return
-        for i, d in enumerate(docks):
-            if i != index:
-                self._hide_dock_safely(d)
-        self._show_dock_safely(docks[index])
-        if sys.platform == "linux":
-            self.centralWidget().update()
-            QApplication.processEvents()
+        
+        if sys.platform != "linux":
+            # Windows Logic: Only mutual exclude if in same dock area and NOT floating
+            target_area = self.dockWidgetArea(target)
+            for d in docks:
+                if d != target and not d.isFloating() and self.dockWidgetArea(d) == target_area:
+                    self._hide_dock_safely(d)
+        else:
+            # Linux Logic: Strict exclusivity for exposure stability
+            for d in docks:
+                if d != target: self._hide_dock_safely(d)
+        
+        self._show_dock_safely(target)
+
+    def _show_dock_exclusive(self, index):
+        """Deprecated: Use _activate_dock instead. Maintained for compat."""
+        docks = [self.filter_dock, self.notes_dock, self.log_list_dock]
+        if 0 <= index < len(docks):
+            self._activate_dock(docks[index])
 
     def toggle_sidebar(self, index):
         docks = [self.filter_dock, self.notes_dock, self.log_list_dock]
@@ -804,20 +816,15 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         # Check current visible state carefully on Linux
         is_active = target.isVisible() and not target.isHidden()
         
-        # Hide all others first
-        for d in docks:
-            if d != target:
-                self._hide_dock_safely(d)
-        
-        # Toggle target
         if is_active:
             self._hide_dock_safely(target)
         else:
-            self._show_dock_safely(target)
+            self._activate_dock(target)
         
         if sys.platform == "linux":
             self.centralWidget().update()
             QApplication.processEvents()
+
 
 
     def eventFilter(self, obj, event):
