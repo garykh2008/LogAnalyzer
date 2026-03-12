@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
 from PySide6.QtGui import QPalette, QColor, QPainter, QFont
-from PySide6.QtCore import QSize, QRectF, Qt, QRect, Signal, QEvent
+from PySide6.QtCore import QSize, QRectF, Qt, QRect, Signal, QEvent, QTimer
 from .resources import get_svg_icon
 
 
@@ -96,6 +96,12 @@ class LogDelegate(QStyledItemDelegate):
         self.border_color = QColor("#3c3c3c")
         self.show_line_numbers = True
         self.line_spacing = 0
+        
+        # --- Flash Feedback state ---
+        self._flash_row = -1
+        self._flash_alpha = 0
+        self._flash_timer = QTimer(self)
+        self._flash_timer.timeout.connect(self._on_flash_tick)
 
     def set_line_spacing(self, spacing):
         self.line_spacing = spacing
@@ -118,6 +124,21 @@ class LogDelegate(QStyledItemDelegate):
         self.search_query = query
         self.search_case_sensitive = case_sensitive
 
+    def flash_index(self, row):
+        """Starts a visual flash on the specified row index."""
+        self._flash_row = row
+        self._flash_alpha = 150
+        self._flash_timer.start(30) # ~33fps
+
+    def _on_flash_tick(self):
+        self._flash_alpha -= 15
+        if self._flash_alpha <= 0:
+            self._flash_alpha = 0
+            self._flash_row = -1
+            self._flash_timer.stop()
+        if self.parent():
+            self.parent().viewport().update()
+
     def paint(self, painter, option, index):
         painter.save()
         painter.setFont(option.font) # Ensure custom font is used for drawing
@@ -138,6 +159,12 @@ class LogDelegate(QStyledItemDelegate):
             elif state & QStyle.State_MouseOver:
                  # Standard hover overlay (blended over the current background)
                  painter.fillRect(option.rect, self.hover_color)
+            
+            # --- Flash Feedback Drawing ---
+            if self._flash_row == index.row() and self._flash_alpha > 0:
+                flash_c = QColor("#3794ff") # Highlighting blue
+                flash_c.setAlpha(self._flash_alpha)
+                painter.fillRect(option.rect, flash_c)
 
             # --- Fixed Line Number Column ---
             raw_index = index.data(Qt.UserRole + 1)

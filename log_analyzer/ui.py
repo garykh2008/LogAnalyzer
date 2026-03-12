@@ -845,7 +845,10 @@ class MainWindow(NativeWindowMixin, QMainWindow):
                     self.config.set_editor_font(self.config.editor_font_family, new_size)
                 return True
             else:
-                self.v_scrollbar.setValue(self.v_scrollbar.value() + (-delta / 40))
+                # Optimized Scrolling: Use system setting for lines per notch
+                lines = QApplication.wheelScrollLines()
+                step = (delta / 120) * lines
+                self.v_scrollbar.setValue(self.v_scrollbar.value() - step)
                 return True
         if event.type() == QEvent.KeyPress:
             key = event.key()
@@ -868,12 +871,14 @@ class MainWindow(NativeWindowMixin, QMainWindow):
                 elif key == Qt.Key_Down:
                     idx = self.list_view.currentIndex()
                     if idx.isValid() and idx.row() >= self.model.rowCount() - 1:
-                        self.v_scrollbar.setValue(self.v_scrollbar.value() + 1)
+                        # Boundary navigation: faster scroll when holding down
+                        self.v_scrollbar.setValue(self.v_scrollbar.value() + 3)
                         return True
                 elif key == Qt.Key_Up:
                     idx = self.list_view.currentIndex()
                     if idx.isValid() and idx.row() <= 0:
-                        self.v_scrollbar.setValue(self.v_scrollbar.value() - 1)
+                        # Boundary navigation: faster scroll when holding up
+                        self.v_scrollbar.setValue(self.v_scrollbar.value() - 3)
                         return True
                 elif key == Qt.Key_PageDown:
                     self.v_scrollbar.setValue(self.v_scrollbar.value() + self.v_scrollbar.pageStep())
@@ -887,6 +892,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
                     return True
                 elif key == Qt.Key_End:
                     self.v_scrollbar.setValue(self.v_scrollbar.maximum())
+                    QApplication.processEvents() # Ensure viewport update for index mapping
                     last = self.model.rowCount() - 1
                     if last >= 0:
                         self.list_view.setCurrentIndex(self.model.index(last, 0))
@@ -1414,6 +1420,11 @@ class MainWindow(NativeWindowMixin, QMainWindow):
                 if focus_list:
                     self.list_view.setFocus()
                 self.selected_raw_index = raw_index
+                
+                # Visual Feedback: Flash the row
+                if hasattr(self.delegate, 'flash_index'):
+                    self.delegate.flash_index(rel_row)
+                    self.list_view.viewport().update()
     @property
     def filters_modified(self): 
         return self.filter_controller.filters_modified
