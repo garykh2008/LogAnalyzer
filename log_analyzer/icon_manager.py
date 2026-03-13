@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PySide6.QtSvg import QSvgRenderer
@@ -20,8 +21,14 @@ class IconManager(QObject):
         super().__init__()
         self._initialized = True
         
-        # Ensure absolute path calculation
-        base_dir = os.path.dirname(os.path.abspath(__file__))
+        # Handle PyInstaller _MEIPASS for resource paths
+        if hasattr(sys, '_MEIPASS'):
+            # Running in PyInstaller bundle
+            base_dir = os.path.join(sys._MEIPASS, "log_analyzer")
+        else:
+            # Running in normal Python environment
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            
         self.assets_dir = assets_dir or os.path.join(base_dir, "assets")
         self._cache = {}
         self._path_cache = {}

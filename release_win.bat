@@ -193,7 +193,19 @@ if not exist "build" mkdir "build"
 set "ABS_DOC_SRC=%~dp0%DOC_DIR%"
 set "ABS_ICON_PATH=%~dp0loganalyzer.ico"
 set "ABS_FONTS_SRC=%~dp0log_analyzer\fonts"
-pyinstaller --noconfirm --noconsole --onefile --clean --distpath "%REL_WIN%" --workpath "build" --specpath "build" --add-data "%ABS_DOC_SRC%;%DOC_DIR%" --add-data "%ABS_FONTS_SRC%;log_analyzer/fonts" --add-data "%ABS_ICON_PATH%;." --icon="%ABS_ICON_PATH%" --hidden-import log_engine_rs --name "LogAnalyzer_%BUILD_VER%" "%PYTHON_FILE%" > build/pyinstaller.log 2>&1
+set "ABS_ASSETS_SRC=%~dp0log_analyzer\assets"
+
+:: Added --add-data for assets directory to include SVG icons in the bundle
+pyinstaller --noconfirm --noconsole --onefile --clean ^
+    --distpath "%REL_WIN%" --workpath "build" --specpath "build" ^
+    --add-data "%ABS_DOC_SRC%;%DOC_DIR%" ^
+    --add-data "%ABS_FONTS_SRC%;log_analyzer/fonts" ^
+    --add-data "%ABS_ASSETS_SRC%;log_analyzer/assets" ^
+    --add-data "%ABS_ICON_PATH%;." ^
+    --icon="%ABS_ICON_PATH%" ^
+    --hidden-import log_engine_rs ^
+    --name "LogAnalyzer_%BUILD_VER%" "%PYTHON_FILE%" > build/pyinstaller.log 2>&1
+
 if %errorlevel% neq 0 ( echo [Error] PyInstaller failed. Check build/pyinstaller.log && exit /b 1 )
 
 goto :eof
