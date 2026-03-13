@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QListView,
                                QMessageBox, QPushButton, QStackedLayout, QFrame,
                                QSpinBox, QSizeGrip)
 from PySide6.QtGui import QAction, QFont, QColor, QKeySequence, QIcon, QFontMetrics, QFontInfo
-from PySide6.QtCore import Qt, QSettings, QTimer, QEvent, QSize, QItemSelectionModel, QRect
+from PySide6.QtCore import Qt, QSettings, QTimer, QEvent, QSize, QItemSelectionModel, QRect, QPoint
 from .models import LogModel
 from .theme_manager import theme_manager
 from .controllers import LogController, FilterController, SearchController
@@ -49,6 +49,8 @@ class LogListView(QListView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.suppress_scroll = False
+        # Ensure we scroll by items, which is more predictable for virtual viewports
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerItem)
 
     def scrollTo(self, index, hint=QAbstractItemView.EnsureVisible):
         if self.suppress_scroll:
@@ -160,6 +162,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         
         # --- View Anchor State ---
         self._anchor_raw = 0
+        self._anchor_rel_row = 0
         self._landed_v = -1
 
         if sys.platform == "linux":
@@ -347,6 +350,8 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.list_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.v_scrollbar = SearchScrollBar(Qt.Vertical)
         self.v_scrollbar.valueChanged.connect(self.on_scrollbar_value_changed)
+        # Use viewport for wheel filter to be more robust
+        self.list_view.viewport().installEventFilter(self)
         self.list_view.installEventFilter(self)
 
         self.list_view.selectionModel().currentChanged.connect(self.on_view_selection_changed)
@@ -370,13 +375,13 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.welcome_icon = QLabel()
         self.welcome_icon.setFixedSize(80, 80)
         self.welcome_icon.setAlignment(Qt.AlignCenter)
-        welcome_layout.addWidget(self.welcome_icon, 0, Qt.AlignCenter)
+        welcome_layout.addWidget(self.welcome_widget, 0, Qt.AlignCenter)
 
         self.welcome_label = QLabel("Drag & Drop Log File Here\nor use File > Open Log")
         self.welcome_label.setAlignment(Qt.AlignCenter)
         self.welcome_label.setFont(theme_manager.get_font(14))
         self.welcome_label.setStyleSheet("color: #888888;")
-        welcome_layout.addWidget(self.welcome_label, 0, Qt.AlignCenter)
+        welcome_layout.addWidget(self.welcome_widget, 0, Qt.AlignCenter)
 
         self.central_stack.addWidget(self.welcome_widget)
 
@@ -580,8 +585,10 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         if self._pending_view_switch_jump and self.show_filtered_only:
             target_v = 0
             if self.model.filtered_indices:
-                target_v = bisect.bisect_left(self.model.filtered_indices, self._anchor_raw)
-                self._landed_v = target_v
+                # Find the filtered index of the selected line (or anchor)
+                v_row_of_anchor = bisect.bisect_left(self.model.filtered_indices, self._anchor_raw)
+                # Apply the saved relative offset to maintain visual position
+                target_v = max(0, v_row_of_anchor - self._anchor_rel_row)
             
             self.v_scrollbar.blockSignals(True)
             self.v_scrollbar.setValue(target_v)
@@ -727,35 +734,53 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             self.notes_manager.delete_note(raw_index, self.current_log_path)
 
     def toggle_show_filtered_only(self):
-        v_val = self.v_scrollbar.value()
+        # --- PHYSICAL POSITION MEASUREMENT ---
+        target_raw = -1
+        rel_row = 0
         
-        # --- MEMORY PROTECTION: Preserve the origin point ---
-        if not self.show_filtered_only:
-            # Entering Filtered View: Set the anchor
-            self._anchor_raw = v_val
-        else:
-            # Returning to Full View: Check if user scrolled
-            if v_val != self._landed_v:
-                # User MOVED in Filtered mode. Update anchor to current visual row's raw index.
-                if self.model.filtered_indices and 0 <= v_val < len(self.model.filtered_indices):
-                    self._anchor_raw = self.model.filtered_indices[v_val]
+        # 1. Capture relative position of the selection if visible
+        if self.selected_raw_index != -1:
+            v_row = -1
+            if self.show_filtered_only and self.model.filtered_indices:
+                idx = bisect.bisect_left(self.model.filtered_indices, self.selected_raw_index)
+                if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == self.selected_raw_index:
+                    v_row = idx
+            else:
+                v_row = self.selected_raw_index
+            
+            # Check visibility in the current rendered 200-line viewport
+            if v_row != -1 and self.model.viewport_start <= v_row < self.model.viewport_start + self.model.rowCount():
+                rel_row = v_row - self.model.viewport_start
+                target_raw = self.selected_raw_index
+        
+        # 2. Fallback to top-line measurement if no selection visible
+        if target_raw == -1:
+            top_idx = self.list_view.indexAt(QPoint(5, 5))
+            if top_idx.isValid():
+                target_raw = top_idx.data(Qt.UserRole + 1)
+            else:
+                v_val = self.v_scrollbar.value()
+                if self.show_filtered_only and self.model.filtered_indices:
+                    target_raw = self.model.filtered_indices[v_val] if v_val < len(self.model.filtered_indices) else v_val
                 else:
-                    self._anchor_raw = v_val
-            # If user DID NOT move (v_val == landed_v), we preserve the original anchor_raw.
+                    target_raw = v_val
+            rel_row = 0
 
         self.show_filtered_only = self.show_filtered_action.isChecked()
         self._pending_view_switch_jump = True
+        self._anchor_raw = target_raw
+        self._anchor_rel_row = rel_row
         self.recalc_filters()
         
         # --- IMMEDIATE RETURN (TO FULL) ---
         if not self.show_filtered_only:
-            target_v = self._anchor_raw
-            
+            # When returning to Full, we can perfectly calculate the top raw index
+            final_top = max(0, self._anchor_raw - self._anchor_rel_row)
             self.v_scrollbar.blockSignals(True)
             self.update_scrollbar_range(sync_view=False)
-            self.v_scrollbar.setValue(target_v)
+            self.v_scrollbar.setValue(final_top)
             self.v_scrollbar.blockSignals(False)
-            self.on_scrollbar_value_changed(target_v)
+            self.on_scrollbar_value_changed(final_top)
             self._pending_view_switch_jump = False
 
         mode_str = "Filtered View" if self.show_filtered_only else "Full Log View"
@@ -836,7 +861,8 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         if hasattr(self, 'list_view') and obj == self.list_view and event.type() == QEvent.Resize:
             self.update_scrollbar_range()
             return False
-        if hasattr(self, 'list_view') and obj == self.list_view and event.type() == QEvent.Wheel:
+        # Catch wheel events on BOTH the list view and its viewport
+        if hasattr(self, 'list_view') and (obj == self.list_view or obj == self.list_view.viewport()) and event.type() == QEvent.Wheel:
             modifiers = event.modifiers()
             delta = event.angleDelta().y()
             if modifiers & Qt.ControlModifier:
@@ -847,8 +873,12 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             else:
                 # Optimized Scrolling: Use system setting for lines per notch
                 lines = QApplication.wheelScrollLines()
-                step = (delta / 120) * lines
-                self.v_scrollbar.setValue(self.v_scrollbar.value() - step)
+                # Ensure we handle high-res wheels by accumulating delta or using a fixed minimum step
+                step = int(max(1, abs(delta / 120)) * lines)
+                if delta > 0:
+                    self.v_scrollbar.setValue(self.v_scrollbar.value() - step)
+                else:
+                    self.v_scrollbar.setValue(self.v_scrollbar.value() + step)
                 return True
         if event.type() == QEvent.KeyPress:
             key = event.key()
@@ -1593,7 +1623,11 @@ class MainWindow(NativeWindowMixin, QMainWindow):
     def calculate_viewport_size(self):
         h = self.list_view.viewport().height()
         rh = QFontMetrics(self.list_view.font()).height()
-        return (h // (rh if rh > 0 else 20)) + 100
+        # DECREASE BUFFER: 
+        # Using a very small buffer (2 lines) ensures the internal scrollbar 
+        # has almost no room to deviate from the top, fixing alignment 
+        # without needing dangerous manual scroll resets.
+        return (h // (rh if rh > 0 else 20)) + 2
     def on_view_selection_changed(self, curr, prev):
         if self.is_scrolling or not curr.isValid():
             return
@@ -1612,7 +1646,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         if self.show_filtered_only and self.model.filtered_indices is not None:
             total = len(self.model.filtered_indices)
         vp = self.calculate_viewport_size()
-        self.v_scrollbar.setRange(0, max(0, total - vp))
+        self.v_scrollbar.setRange(0, max(0, total - (vp - 2)))
         self.v_scrollbar.setPageStep(vp)
         if sync_view:
             self.on_scrollbar_value_changed(self.v_scrollbar.value())
@@ -1733,7 +1767,12 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.is_scrolling = True
         self.list_view.suppress_scroll = True
         try:
+            # Sync model viewport
             self.model.set_viewport(value, self.calculate_viewport_size())
+            
+            # Reset internal scroll to zero to align model's first row with window top
+            self.list_view.verticalScrollBar().setValue(0)
+            
             if self.selected_raw_index != -1:
                 tr = -1
                 if self.show_filtered_only and self.model.filtered_indices:
