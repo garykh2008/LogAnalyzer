@@ -1,8 +1,8 @@
-# Log Analyzer V2.0 User Manual
+# Log Analyzer V2.3 User Manual
 
 ## Table of Contents
 
-- [Log Analyzer V2.0 User Manual](#log-analyzer-v20-user-manual)
+- [Log Analyzer V2.3 User Manual](#log-analyzer-v23-user-manual)
   - [1. Introduction](#1-introduction)
   - [2. Key Features](#2-key-features)
     - [🚀 Next-Gen Performance](#-next-gen-performance)
@@ -17,6 +17,7 @@
     - [Shortcuts](#shortcuts)
     - [Preferences](#preferences)
   - [4. Release Notes](#4-release-notes)
+    - [Version 2.3 (2026-03-12)](#version-23-2026-03-12)
     - [Version 2.2 (2026-01-29)](#version-22-2026-01-29)
     - [Version 2.1 (2026-01-15)](#version-21-2026-01-15)
     - [Version 2.0 (2026-01-12)](#version-20-2026-01-12)
@@ -25,9 +26,9 @@
 
 ## 1. Introduction
 
-**Log Analyzer V2.2** builds upon the robust Qt architecture of V2.0, focusing on refined modularity, customizable user preferences, and a polished visual experience.
+**Log Analyzer V2.3** represents a major leap in user experience and visual continuity. Building on the robust Qt architecture of V2.0, this version focuses on "Zero-Context Loss" navigation and professional-grade UI refinements.
 
-Designed for high-performance log analysis, it continues to leverage the **Virtual Viewport** and Rust-powered filtering while introducing a centralized **Theme Manager** and a dedicated **Preferences** system.
+Designed for high-performance log analysis, it ensures that your visual focus remains locked, your navigation feels native, and your workspace stays clean and efficient across Windows and Linux environments.
 
 ## 2. Key Features
 
@@ -39,27 +40,27 @@ Designed for high-performance log analysis, it continues to leverage the **Virtu
 ### 🖥️ Modern & Flexible UI
 
 *   **Activity Bar**: A VS Code-inspired vertical bar for quick access to **Log List**, **Filters**, and **Notes**. Includes **Notification Badges** that display the count of enabled filters and notes for the current file.
-*   **Docking System**: Fully dockable panels for Filters and Notes. You can pin them to any edge, tab them together, or float them as separate windows. 
-    *   *Note: On Linux, a simplified fixed-layout mode is used to ensure maximum stability.*
+*   **Selection Anchor Preservation**: When toggling between Full and Filtered views, the application now locks the selected line's relative position on screen, preventing "jump disorientation."
+*   **Area-Aware Docking**: Intelligent mutual exclusivity for docks. Panels in the same area (like Filters and Notes) swap automatically to maximize space, while floating panels remain independent.
 *   **Refined Visuals**: 
     *   **Flat Menu Design**: Modern, frameless menus with rounded corners and optimized spacing.
+    *   **Professional SVG Iconography**: A complete set of professional SVG assets that dynamically adapt to your chosen theme (Dark/Light).
     *   **Layered Theming**: Polished Dark/Light modes with better contrast and visual hierarchy.
 *   **Customization**: A new **Preferences Dialog** allows you to adjust UI font sizes, editor fonts, and line spacing to suit your display setup.
 
 ### 📊 Advanced Visualization
 
 *   **Scrollbar Minimap (Heatmap)**: The vertical scrollbar track now displays color-coded markers (orange/yellow) indicating the distribution of search results across the entire file.
+*   **Jump Flash Feedback**: A subtle blue fade-out animation highlights the target line after a search jump (F2/F3) or "Go to Line" operation, ensuring instant visual confirmation.
 *   **Zooming**: Quickly adjust the log view font size using **Ctrl + Wheel**.
-*   **Density View**: Provides a high-level overview of where matches are concentrated, allowing you to jump to interesting sections instantly.
 
 ### 🔍 Intelligent Search & Navigation
 
+*   **Physical Top-Line Alignment**: Uses physical coordinate mapping (`indexAt`) to ensure 1:1 view reconstruction when switching modes, eliminating numerical drift in massive files.
 *   **Floating Search Overlay**: A modern, non-intrusive search panel with shadows and animations.
 *   **Search History**: Access previous search queries by clicking the input box or pressing the **Down** arrow key.
-*   **Interactive Status Bar**: 
-    *   Click the **Line Count** to open the "Go to Line" dialog.
-    *   Click the **View Mode** label to toggle "Show Filtered Only" instantly.
 *   **Smart "Go to Line"**: In Filtered View, you can still enter **raw line numbers**. If the target line is hidden by filters, the app will automatically switch back to Full View to reach the destination.
+*   **Native Scroll Sync**: Mouse wheel behavior now automatically respects the system's "lines per notch" settings for a truly native feel.
 
 ### 📝 Comprehensive Notes System
 
@@ -95,7 +96,7 @@ Designed for high-performance log analysis, it continues to leverage the **Virtu
 | **Ctrl + F** | Open Search Bar |
 | **Ctrl + G** | Go to Line |
 | **F3 / F2** | Find Next / Previous |
-| **Ctrl + H** | Toggle "Show Filtered Only" |
+| **Ctrl + H** | Toggle "Show Filtered Only" (Maintains Selection Anchor) |
 | **Ctrl + Shift + L** | Toggle Log Files Panel |
 | **Ctrl + Shift + F** | Toggle Filters Panel |
 | **Ctrl + Shift + N** | Toggle Notes Panel |
@@ -122,6 +123,29 @@ Access via the **Settings (Gear)** icon at the bottom of the Activity Bar.
     *   **Font Size**: Scale the entire application UI for better readability on high-DPI screens.
 
 ## 4. Release Notes
+
+### Version 2.3 (2026-03-12)
+
+**Visual Continuity & Locking**
+*   **Selection Anchor Preservation**: The selected line now maintains its exact relative vertical position on the screen when toggling between Full and Filtered views.
+*   **Physical Coordinate Alignment**: Switched to a physical coordinate-based anchoring system (`indexAt`) to ensure 1:1 view reconstruction, eliminating calculation drifts in massive log files.
+
+**Enhanced Navigation UX**
+*   **Jump Flash Feedback**: Added a blue fade-out animation to the target line when performing search jumps (F2/F3) or "Go to Line" operations.
+*   **Turbo Boundary Navigation**: Holding Up/Down keys at the viewport edges now scrolls 3x faster for smoother traversal through long files.
+
+**Scrolling & Performance**
+*   **Native Scroll Sync**: Mouse wheel scrolling now respects the operating system's "lines per notch" setting.
+*   **Viewport Stability**: Eliminated the "bounce-back" effect during rapid scrolling by optimizing buffer management and coordinate mapping.
+
+**UI/UX Polishing**
+*   **Professional Asset Migration**: Introduced a complete set of high-quality SVG icons with dynamic theme-aware recoloring.
+*   **Windows 11 Aesthetics**: Applied rounded corners to all dialogs and improved tool-tip styling.
+*   **Smart Dock Management**: Implemented area-aware dock exclusivity on Windows, allowing panels like Filters and Notes to intelligently swap spaces.
+
+**Cross-Platform Fixes**
+*   Comprehensive fixes for Linux UI issues, including ghosting, residue panels, and window exposure problems.
+*   Fixed an issue where copied text contained extra newline characters.
 
 ### Version 2.2 (2026-01-29)
 
