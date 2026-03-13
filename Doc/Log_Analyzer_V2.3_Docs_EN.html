@@ -4,7 +4,7 @@
 	<head>
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>Log Analyzer Documentation ( V2.2 )</title>
+		<title>Log Analyzer Documentation ( V2.3 )</title>
 		
 <style>
 	body {
@@ -30,10 +30,10 @@
 
 	</head>
 	<body>
-		<h1 id="log-analyzer-v20-user-manual">Log Analyzer V2.0 User Manual</h1>
+		<h1 id="log-analyzer-v23-user-manual">Log Analyzer V2.3 User Manual</h1>
 <h2 id="table-of-contents">Table of Contents</h2>
 <ul>
-<li><a href="#log-analyzer-v20-user-manual">Log Analyzer V2.0 User Manual</a></li>
+<li><a href="#log-analyzer-v23-user-manual">Log Analyzer V2.3 User Manual</a></li>
 <li><a href="#1-introduction">1. Introduction</a></li>
 <li><a href="#2-key-features">2. Key Features</a><ul>
 <li><a href="#-next-gen-performance">🚀 Next-Gen Performance</a></li>
@@ -52,6 +52,7 @@
 </ul>
 </li>
 <li><a href="#4-release-notes">4. Release Notes</a><ul>
+<li><a href="#version-23-2026-03-12">Version 2.3 (2026-03-12)</a></li>
 <li><a href="#version-22-2026-01-29">Version 2.2 (2026-01-29)</a></li>
 <li><a href="#version-21-2026-01-15">Version 2.1 (2026-01-15)</a></li>
 <li><a href="#version-20-2026-01-12">Version 2.0 (2026-01-12)</a></li>
@@ -60,8 +61,8 @@
 </ul>
 <hr />
 <h2 id="1-introduction">1. Introduction</h2>
-<p><strong>Log Analyzer V2.2</strong> builds upon the robust Qt architecture of V2.0, focusing on refined modularity, customizable user preferences, and a polished visual experience.</p>
-<p>Designed for high-performance log analysis, it continues to leverage the <strong>Virtual Viewport</strong> and Rust-powered filtering while introducing a centralized <strong>Theme Manager</strong> and a dedicated <strong>Preferences</strong> system.</p>
+<p><strong>Log Analyzer V2.3</strong> represents a major leap in user experience and visual continuity. Building on the robust Qt architecture of V2.0, this version focuses on "Zero-Context Loss" navigation and professional-grade UI refinements.</p>
+<p>Designed for high-performance log analysis, it ensures that your visual focus remains locked, your navigation feels native, and your workspace stays clean and efficient across Windows and Linux environments.</p>
 <h2 id="2-key-features">2. Key Features</h2>
 <h3 id="next-gen-performance">🚀 Next-Gen Performance</h3>
 <ul>
@@ -71,12 +72,11 @@
 <h3 id="modern-flexible-ui">🖥️ Modern &amp; Flexible UI</h3>
 <ul>
 <li><strong>Activity Bar</strong>: A VS Code-inspired vertical bar for quick access to <strong>Log List</strong>, <strong>Filters</strong>, and <strong>Notes</strong>. Includes <strong>Notification Badges</strong> that display the count of enabled filters and notes for the current file.</li>
-<li><strong>Docking System</strong>: Fully dockable panels for Filters and Notes. You can pin them to any edge, tab them together, or float them as separate windows. <ul>
-<li><em>Note: On Linux, a simplified fixed-layout mode is used to ensure maximum stability.</em></li>
-</ul>
-</li>
+<li><strong>Selection Anchor Preservation</strong>: When toggling between Full and Filtered views, the application now locks the selected line's relative position on screen, preventing "jump disorientation."</li>
+<li><strong>Area-Aware Docking</strong>: Intelligent mutual exclusivity for docks. Panels in the same area (like Filters and Notes) swap automatically to maximize space, while floating panels remain independent.</li>
 <li><strong>Refined Visuals</strong>: <ul>
 <li><strong>Flat Menu Design</strong>: Modern, frameless menus with rounded corners and optimized spacing.</li>
+<li><strong>Professional SVG Iconography</strong>: A complete set of professional SVG assets that dynamically adapt to your chosen theme (Dark/Light).</li>
 <li><strong>Layered Theming</strong>: Polished Dark/Light modes with better contrast and visual hierarchy.</li>
 </ul>
 </li>
@@ -85,19 +85,16 @@
 <h3 id="advanced-visualization">📊 Advanced Visualization</h3>
 <ul>
 <li><strong>Scrollbar Minimap (Heatmap)</strong>: The vertical scrollbar track now displays color-coded markers (orange/yellow) indicating the distribution of search results across the entire file.</li>
+<li><strong>Jump Flash Feedback</strong>: A subtle blue fade-out animation highlights the target line after a search jump (F2/F3) or "Go to Line" operation, ensuring instant visual confirmation.</li>
 <li><strong>Zooming</strong>: Quickly adjust the log view font size using <strong>Ctrl + Wheel</strong>.</li>
-<li><strong>Density View</strong>: Provides a high-level overview of where matches are concentrated, allowing you to jump to interesting sections instantly.</li>
 </ul>
 <h3 id="intelligent-search-navigation">🔍 Intelligent Search &amp; Navigation</h3>
 <ul>
+<li><strong>Physical Top-Line Alignment</strong>: Uses physical coordinate mapping (<code>indexAt</code>) to ensure 1:1 view reconstruction when switching modes, eliminating numerical drift in massive files.</li>
 <li><strong>Floating Search Overlay</strong>: A modern, non-intrusive search panel with shadows and animations.</li>
 <li><strong>Search History</strong>: Access previous search queries by clicking the input box or pressing the <strong>Down</strong> arrow key.</li>
-<li><strong>Interactive Status Bar</strong>: <ul>
-<li>Click the <strong>Line Count</strong> to open the "Go to Line" dialog.</li>
-<li>Click the <strong>View Mode</strong> label to toggle "Show Filtered Only" instantly.</li>
-</ul>
-</li>
 <li><strong>Smart "Go to Line"</strong>: In Filtered View, you can still enter <strong>raw line numbers</strong>. If the target line is hidden by filters, the app will automatically switch back to Full View to reach the destination.</li>
+<li><strong>Native Scroll Sync</strong>: Mouse wheel behavior now automatically respects the system's "lines per notch" settings for a truly native feel.</li>
 </ul>
 <h3 id="comprehensive-notes-system">📝 Comprehensive Notes System</h3>
 <ul>
@@ -156,7 +153,7 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Ctrl + H</strong></td>
-<td style="text-align: left;">Toggle "Show Filtered Only"</td>
+<td style="text-align: left;">Toggle "Show Filtered Only" (Maintains Selection Anchor)</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Ctrl + Shift + L</strong></td>
@@ -214,6 +211,23 @@
 </li>
 </ul>
 <h2 id="4-release-notes">4. Release Notes</h2>
+<h3 id="version-23-2026-03-12">Version 2.3 (2026-03-12)</h3>
+<p><strong>Visual Continuity &amp; Locking</strong>
+*   <strong>Selection Anchor Preservation</strong>: The selected line now maintains its exact relative vertical position on the screen when toggling between Full and Filtered views.
+*   <strong>Physical Coordinate Alignment</strong>: Switched to a physical coordinate-based anchoring system (<code>indexAt</code>) to ensure 1:1 view reconstruction, eliminating calculation drifts in massive log files.</p>
+<p><strong>Enhanced Navigation UX</strong>
+*   <strong>Jump Flash Feedback</strong>: Added a blue fade-out animation to the target line when performing search jumps (F2/F3) or "Go to Line" operations.
+*   <strong>Turbo Boundary Navigation</strong>: Holding Up/Down keys at the viewport edges now scrolls 3x faster for smoother traversal through long files.</p>
+<p><strong>Scrolling &amp; Performance</strong>
+*   <strong>Native Scroll Sync</strong>: Mouse wheel scrolling now respects the operating system's "lines per notch" setting.
+*   <strong>Viewport Stability</strong>: Eliminated the "bounce-back" effect during rapid scrolling by optimizing buffer management and coordinate mapping.</p>
+<p><strong>UI/UX Polishing</strong>
+*   <strong>Professional Asset Migration</strong>: Introduced a complete set of high-quality SVG icons with dynamic theme-aware recoloring.
+*   <strong>Windows 11 Aesthetics</strong>: Applied rounded corners to all dialogs and improved tool-tip styling.
+*   <strong>Smart Dock Management</strong>: Implemented area-aware dock exclusivity on Windows, allowing panels like Filters and Notes to intelligently swap spaces.</p>
+<p><strong>Cross-Platform Fixes</strong>
+*   Comprehensive fixes for Linux UI issues, including ghosting, residue panels, and window exposure problems.
+*   Fixed an issue where copied text contained extra newline characters.</p>
 <h3 id="version-22-2026-01-29">Version 2.2 (2026-01-29)</h3>
 <p><strong>UX &amp; Navigation</strong>
 *   <strong>Smart Context Persistence</strong>: Significantly improved behavior when switching between "Full Log" and "Filtered View" (Ctrl+H).
