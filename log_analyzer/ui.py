@@ -156,6 +156,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
 
         self.selected_filter_index = -1
         self.selected_raw_index = -1
+        self.selected_raw_indices = set()
         self.is_scrolling = False
         self._suppress_search_jump = False
         self._pending_view_switch_jump = False
@@ -355,6 +356,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.list_view.installEventFilter(self)
 
         self.list_view.selectionModel().currentChanged.connect(self.on_view_selection_changed)
+        self.list_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
         self.central = QWidget()
         self.central.setObjectName("central_widget")
@@ -883,9 +885,18 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         if event.type() == QEvent.KeyPress:
             key = event.key()
             mod = event.modifiers()
-            if hasattr(self, 'search_overlay') and key == Qt.Key_Escape and not self.search_overlay.isHidden():
-                self.hide_search_bar()
-                return True
+            if key == Qt.Key_Escape:
+                if hasattr(self, 'search_overlay') and not self.search_overlay.isHidden():
+                    self.hide_search_bar()
+                    return True
+                else:
+                    # Escape also clears selection as per keyboard shortcut docs
+                    self.list_view.selectionModel().clearSelection()
+                    self.selected_raw_indices.clear()
+                    self.selected_raw_index = -1
+                    if hasattr(self, 'status_pos_label'):
+                        self.status_pos_label.setText("Ln 0")
+                    return True
             if (mod & Qt.ControlModifier):
                 if key == Qt.Key_Left:
                     self.navigate_filter_hit(reverse=True)
@@ -1005,6 +1016,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.btn_side_loglist.setIcon(icon_manager.load_icon("file-text", general_icon_c, 24))
         self.btn_side_filter.setIcon(icon_manager.load_icon("filter", general_icon_c, 24))
         self.btn_side_notes.setIcon(icon_manager.load_icon("edit", general_icon_c, 24))
+        self.btn_side_notes.setIcon(icon_manager.load_icon("edit", general_icon_c, 24))
         self.btn_settings.setIcon(icon_manager.load_icon("settings", general_icon_c, 24))
         
         self.open_action.setIcon(icon_manager.load_icon("file-text", general_icon_c, 16))
@@ -1077,6 +1089,8 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.central_stack.setCurrentIndex(0)
         self.update_window_title()
         self.update_status_bar("Ready")
+        self.selected_raw_indices.clear()
+        self.selected_raw_index = -1
         if hasattr(self, 'status_pos_label'):
             self.status_pos_label.setText("Ln 0")
     def update_recent_menu(self):
@@ -1137,6 +1151,8 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.central_stack.setCurrentIndex(0)
         self.update_window_title()
         self.update_status_bar("Ready")
+        self.selected_raw_indices.clear()
+        self.selected_raw_index = -1
     def load_log(self, filepath, is_multiple=False):
         if not filepath or not os.path.exists(filepath):
             return
@@ -1161,6 +1177,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
                 self.log_states[self.current_log_path] = {}
             self.log_states[self.current_log_path]["scroll"] = self.v_scrollbar.value()
             self.log_states[self.current_log_path]["selected_raw"] = self.selected_raw_index
+            self.log_states[self.current_log_path]["selected_raw_indices"] = set(self.selected_raw_indices)
         self.log_controller.set_current_log(filepath)
         self.current_log_path = filepath
         self.model.set_engine(self.current_engine, filepath)
@@ -1176,6 +1193,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         scroll_pos = state.get("scroll", 0)
         selected_raw = state.get("selected_raw", -1)
         self.selected_raw_index = selected_raw
+        self.selected_raw_indices = state.get("selected_raw_indices", set())
         
         self.v_scrollbar.blockSignals(True)
         self.update_scrollbar_range(sync_view=False)
@@ -1211,15 +1229,9 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         if not self.search_overlay.isHidden():
             self.search_overlay.input.setFocus()
     def _restore_selection_ui(self, raw_index):
-        view_row = raw_index
-        if self.show_filtered_only and self.model.filtered_indices:
-             idx = bisect.bisect_left(self.model.filtered_indices, raw_index)
-             if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == raw_index:
-                 view_row = idx
-             else:
-                 return 
-        rel_row = view_row - self.model.viewport_start
-        if 0 <= rel_row < self.model.rowCount():
+        rel_row = self._get_view_row_from_raw(raw_index)
+        if rel_row != -1:
+            # Note: ClearAndSelect here is fine for a single target restoration
             self.list_view.setCurrentIndex(self.model.index(rel_row, 0))
     def update_log_tree(self):
         self.log_tree.clear()
@@ -1281,26 +1293,67 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         indexes = self.list_view.selectionModel().selectedIndexes()
         if len(indexes) == 1:
             idx = indexes[0]
-            abs_row = self.model.viewport_start + idx.row()
-            raw_index = abs_row
-            if self.show_filtered_only and self.model.filtered_indices:
-                raw_index = self.model.filtered_indices[abs_row]
-            menu.addAction(icon_manager.load_icon("edit", ic, 16), "Add/Edit Note", lambda: self.notes_manager.add_note(raw_index, "", self.current_log_path))
+            raw_index = self._get_raw_from_view_index(idx)
+            if raw_index != -1:
+                menu.addAction(icon_manager.load_icon("edit", ic, 16), "Add/Edit Note", lambda: self.notes_manager.add_note(raw_index, "", self.current_log_path))
         menu.exec_(self.list_view.mapToGlobal(pos))
-    def copy_selection(self):
-        indexes = self.list_view.selectionModel().selectedIndexes()
-        if not indexes:
+
+    def _get_raw_from_view_index(self, index):
+        if not index.isValid():
+            return -1
+        abs_row = self.model.viewport_start + index.row()
+        if self.show_filtered_only and self.model.filtered_indices:
+            if abs_row < len(self.model.filtered_indices):
+                return self.model.filtered_indices[abs_row]
+            return -1
+        return abs_row
+
+    def _get_view_row_from_raw(self, raw_index):
+        view_row = raw_index
+        if self.show_filtered_only and self.model.filtered_indices:
+             idx = bisect.bisect_left(self.model.filtered_indices, raw_index)
+             if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == raw_index:
+                 view_row = idx
+             else:
+                 return -1
+        rel_row = view_row - self.model.viewport_start
+        if 0 <= rel_row < self.model.rowCount():
+            return rel_row
+        return -1
+
+    def on_selection_changed(self, selected, deselected):
+        if self.is_scrolling:
             return
-        indexes.sort(key=lambda x: x.row())
+        
+        # Sync global selection set based on selection model changes
+        for index in selected.indexes():
+            raw = self._get_raw_from_view_index(index)
+            if raw != -1:
+                self.selected_raw_indices.add(raw)
+        
+        for index in deselected.indexes():
+            raw = self._get_raw_from_view_index(index)
+            if raw != -1:
+                self.selected_raw_indices.discard(raw)
+
+    def copy_selection(self):
+        if not self.selected_raw_indices:
+            return
+        
+        # Use the global selection set to allow copying across viewports
+        sorted_indices = sorted(list(self.selected_raw_indices))
+        
         text_lines = []
-        for idx in indexes:
-            if idx.isValid():
-                text = self.model.data(idx, Qt.DisplayRole)
+        for raw_idx in sorted_indices:
+            if self.current_engine:
+                text = self.current_engine.get_line(raw_idx)
                 if text is not None:
                     text_lines.append(text.rstrip('\r\n'))
+        
         if text_lines:
             QApplication.clipboard().setText("\n".join(text_lines))
             self.toast.show_message(f"Copied {len(text_lines)} lines")
+
     def resizeEvent(self, event):
         if not self.isMaximized():
             self.last_normal_rect = self.geometry()
@@ -1445,6 +1498,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         if is_exact:
             rel_row = view_row - target_scroll
             if 0 <= rel_row < self.model.rowCount():
+                # For jump, we clear other selections as standard behavior
                 self.list_view.selectionModel().setCurrentIndex(self.model.index(rel_row, 0), QItemSelectionModel.ClearAndSelect)
                 self.list_view.scrollTo(self.model.index(rel_row, 0), QAbstractItemView.PositionAtCenter)
                 if focus_list:
@@ -1631,11 +1685,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
     def on_view_selection_changed(self, curr, prev):
         if self.is_scrolling or not curr.isValid():
             return
-        abs_row = self.model.viewport_start + curr.row()
-        raw = abs_row
-        if self.show_filtered_only and self.model.filtered_indices:
-            if abs_row < len(self.model.filtered_indices):
-                raw = self.model.filtered_indices[abs_row]
+        raw = self._get_raw_from_view_index(curr)
         self.selected_raw_index = raw
         if hasattr(self, 'status_pos_label'):
             self.status_pos_label.setText(f"Ln {raw + 1}")
@@ -1773,21 +1823,26 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             # Reset internal scroll to zero to align model's first row with window top
             self.list_view.verticalScrollBar().setValue(0)
             
+            # Restore visual selection from global selection set
+            sel_model = self.list_view.selectionModel()
+            sel_model.clearSelection()
+            
+            viewport_size = self.model.rowCount()
+            for rel_row in range(viewport_size):
+                raw = self._get_raw_from_view_index(self.model.index(rel_row, 0))
+                if raw in self.selected_raw_indices:
+                    sel_model.select(self.model.index(rel_row, 0), QItemSelectionModel.Select)
+            
+            # Restore current index (cursor/anchor position)
             if self.selected_raw_index != -1:
-                tr = -1
-                if self.show_filtered_only and self.model.filtered_indices:
-                    idx = bisect.bisect_left(self.model.filtered_indices, self.selected_raw_index)
-                    if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == self.selected_raw_index:
-                        tr = idx - value
-                else:
-                    tr = self.selected_raw_index - value
-                if 0 <= tr < self.model.rowCount():
-                    self.list_view.selectionModel().setCurrentIndex(self.model.index(tr, 0), QItemSelectionModel.ClearAndSelect)
-                else:
-                    self.list_view.selectionModel().clearSelection()
+                tr = self._get_view_row_from_raw(self.selected_raw_index)
+                if tr != -1:
+                    # Use NoUpdate to avoid clobbering restored selection
+                    sel_model.setCurrentIndex(self.model.index(tr, 0), QItemSelectionModel.NoUpdate)
         finally:
             self.list_view.suppress_scroll = False
             self.is_scrolling = False
+
     def toggle_theme(self): 
         self.config.theme = "Light" if self.is_dark_mode else "Dark"
     def toggle_show_filtered_only_from_status(self): 
