@@ -1,4 +1,4 @@
-# 🔍 Log Analyzer V2.3
+# 🔍 Log Analyzer V2.4
 
 > A professional, high-performance log analysis tool powered by Qt and Rust.
 
@@ -7,7 +7,7 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey?style=flat-square)
 ![Status](https://img.shields.io/badge/Status-Active-success?style=flat-square)
 
-**Log Analyzer V2.3** introduces major enhancements in visual continuity and operational fluidness. It addresses common analysis pain points such as view disorientation when switching modes and provides a more responsive, native navigation experience. Powered by a custom **Virtual Viewport** rendering engine and a high-performance **Rust core**.
+**Log Analyzer V2.4** focuses on robust data interaction and selection reliability. Building on the visual continuity of V2.3, this version introduces **Global Selection Tracking**, ensuring that your multi-line selections are never lost during scrolling and can be copied across the entire log file seamlessly.
 
 ---
 
@@ -19,16 +19,17 @@
 - **Ultra-Stable Viewport**: Optimized buffer management to eliminate scrolling jitter and "bounce-back" effects.
 
 ### 🖥️ Modern & Flexible UI
+- **Global Selection Tracking**: Selections are preserved even when lines scroll out of the viewport.
 - **Selection Anchor Locking**: Maintains the exact vertical position of your selected line when toggling view modes.
-- **Professional SVG Icons**: New theme-aware iconography system for a consistent look across Dark and Light modes.
-- **Smart Dock Management**: Area-aware dock exclusivity for improved Windows layout flexibility.
+- **Professional SVG Icons**: Theme-aware iconography system for a consistent look across Dark and Light modes.
 - **Windows 11 Visuals**: Refined UI with rounded corners and modern dialog styling.
 
 ### 🔍 Intelligent Analysis
+- **Cross-Viewport Copying**: `Ctrl+C` now copies all globally selected lines, regardless of visibility.
+- **Selection Memory**: Remembers selection states independently for every loaded log file.
 - **Jump Flash Feedback**: Visual confirmation highlighting the target line after search or line jumps.
 - **Physical Coordinate Sync**: Precision 1:1 view reconstruction using physical screen coordinates.
 - **Native Scroll Speed**: Mouse wheel behavior now synchronizes with system-level scroll settings.
-- **Smart Search**: Floating search overlay with history, regex support, and instant navigation (F2/F3).
 
 ---
 
@@ -71,6 +72,7 @@ For a comprehensive guide on all features, keyboard shortcuts, and advanced conf
 
 ## 📦 Version History
 
+- **v2.4**: Multi-Selection persistence during scroll, Cross-Viewport copying, and Selection memory per file.
 - **v2.3**: View continuity locking, Jump Flash feedback, and Native scroll sync.
 - **v2.2**: UX refinements, Smart Context Persistence, and scroll stability improvements.
 - **v2.1**: Introduced Preferences Dialog, Theme Manager, and MVC refactoring.
