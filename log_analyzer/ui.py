@@ -105,7 +105,7 @@ class GoToLineDialog(ModernDialog):
 
 
 class MainWindow(NativeWindowMixin, QMainWindow):
-    VERSION = "V2.4"
+    VERSION = "V2.5_BETA_V1"
     APP_NAME = "Log Analyzer"
 
     def __init__(self):
@@ -160,6 +160,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.is_scrolling = False
         self._suppress_search_jump = False
         self._pending_view_switch_jump = False
+        self._is_switching_view = False
         
         # --- View Anchor State ---
         self._anchor_raw = 0
@@ -377,13 +378,13 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.welcome_icon = QLabel()
         self.welcome_icon.setFixedSize(80, 80)
         self.welcome_icon.setAlignment(Qt.AlignCenter)
-        welcome_layout.addWidget(self.welcome_widget, 0, Qt.AlignCenter)
+        welcome_layout.addWidget(self.welcome_icon, 0, Qt.AlignCenter)
 
         self.welcome_label = QLabel("Drag & Drop Log File Here\nor use File > Open Log")
         self.welcome_label.setAlignment(Qt.AlignCenter)
         self.welcome_label.setFont(theme_manager.get_font(14))
         self.welcome_label.setStyleSheet("color: #888888;")
-        welcome_layout.addWidget(self.welcome_widget, 0, Qt.AlignCenter)
+        welcome_layout.addWidget(self.welcome_label, 0, Qt.AlignCenter)
 
         self.central_stack.addWidget(self.welcome_widget)
 
@@ -597,6 +598,32 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             self.v_scrollbar.blockSignals(False)
             self.on_scrollbar_value_changed(target_v)
             self._pending_view_switch_jump = False
+        
+        # Sync selection UI if we are in the middle of a switch
+        self._sync_view_selection_from_global()
+        self._is_switching_view = False
+
+    def _sync_view_selection_from_global(self):
+        """Maps global selection set back to current viewport highlights."""
+        if not hasattr(self, 'list_view'): return
+        sel_model = self.list_view.selectionModel()
+        sel_model.blockSignals(True)
+        sel_model.clearSelection()
+        
+        # Apply highlights for all globally selected lines that are visible in current view
+        viewport_size = self.model.rowCount()
+        for rel_row in range(viewport_size):
+            raw = self._get_raw_from_view_index(self.model.index(rel_row, 0))
+            if raw != -1 and raw in self.selected_raw_indices:
+                sel_model.select(self.model.index(rel_row, 0), QItemSelectionModel.Select)
+        
+        # Also restore anchor/current index if possible
+        if self.selected_raw_index != -1:
+            tr = self._get_view_row_from_raw(self.selected_raw_index)
+            if tr != -1:
+                sel_model.setCurrentIndex(self.model.index(tr, 0), QItemSelectionModel.NoUpdate)
+        
+        sel_model.blockSignals(False)
 
     def apply_editor_font(self, family, size):
         self.list_view.setStyleSheet(f"font-family: \"{family}\"; font-size: {size}pt;")
@@ -768,6 +795,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
                     target_raw = v_val
             rel_row = 0
 
+        self._is_switching_view = True
         self.show_filtered_only = self.show_filtered_action.isChecked()
         self._pending_view_switch_jump = True
         self._anchor_raw = target_raw
@@ -784,6 +812,10 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             self.v_scrollbar.blockSignals(False)
             self.on_scrollbar_value_changed(final_top)
             self._pending_view_switch_jump = False
+            
+            # Sync selection UI for immediate Full view return
+            self._sync_view_selection_from_global()
+            self._is_switching_view = False
 
         mode_str = "Filtered View" if self.show_filtered_only else "Full Log View"
         self.toast.show_message(mode_str)
@@ -1322,9 +1354,16 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         return -1
 
     def on_selection_changed(self, selected, deselected):
-        if self.is_scrolling:
+        if self.is_scrolling or getattr(self, '_is_switching_view', False):
             return
         
+        # If no modifiers are pressed (Ctrl/Shift), this is a fresh selection.
+        # Clear the global set to avoid residue from other views.
+        modifiers = QApplication.keyboardModifiers()
+        if not (modifiers & Qt.ControlModifier or modifiers & Qt.ShiftModifier):
+            if not selected.isEmpty():
+                self.selected_raw_indices.clear()
+
         # Sync global selection set based on selection model changes
         for index in selected.indexes():
             raw = self._get_raw_from_view_index(index)
@@ -1366,7 +1405,8 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         if hasattr(self, 'toast'):
             self.toast.resize_to_parent()
             self.toast.raise_()
-        super().resizeEvent(event)
+        if event:
+            super().resizeEvent(event)
     def moveEvent(self, event):
         if not self.isMaximized():
             self.last_normal_rect = self.geometry()
@@ -1825,6 +1865,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             
             # Restore visual selection from global selection set
             sel_model = self.list_view.selectionModel()
+            sel_model.blockSignals(True)
             sel_model.clearSelection()
             
             viewport_size = self.model.rowCount()
@@ -1839,6 +1880,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
                 if tr != -1:
                     # Use NoUpdate to avoid clobbering restored selection
                     sel_model.setCurrentIndex(self.model.index(tr, 0), QItemSelectionModel.NoUpdate)
+            sel_model.blockSignals(False)
         finally:
             self.list_view.suppress_scroll = False
             self.is_scrolling = False
