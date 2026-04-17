@@ -8,13 +8,14 @@ import sys
 IS_WINDOWS = sys.platform == "win32"
 
 if IS_WINDOWS:
-    from ctypes import c_int, Structure, POINTER, byref
-    from ctypes.wintypes import HWND, MSG, RECT
+    from ctypes import c_int, Structure, POINTER, byref, cast
+    from ctypes.wintypes import HWND, MSG, RECT, LPARAM, WPARAM
 
     # --- Windows API Constants ---
     WM_NCCALCSIZE = 0x0083
     WM_NCHITTEST = 0x0084
     WM_ACTIVATE = 0x0006
+    WM_GETMINMAXINFO = 0x0024
 
     HTCLIENT = 1
     HTCAPTION = 2
@@ -23,6 +24,10 @@ if IS_WINDOWS:
     GWL_STYLE = -16
     WS_CAPTION = 0x00C00000; WS_THICKFRAME = 0x00040000; WS_MINIMIZEBOX = 0x00020000; WS_MAXIMIZEBOX = 0x00010000; WS_SYSMENU = 0x00080000
     SWP_NOSIZE = 0x0001; SWP_NOMOVE = 0x0002; SWP_FRAMECHANGED = 0x0020
+
+    SM_CXFRAME = 32
+    SM_CYFRAME = 33
+    SM_CXPADDEDBORDER = 92
 
     DWMWA_USE_IMMERSIVE_DARK_MODE = 20
     DWMWA_SYSTEMBACKDROP_TYPE = 38
@@ -96,13 +101,32 @@ class NativeWindowMixin:
         user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED)
 
     def nativeEvent(self, eventType, message):
-        if not IS_WINDOWS or eventType != b"windows_generic_MSG":
+        if not IS_WINDOWS:
+            return super().nativeEvent(eventType, message)
+            
+        # PySide6 eventType is QByteArray, convert to bytes before comparison
+        try:
+            et_bytes = bytes(eventType)
+        except:
+            et_bytes = eventType
+            
+        if et_bytes != b"windows_generic_MSG":
             return super().nativeEvent(eventType, message)
         
-        msg = ctypes.cast(int(message), POINTER(MSG)).contents
+        msg = MSG.from_address(int(message))
         
         if msg.message == WM_NCCALCSIZE:
-            return True, 0
+            if msg.wParam:
+                if user32.IsZoomed(msg.hWnd):
+                    # Adjust for maximization overflow (usually 8px)
+                    # Casting lParam directly to RECT pointer allows modifying the first RECT in NCCALCSIZE_PARAMS
+                    border = user32.GetSystemMetrics(SM_CXFRAME) + user32.GetSystemMetrics(SM_CXPADDEDBORDER)
+                    rect = cast(msg.lParam, POINTER(RECT)).contents
+                    rect.left += border
+                    rect.top += border
+                    rect.right -= border
+                    rect.bottom -= border
+                return True, 0
             
         if msg.message == WM_NCHITTEST:
             if isinstance(self, QMainWindow):
