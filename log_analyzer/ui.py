@@ -548,6 +548,32 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         QTimer.singleShot(100, self.refresh_frame)
 
     def on_filters_changed(self):
+        # --- POSITION PRESERVATION (FILTER TOGGLE) ---
+        # 1. Identify current focus anchor safely
+        v_top = self.v_scrollbar.value()
+        self._anchor_raw = -1
+        self._anchor_rel_row = 0
+        
+        # Priority: If selection is visible, anchor to selection
+        # (Defensive: check selected_raw_index before calling helper)
+        rel_sel = -1
+        if self.selected_raw_index != -1:
+            rel_sel = self._get_view_row_from_raw(self.selected_raw_index)
+            
+        if rel_sel != -1:
+            self._anchor_raw = self.selected_raw_index
+            self._anchor_rel_row = rel_sel
+        else:
+            # Fallback: anchor to top visible row
+            if self.show_filtered_only and self.model.filtered_indices:
+                if 0 <= v_top < len(self.model.filtered_indices):
+                    self._anchor_raw = self.model.filtered_indices[v_top]
+            else:
+                self._anchor_raw = v_top
+            self._anchor_rel_row = 0
+            
+        self._pending_view_switch_jump = (self._anchor_raw != -1)
+
         self.refresh_filter_tree()
         self.update_window_title()
         self._invalidate_all_filter_caches(mark_modified=False)
@@ -584,14 +610,20 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         enabled_count = sum(1 for f in self.filters if f["enabled"])
         self.btn_side_filter.set_badge(enabled_count)
         
-        # --- VIEW RESTORE (TO FILTERED) ---
-        if self._pending_view_switch_jump and self.show_filtered_only:
+        # --- VIEW RESTORE (SYNCHRONOUS) ---
+        if self._pending_view_switch_jump:
             target_v = 0
-            if self.model.filtered_indices:
-                # Find the filtered index of the selected line (or anchor)
-                v_row_of_anchor = bisect.bisect_left(self.model.filtered_indices, self._anchor_raw)
-                # Apply the saved relative offset to maintain visual position
-                target_v = max(0, v_row_of_anchor - self._anchor_rel_row)
+            if self.show_filtered_only:
+                if self.model.filtered_indices:
+                    # Find the filtered index of the anchor (or nearest)
+                    v_row_of_anchor = bisect.bisect_left(self.model.filtered_indices, self._anchor_raw)
+                    target_v = max(0, v_row_of_anchor - self._anchor_rel_row)
+            else:
+                # Full Log View: Just jump back to raw index minus relative offset
+                target_v = max(0, self._anchor_raw - self._anchor_rel_row)
+            
+            # Defensive: Clamp to current scrollbar range
+            target_v = min(target_v, self.v_scrollbar.maximum())
             
             self.v_scrollbar.blockSignals(True)
             self.v_scrollbar.setValue(target_v)
@@ -763,43 +795,31 @@ class MainWindow(NativeWindowMixin, QMainWindow):
             self.notes_manager.delete_note(raw_index, self.current_log_path)
 
     def toggle_show_filtered_only(self):
-        # --- PHYSICAL POSITION MEASUREMENT ---
-        target_raw = -1
-        rel_row = 0
+        # --- POSITION PRESERVATION (VIEW MODE TOGGLE) ---
+        v_top = self.v_scrollbar.value()
+        self._anchor_raw = -1
+        self._anchor_rel_row = 0
         
-        # 1. Capture relative position of the selection if visible
+        # Priority: If selection is visible, anchor to selection
+        rel_sel = -1
         if self.selected_raw_index != -1:
-            v_row = -1
-            if self.show_filtered_only and self.model.filtered_indices:
-                idx = bisect.bisect_left(self.model.filtered_indices, self.selected_raw_index)
-                if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == self.selected_raw_index:
-                    v_row = idx
-            else:
-                v_row = self.selected_raw_index
+            rel_sel = self._get_view_row_from_raw(self.selected_raw_index)
             
-            # Check visibility in the current rendered 200-line viewport
-            if v_row != -1 and self.model.viewport_start <= v_row < self.model.viewport_start + self.model.rowCount():
-                rel_row = v_row - self.model.viewport_start
-                target_raw = self.selected_raw_index
-        
-        # 2. Fallback to top-line measurement if no selection visible
-        if target_raw == -1:
-            top_idx = self.list_view.indexAt(QPoint(5, 5))
-            if top_idx.isValid():
-                target_raw = top_idx.data(Qt.UserRole + 1)
+        if rel_sel != -1:
+            self._anchor_raw = self.selected_raw_index
+            self._anchor_rel_row = rel_sel
+        else:
+            # Fallback: anchor to top visible row
+            if self.show_filtered_only and self.model.filtered_indices:
+                if 0 <= v_top < len(self.model.filtered_indices):
+                    self._anchor_raw = self.model.filtered_indices[v_top]
             else:
-                v_val = self.v_scrollbar.value()
-                if self.show_filtered_only and self.model.filtered_indices:
-                    target_raw = self.model.filtered_indices[v_val] if v_val < len(self.model.filtered_indices) else v_val
-                else:
-                    target_raw = v_val
-            rel_row = 0
+                self._anchor_raw = v_top
+            self._anchor_rel_row = 0
 
         self._is_switching_view = True
         self.show_filtered_only = self.show_filtered_action.isChecked()
         self._pending_view_switch_jump = True
-        self._anchor_raw = target_raw
-        self._anchor_rel_row = rel_row
         self.recalc_filters()
         
         # --- IMMEDIATE RETURN (TO FULL) ---
@@ -1062,7 +1082,7 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.goto_action.setIcon(icon_manager.load_icon("hash", general_icon_c, 16))
         self.toggle_log_sidebar_action.setIcon(icon_manager.load_icon("file-text", general_icon_c, 16))
         self.toggle_filter_sidebar_action.setIcon(icon_manager.load_icon("filter", general_icon_c, 16))
-        self.toggle_notes_sidebar_action.setIcon(icon_manager.load_icon("edit", general_icon_c, 16))
+        self.toggle_notes_sidebar_action.setIcon(icon_manager.load_icon("edit", Carpet_Icon_Color if False else general_icon_c, 16))
         self.show_filtered_action.setIcon(icon_manager.load_icon("eye", general_icon_c, 16))
         self.toggle_theme_action.setIcon(icon_manager.load_icon("sun-moon", general_icon_c, 16))
         self.add_note_action.setIcon(icon_manager.load_icon("plus", general_icon_c, 16))
@@ -1341,8 +1361,12 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         return abs_row
 
     def _get_view_row_from_raw(self, raw_index):
+        if raw_index == -1:
+            return -1
         view_row = raw_index
-        if self.show_filtered_only and self.model.filtered_indices:
+        if self.show_filtered_only:
+             if self.model.filtered_indices is None:
+                 return -1
              idx = bisect.bisect_left(self.model.filtered_indices, raw_index)
              if idx < len(self.model.filtered_indices) and self.model.filtered_indices[idx] == raw_index:
                  view_row = idx
@@ -1932,3 +1956,89 @@ class MainWindow(NativeWindowMixin, QMainWindow):
         self.spinner.stop()
     def close_app(self): 
         self.close()
+
+    def on_filters_changed(self):
+        # --- POSITION PRESERVATION (FILTER TOGGLE) ---
+        v_top = self.v_scrollbar.value()
+        self._anchor_raw = -1
+        self._anchor_rel_row = 0
+        
+        # Priority: If selection is visible, anchor to selection
+        rel_sel = -1
+        if self.selected_raw_index != -1:
+            rel_sel = self._get_view_row_from_raw(self.selected_raw_index)
+            
+        if rel_sel != -1:
+            self._anchor_raw = self.selected_raw_index
+            self._anchor_rel_row = rel_sel
+        else:
+            # Fallback: anchor to top visible row
+            if self.show_filtered_only and self.model.filtered_indices:
+                if 0 <= v_top < len(self.model.filtered_indices):
+                    self._anchor_raw = self.model.filtered_indices[v_top]
+            else:
+                self._anchor_raw = v_top
+            self._anchor_rel_row = 0
+            
+        self._pending_view_switch_jump = (self._anchor_raw != -1)
+
+        self.refresh_filter_tree()
+        self.update_window_title()
+        self._invalidate_all_filter_caches(mark_modified=False)
+        self.recalc_filters()
+
+    def on_filter_results_ready(self, res, rust_f):
+        tag_codes, filtered_indices = res[0], res[1]
+        palette = {}
+        for j, rf in enumerate(rust_f):
+            f_idx = rf[4]
+            fg = adjust_color_for_theme(self.filters[f_idx]["fg_color"], False, self.is_dark_mode)
+            bg = adjust_color_for_theme(self.filters[f_idx]["bg_color"], True, self.is_dark_mode)
+            palette[j+2] = (fg, bg)
+            
+        self.model.update_filter_result(tag_codes, palette, filtered_indices if self.show_filtered_only else None)
+        
+        # 1. Update Scrollbar Range (silent)
+        self.v_scrollbar.blockSignals(True)
+        self.update_scrollbar_range(sync_view=False)
+        self.v_scrollbar.blockSignals(False)
+        
+        self.update_filtered_search_results()
+        self.refresh_filter_tree()
+        
+        if self.current_log_path:
+            if self.current_log_path not in self.log_states:
+                self.log_states[self.current_log_path] = {}
+            self.log_states[self.current_log_path]["filter_cache"] = (res, rust_f)
+        
+        count = len(filtered_indices) if filtered_indices else 0
+        if self.show_filtered_only:
+            self.toast.show_message(f"Filtered: {count:,} lines")
+        self.update_status_bar()
+        enabled_count = sum(1 for f in self.filters if f["enabled"])
+        self.btn_side_filter.set_badge(enabled_count)
+        
+        # --- VIEW RESTORE (SYNCHRONOUS) ---
+        if getattr(self, '_pending_view_switch_jump', False):
+            target_v = 0
+            if self.show_filtered_only:
+                if self.model.filtered_indices:
+                    # Find the filtered index of the anchor (or nearest)
+                    v_row_of_anchor = bisect.bisect_left(self.model.filtered_indices, self._anchor_raw)
+                    target_v = max(0, v_row_of_anchor - self._anchor_rel_row)
+            else:
+                # Full Log View: Just jump back to raw index minus relative offset
+                target_v = max(0, self._anchor_raw - self._anchor_rel_row)
+            
+            # Defensive: Clamp to current scrollbar range
+            target_v = min(target_v, self.v_scrollbar.maximum())
+            
+            self.v_scrollbar.blockSignals(True)
+            self.v_scrollbar.setValue(target_v)
+            self.v_scrollbar.blockSignals(False)
+            self.on_scrollbar_value_changed(target_v)
+            self._pending_view_switch_jump = False
+        
+        # Sync selection UI if we are in the middle of a switch
+        self._sync_view_selection_from_global()
+        self._is_switching_view = False
