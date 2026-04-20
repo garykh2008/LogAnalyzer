@@ -11,4 +11,5 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.20", features = ["extension-module"] }
 rayon = "1.8"
 regex = "1.10"
-memmap2 = "0.9"  # 用於快速讀取檔案
+memmap2 = "0.9"
+encoding_rs = "0.8"

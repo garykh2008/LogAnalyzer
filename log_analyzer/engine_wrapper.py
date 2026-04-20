@@ -1,8 +1,22 @@
+import os
+
 try:
     import log_engine_rs
     HAS_RUST = True
 except ImportError:
     HAS_RUST = False
+
+
+def detect_encoding(filepath):
+    """Simple BOM-based encoding detection."""
+    try:
+        with open(filepath, 'rb') as f:
+            raw = f.read(4)
+        if raw.startswith(b'\xff\xfe') or raw.startswith(b'\xfe\xff'):
+            return 'utf-16'
+        return 'utf-8'
+    except Exception:
+        return 'utf-8'
 
 
 class MockLogEngine:
@@ -12,8 +26,8 @@ class MockLogEngine:
         self._lines = []
         if filepath:
             try:
-                # Basic load for small files
-                with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                enc = detect_encoding(filepath)
+                with open(filepath, 'r', encoding=enc, errors='replace') as f:
                     self._lines = f.readlines()
             except Exception:
                 self._lines = [f"Error loading {filepath}"]
