@@ -1,8 +1,8 @@
-# Log Analyzer V2.4 User Manual
+# Log Analyzer V2.5 User Manual
 
 ## Table of Contents
 
-- [Log Analyzer V2.4 User Manual](#log-analyzer-v24-user-manual)
+- [Log Analyzer V2.5 User Manual](#log-analyzer-v25-user-manual)
   - [1. Introduction](#1-introduction)
   - [2. Key Features](#2-key-features)
     - [🚀 Next-Gen Performance](#-next-gen-performance)
@@ -17,6 +17,7 @@
     - [Shortcuts](#shortcuts)
     - [Preferences](#preferences)
   - [4. Release Notes](#4-release-notes)
+    - [Version 2.5 (2026-04-21)](#version-25-2026-04-21)
     - [Version 2.4 (2026-03-17)](#version-24-2026-03-17)
     - [Version 2.3 (2026-03-12)](#version-23-2026-03-12)
     - [Version 2.2 (2026-01-29)](#version-22-2026-01-29)
@@ -27,7 +28,7 @@
 
 ## 1. Introduction
 
-**Log Analyzer V2.4** continues to refine the power of high-performance analysis with a focus on seamless data interaction. Building on the visual continuity of V2.3, this version introduces robust multi-selection management, ensuring that your analysis workflow remains uninterrupted even when navigating massive datasets.
+**Log Analyzer V2.5** focuses on stability and expanded compatibility. This version introduces **Intelligent Viewport Preservation**, which maintains your precise visual focus during complex filtering operations. Additionally, the core engine has been upgraded to support **UTF-16** encodings, making it a truly universal tool for enterprise-grade log analysis.
 
 Designed for professional engineering workflows, it bridges the gap between massive scale and surgical precision.
 
@@ -37,12 +38,13 @@ Designed for professional engineering workflows, it bridges the gap between mass
 
 *   **Virtual Viewport**: A custom-built rendering engine that renders *only* the lines currently visible on screen. This allows the application to scroll through files with 100+ million lines as smoothly as a small text file.
 *   **Rust-Powered Core**: Retains the high-performance Rust backend (`log_engine_rs`) for multi-threaded file loading and regular expression filtering.
+*   **Universal Encoding**: Native support for UTF-16 (LE/BE) and UTF-8, ensuring consistent performance across diverse log formats.
 
 ### 🖥️ Modern & Flexible UI
 
 *   **Activity Bar**: A VS Code-inspired vertical bar for quick access to **Log List**, **Filters**, and **Notes**. Includes **Notification Badges** that display the count of enabled filters and notes for the current file.
+*   **Intelligent Viewport Preservation**: When toggling between Full and Filtered views, the application locks the focused line's relative position on screen, preventing "jump disorientation."
 *   **Global Selection Tracking**: Unlike standard list views, selection state is now preserved globally. You can select multiple lines, scroll away to a different part of the file, and your selection remains intact.
-*   **Selection Anchor Preservation**: When toggling between Full and Filtered views, the application locks the selected line's relative position on screen, preventing "jump disorientation."
 *   **Area-Aware Docking**: Intelligent mutual exclusivity for docks. Panels in the same area (like Filters and Notes) swap automatically to maximize space, while floating panels remain independent.
 *   **Refined Visuals**: Professional SVG iconography and layered Dark/Light modes provide a high-contrast, professional aesthetic.
 *   **Customization**: A **Preferences Dialog** allows you to adjust UI/Editor fonts and spacing.
@@ -111,6 +113,14 @@ Access via the **Settings (Gear)** icon at the bottom of the Activity Bar.
 *   **UI**: UI font family and scaling for high-DPI displays.
 
 ## 4. Release Notes
+
+### Version 2.5 (2026-04-21)
+
+**Stability & Compatibility**
+*   **Intelligent Viewport Preservation**: Implemented a sophisticated focus-locking mechanism that maintains the current anchor line's position during filter changes.
+*   **UTF-16 Engine Support**: The high-performance Rust core now natively handles UTF-16 log files, including automatic detection of endianness.
+*   **Maximized Window Fixes**: Resolved issues where the frameless window would occasionally freeze or overflow the desktop area when maximized on Windows.
+*   **Search Engine Optimization**: Refined memory allocation in the Rust extension for faster filtering of massive datasets.
 
 ### Version 2.4 (2026-03-17)
 

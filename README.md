@@ -1,4 +1,4 @@
-# 🔍 Log Analyzer V2.4
+# 🔍 Log Analyzer V2.5
 
 > A professional, high-performance log analysis tool powered by Qt and Rust.
 
@@ -7,7 +7,7 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey?style=flat-square)
 ![Status](https://img.shields.io/badge/Status-Active-success?style=flat-square)
 
-**Log Analyzer V2.4** focuses on robust data interaction and selection reliability. Building on the visual continuity of V2.3, this version introduces **Global Selection Tracking**, ensuring that your multi-line selections are never lost during scrolling and can be copied across the entire log file seamlessly.
+**Log Analyzer V2.5** introduces **Intelligent Viewport Preservation** and broadens encoding support with native **UTF-16** handling. This version ensures a seamless analysis experience by maintaining visual focus during filtering transitions and resolving critical UI stability issues on high-resolution displays.
 
 ---
 
@@ -16,9 +16,11 @@
 ### 🚀 Next-Gen Performance
 - **Virtual Viewport**: Smoothly scroll through 100M+ lines with zero lag.
 - **Rust-Powered Core**: Sub-second filtering and loading powered by Rust and `rayon`.
+- **UTF-16 Support**: Native support for UTF-16 encoded logs (LE/BE) within the high-performance engine.
 - **Ultra-Stable Viewport**: Optimized buffer management to eliminate scrolling jitter and "bounce-back" effects.
 
 ### 🖥️ Modern & Flexible UI
+- **Intelligent Viewport Preservation**: Focus remains locked on the current line during filter toggles, preventing jump disorientation.
 - **Global Selection Tracking**: Selections are preserved even when lines scroll out of the viewport.
 - **Selection Anchor Locking**: Maintains the exact vertical position of your selected line when toggling view modes.
 - **Professional SVG Icons**: Theme-aware iconography system for a consistent look across Dark and Light modes.
@@ -72,6 +74,7 @@ For a comprehensive guide on all features, keyboard shortcuts, and advanced conf
 
 ## 📦 Version History
 
+- **v2.5**: Intelligent Viewport Preservation, UTF-16 encoding support, and maximized window stability fixes.
 - **v2.4**: Multi-Selection persistence during scroll, Cross-Viewport copying, and Selection memory per file.
 - **v2.3**: View continuity locking, Jump Flash feedback, and Native scroll sync.
 - **v2.2**: UX refinements, Smart Context Persistence, and scroll stability improvements.
