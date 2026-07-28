@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+@theme {
+  --color-border: var(--border);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-sidebar: var(--sidebar-bg);
+  --color-activity: var(--activity-bg);
+  --color-gutter: var(--gutter-bg);
+  --color-gutter-fg: var(--gutter-fg);
+  --color-selection: var(--selection-bg);
+  --color-selection-fg: var(--selection-fg);
+  --color-hover: var(--hover-bg);
+  --color-input: var(--input-bg);
+  --color-titlebar: var(--titlebar-bg);
+  --color-card: var(--card-bg);
+}
+
+:root {
+  --background: #ffffff;
+  --foreground: #1f2937; /* gray-800 */
+  --border: #e5e7eb; /* gray-200 */
+  --accent: #007acc;
+  --accent-hover: #005a9e;
+  --sidebar-bg: #f3f4f6; /* gray-100 */
+  --activity-bg: #e5e7eb; /* gray-200 */
+  --gutter-bg: #f9fafb;
+  --gutter-fg: #6b7280;
+  --selection-bg: #add6ff;
+  --selection-fg: #000000;
+  --hover-bg: rgba(0, 0, 0, 0.05);
+  --input-bg: #ffffff;
+  --titlebar-bg: #e5e7eb;
+  --card-bg: #ffffff;
+}
+
+.dark {
+  --background: #1e1e1e;
+  --foreground: #cccccc;
+  --border: #303031;
+  --accent: #007acc;
+  --accent-hover: #1f8ad2;
+  --sidebar-bg: #252526;
+  --activity-bg: #181818;
+  --gutter-bg: #1e1e1e;
+  --gutter-fg: #858585;
+  --selection-bg: #264f78;
+  --selection-fg: #ffffff;
+  --hover-bg: rgba(255, 255, 255, 0.1);
+  --input-bg: #3c3c3c;
+  --titlebar-bg: #181818;
+  --card-bg: #252526;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow: hidden;
+  user-select: none;
+  height: 100vh;
+  width: 100vw;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.25);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}

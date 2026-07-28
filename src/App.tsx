@@ -1,0 +1,1151 @@
+import React, { useState, useEffect } from 'react';
+import { useStore } from './store';
+import { LogViewport } from './components/LogViewport';
+import { SidebarPanels } from './components/SidebarPanels';
+import { SearchOverlay } from './components/SearchOverlay';
+import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { listen } from '@tauri-apps/api/event';
+import {
+  Folder,
+  Filter,
+  BookOpen,
+  Settings,
+  Minus,
+  Square,
+  X,
+  FileText,
+  Check,
+  Sun,
+  Moon,
+  Info,
+  ChevronDown
+} from 'lucide-react';
+
+const appWindow = getCurrentWindow();
+
+export default function App() {
+  const {
+    theme,
+    setTheme,
+    activeFile,
+    loadLog,
+    lineCount,
+    selectedLine,
+    setSelectedLine,
+    selectedLines,
+    copySelection,
+    filters,
+    showFilteredOnly,
+    toggleShowFilteredOnly,
+    importFilters,
+    saveFiltersAs,
+    quickSaveFilters,
+    notes,
+    deleteNote,
+    saveNotes,
+    recentFiles,
+    clearRecentFiles,
+    filtersModified,
+    activeTab,
+    setActiveTab,
+    isSidebarOpen,
+    setIsSidebarOpen,
+    setNoteEditLine,
+
+    // Setting configurations
+    editorFontSize,
+    editorFontFamily,
+    showLineNumbers,
+    lineSpacing,
+    defaultEncoding,
+    uiFontSize,
+    uiFontFamily,
+    setPreferences,
+
+    // Search and filter navigation
+    nextSearchMatch,
+    prevSearchMatch,
+    navigateFilterHit,
+  } = useStore();
+
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
+
+  // Settings page overlays
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'logView' | 'appearance'>('general');
+
+  // Help page overlays
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [isDocsOpen, setIsDocsOpen] = useState(false);
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
+
+  // Export notes helper
+  const handleExportNotes = async () => {
+    if (!activeFile) return;
+    const fileNotes = notes[activeFile] || {};
+    const sortedLines = Object.keys(fileNotes).map(Number).sort((a, b) => a - b);
+    if (sortedLines.length === 0) {
+      alert("No notes in this file to export!");
+      return;
+    }
+
+    try {
+      const path = await invoke<string | null>('save_file_dialog', {
+        defaultName: 'notes.txt',
+        extension: 'txt',
+      });
+      if (!path) return;
+
+      const logLines = await invoke<string[]>('get_lines', {
+        filepath: activeFile,
+        indices: sortedLines,
+      });
+
+      let content = '';
+      sortedLines.forEach((lineIdx, i) => {
+        const noteText = fileNotes[lineIdx];
+        const logLine = logLines[i].replace(/[\r\n]+$/, '');
+        content += `Line ${lineIdx + 1}:\n[LOG]: ${logLine}\n[NOTE]: ${noteText}\n\n`;
+      });
+
+      await invoke('write_text_file', { path, content });
+      alert("Notes exported successfully!");
+    } catch (err) {
+      console.error('Export failed:', err);
+    }
+  };
+
+  // Keyboard Shortcuts Hook
+  useEffect(() => {
+    const handleGlobalKeys = async (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInputFocused = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+
+      // 1. Ctrl+C -> Copy Selection
+      if (e.ctrlKey && e.key.toLowerCase() === 'c' && !isInputFocused) {
+        e.preventDefault();
+        await copySelection();
+      }
+      // 2. Ctrl+O -> Open File
+      else if (e.ctrlKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        try {
+          const path = await invoke<string | null>('open_file_dialog');
+          if (path) await loadLog(path);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      // 2.5. Ctrl+S -> Save Notes
+      else if (e.ctrlKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        try {
+          await saveNotes();
+        } catch (err) {
+          console.error('Failed to save notes:', err);
+        }
+      }
+      // 3. Ctrl+F -> Search
+      else if (e.ctrlKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setIsSearchOpen((prev) => !prev);
+      }
+      // 4. Ctrl+H -> Toggle Filtered Mode
+      else if (e.ctrlKey && e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        toggleShowFilteredOnly();
+      }
+      // 5. Ctrl+Shift+L -> Files Tab
+      else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        setActiveTab('files');
+        setIsSidebarOpen(true);
+      }
+      // 6. Ctrl+Shift+F -> Filters Tab
+      else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setActiveTab('filters');
+        setIsSidebarOpen(true);
+      }
+      // 7. Ctrl+Shift+N -> Notes Tab
+      else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        setActiveTab('notes');
+        setIsSidebarOpen(true);
+      }
+      // 8. Ctrl+G -> Go to Line
+      else if (e.ctrlKey && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        const input = prompt(`Go to line (1 - ${lineCount}):`);
+        if (input) {
+          const line = parseInt(input);
+          if (!isNaN(line) && line >= 1 && line <= lineCount) {
+            setSelectedLine(line - 1);
+          }
+        }
+      }
+      // 9. C -> Add/Edit note
+      else if (e.key.toLowerCase() === 'c' && !e.ctrlKey && !e.shiftKey && !e.altKey && !isInputFocused) {
+        if (selectedLine !== null) {
+          e.preventDefault();
+          setNoteEditLine(selectedLine);
+        }
+      }
+      // 10. Delete -> Remove note
+      else if (e.key === 'Delete' && !isInputFocused) {
+        if (selectedLine !== null && activeFile) {
+          if (notes[activeFile]?.hasOwnProperty(selectedLine)) {
+            e.preventDefault();
+            deleteNote(activeFile, selectedLine);
+          }
+        }
+      }
+      // 11. F3 -> Next search match (or Shift+F3 for previous)
+      else if (e.key === 'F3') {
+        e.preventDefault();
+        if (activeEl && activeEl.tagName === 'TEXTAREA') return;
+
+        if (e.shiftKey) {
+          prevSearchMatch();
+        } else {
+          nextSearchMatch();
+        }
+      }
+      // 12. F2 -> Previous search match
+      else if (e.key === 'F2') {
+        e.preventDefault();
+        if (activeEl && activeEl.tagName === 'TEXTAREA') return;
+
+        prevSearchMatch();
+      }
+      // 13. Ctrl + ArrowLeft/ArrowRight -> Navigate filter hits
+      else if (e.ctrlKey && !isInputFocused) {
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          navigateFilterHit(true);
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          navigateFilterHit(false);
+        }
+      }
+      // 14. H -> Open shortcuts dialog
+      else if (e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.shiftKey && !e.altKey && !isInputFocused) {
+        e.preventDefault();
+        setIsShortcutsOpen(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeys);
+    return () => window.removeEventListener('keydown', handleGlobalKeys);
+  }, [lineCount, loadLog, toggleShowFilteredOnly, setSelectedLine, selectedLine, selectedLines, copySelection, activeFile, notes, nextSearchMatch, prevSearchMatch, navigateFilterHit, setIsShortcutsOpen, saveNotes]);
+
+  // Handle active menu closures
+  useEffect(() => {
+    const closeMenu = () => setActiveMenu(null);
+    window.addEventListener('click', closeMenu);
+    return () => window.removeEventListener('click', closeMenu);
+  }, []);
+
+  // Listen to Tauri's native window drag and drop events
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    
+    const setupDragDrop = async () => {
+      unlisten = await listen<any>('tauri://drag-drop', async (event) => {
+        const paths = event.payload?.paths;
+        if (paths && paths.length > 0) {
+          const filepath = paths[0];
+          await loadLog(filepath);
+        }
+      });
+    };
+
+    setupDragDrop();
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [loadLog]);
+
+  // Block native browser page zoom on Ctrl+Wheel
+  useEffect(() => {
+    const blockZoom = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('wheel', blockZoom, { passive: false });
+    return () => window.removeEventListener('wheel', blockZoom);
+  }, []);
+
+  const toggleTab = (tab: 'files' | 'filters' | 'notes') => {
+    if (activeTab === tab && isSidebarOpen) {
+      setIsSidebarOpen(false);
+    } else {
+      setActiveTab(tab);
+      setIsSidebarOpen(true);
+    }
+  };
+
+  const handleMenuClick = (e: React.MouseEvent, menu: string) => {
+    e.stopPropagation();
+    setActiveMenu(activeMenu === menu ? null : menu);
+  };
+
+  const activeFilename = activeFile ? activeFile.split(/[\\/]/).pop() : null;
+  const enabledFiltersCount = filters.filter((f) => f.enabled).length;
+  const notesCount = Object.keys(notes[activeFile || ''] || {}).length;
+
+  return (
+    <div className={`h-screen w-screen flex flex-col overflow-hidden select-none bg-background text-foreground ${theme}`}>
+      {/* 1. Custom Frameless Titlebar */}
+      <div 
+        data-tauri-drag-region
+        className="h-10 border-b border-border flex items-center justify-between pl-3 select-none bg-sidebar dark:bg-activity z-50 shrink-0 cursor-default"
+      >
+        {/* Left: App Logo & Menus */}
+        <div className="flex items-center gap-2 select-none">
+          <FileText size={16} className="text-accent mr-1 animate-pulse" />
+          
+          {/* Custom Dropdown Menus */}
+          <div className="flex items-center text-xs font-medium">
+            {/* File Menu */}
+            <div className="relative">
+              <button
+                onClick={(e) => handleMenuClick(e, 'file')}
+                className="px-2.5 py-1 rounded-md hover:bg-hover transition-colors cursor-default"
+              >
+                File
+              </button>
+              {activeMenu === 'file' && (
+                <div className="absolute top-full left-0 mt-1 w-52 bg-card border border-border rounded-lg shadow-2xl py-1.5 z-55 text-xs font-normal">
+                  <button
+                    onClick={async () => {
+                      const path = await invoke<string | null>('open_file_dialog');
+                      if (path) await loadLog(path);
+                      setActiveMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Open Log...</span>
+                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+O</span>
+                  </button>
+
+                  {/* Open Recent Submenu */}
+                  <div className="relative group/recent">
+                    <button
+                      className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors cursor-default"
+                    >
+                      <span>Open Recent</span>
+                      <span className="text-[10px] text-gray-400">▶</span>
+                    </button>
+                    <div className="absolute top-0 left-full ml-0.5 w-64 bg-card border border-border rounded-lg shadow-2xl py-1.5 hidden group-hover/recent:block text-xs font-normal">
+                      {recentFiles.length === 0 ? (
+                        <div className="px-3 py-2 text-gray-400 italic">No recent logs</div>
+                      ) : (
+                        <>
+                          {recentFiles.map((filepath) => (
+                            <button
+                              key={filepath}
+                              onClick={async () => {
+                                await loadLog(filepath);
+                                setActiveMenu(null);
+                              }}
+                              className="w-full text-left px-3 py-2 hover:bg-hover truncate transition-colors text-[10px] font-mono text-gray-500 hover:text-foreground"
+                              title={filepath}
+                            >
+                              {filepath.split(/[\\/]/).pop()}
+                              <span className="block text-[8px] text-gray-400 truncate mt-0.5">{filepath}</span>
+                            </button>
+                          ))}
+                          <div className="h-[1px] bg-border my-1" />
+                          <button
+                            onClick={() => {
+                              clearRecentFiles();
+                              setActiveMenu(null);
+                            }}
+                            className="w-full text-left px-3 py-1.5 hover:bg-hover text-red-500 transition-colors"
+                          >
+                            Clear Recent Files
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className="h-[1px] bg-border my-1" />
+                  <button
+                    onClick={() => importFilters()}
+                    className="w-full text-left px-3 py-2 hover:bg-hover transition-colors"
+                  >
+                    Import Filters...
+                  </button>
+                  <button
+                    onClick={() => quickSaveFilters()}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Save Filters</span>
+                    {filtersModified && <span className="w-1.5 h-1.5 rounded-full bg-accent mr-1" />}
+                  </button>
+                  <button
+                    onClick={() => saveFiltersAs()}
+                    className="w-full text-left px-3 py-2 hover:bg-hover transition-colors"
+                  >
+                    Save Filters As...
+                  </button>
+                  <div className="h-[1px] bg-border my-1" />
+                  <button
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="w-full text-left px-3 py-2 hover:bg-hover transition-colors"
+                  >
+                    Preferences...
+                  </button>
+                  <div className="h-[1px] bg-border my-1" />
+                  <button
+                    onClick={() => appWindow.close()}
+                    className="w-full text-left px-3 py-2 hover:bg-red-500/10 text-red-500 flex justify-between items-center transition-colors"
+                  >
+                    <span>Exit</span>
+                    <span className="text-[10px] text-red-500/60 font-mono">Ctrl+Q</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Edit Menu */}
+            <div className="relative">
+              <button
+                onClick={(e) => handleMenuClick(e, 'edit')}
+                className="px-2.5 py-1 rounded-md hover:bg-hover transition-colors cursor-default"
+              >
+                Edit
+              </button>
+              {activeMenu === 'edit' && (
+                <div className="absolute top-full left-0 mt-1 w-52 bg-card border border-border rounded-lg shadow-2xl py-1.5 z-55 text-xs font-normal">
+                  <button
+                    onClick={() => copySelection()}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Copy Selected Lines</span>
+                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+C</span>
+                  </button>
+                  <div className="h-[1px] bg-border my-1" />
+                  <button
+                    onClick={() => setIsSearchOpen(true)}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Find...</span>
+                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+F</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const input = prompt(`Go to line (1 - ${lineCount}):`);
+                      if (input) {
+                        const line = parseInt(input);
+                        if (!isNaN(line) && line >= 1 && line <= lineCount) {
+                          setSelectedLine(line - 1);
+                        }
+                      }
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Go to Line...</span>
+                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+G</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* View Menu */}
+            <div className="relative">
+              <button
+                onClick={(e) => handleMenuClick(e, 'view')}
+                className="px-2.5 py-1 rounded-md hover:bg-hover transition-colors cursor-default"
+              >
+                View
+              </button>
+              {activeMenu === 'view' && (
+                <div className="absolute top-full left-0 mt-1 w-52 bg-card border border-border rounded-lg shadow-2xl py-1.5 z-55 text-xs font-normal">
+                  <button
+                    onClick={() => {
+                      setActiveTab('files');
+                      setIsSidebarOpen(true);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Log Files</span>
+                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+Shift+L</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveTab('filters');
+                      setIsSidebarOpen(true);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Filters</span>
+                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+Shift+F</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveTab('notes');
+                      setIsSidebarOpen(true);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Notes</span>
+                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+Shift+N</span>
+                  </button>
+                  <div className="h-[1px] bg-border my-1" />
+                  <button
+                    onClick={() => toggleShowFilteredOnly()}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Show Filtered Only</span>
+                    <span className="flex items-center gap-1.5">
+                      {showFilteredOnly && <Check size={12} className="text-accent" />}
+                      <span className="text-[10px] text-gray-400 font-mono">Ctrl+H</span>
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Toggle Theme</span>
+                    <span className="flex items-center gap-2">
+                      {theme === 'dark' ? <Moon size={12} /> : <Sun size={12} />}
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Notes Menu */}
+            <div className="relative">
+              <button
+                onClick={(e) => handleMenuClick(e, 'notesMenu')}
+                className="px-2.5 py-1 rounded-md hover:bg-hover transition-colors cursor-default"
+              >
+                Notes
+              </button>
+              {activeMenu === 'notesMenu' && (
+                <div className="absolute top-full left-0 mt-1 w-52 bg-card border border-border rounded-lg shadow-2xl py-1.5 z-55 text-xs font-normal">
+                  <button
+                    onClick={() => {
+                      if (selectedLine !== null) {
+                        setNoteEditLine(selectedLine);
+                      } else {
+                        alert('Please select a line first to add/edit a note.');
+                      }
+                      setActiveMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Add/Edit Note</span>
+                    <span className="text-[10px] text-gray-400 font-mono">C</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (selectedLine !== null && activeFile) {
+                        deleteNote(activeFile, selectedLine);
+                      } else {
+                        alert('Please select a line with a note first.');
+                      }
+                      setActiveMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors text-red-500"
+                  >
+                    <span>Remove Note</span>
+                    <span className="text-[10px] text-red-400 font-mono">Delete</span>
+                  </button>
+                  <div className="h-[1px] bg-border my-1" />
+                  <button
+                    onClick={async () => {
+                      try {
+                        await saveNotes();
+                        alert('Notes saved successfully!');
+                      } catch (err) {
+                        alert('Failed to save notes: ' + err);
+                      }
+                      setActiveMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Save Notes</span>
+                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+S</span>
+                  </button>
+                  <div className="h-[1px] bg-border my-1" />
+                  <button
+                    onClick={() => {
+                      handleExportNotes();
+                      setActiveMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover transition-colors"
+                  >
+                    Export Notes to Text...
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Help Menu */}
+            <div className="relative">
+              <button
+                onClick={(e) => handleMenuClick(e, 'help')}
+                className="px-2.5 py-1 rounded-md hover:bg-hover transition-colors cursor-default"
+              >
+                Help
+              </button>
+              {activeMenu === 'help' && (
+                <div className="absolute top-full left-0 mt-1 w-52 bg-card border border-border rounded-lg shadow-2xl py-1.5 z-55 text-xs font-normal">
+                  <button
+                    onClick={() => {
+                      setIsShortcutsOpen(true);
+                      setActiveMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Keyboard Shortcuts</span>
+                    <span className="text-[10px] text-gray-400 font-mono">H</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsDocsOpen(true);
+                      setActiveMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover transition-colors"
+                  >
+                    <span>Documentation</span>
+                  </button>
+                  <div className="h-[1px] bg-border my-1" />
+                  <button
+                    onClick={() => {
+                      setIsAboutOpen(true);
+                      setActiveMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover transition-colors"
+                  >
+                    <span>About Log Analyzer</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Middle: Active Filename */}
+        <div data-tauri-drag-region className="flex-1 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 truncate px-4">
+          {activeFilename ? `${activeFilename} - Log Analyzer` : 'Log Analyzer V3.0'}
+        </div>
+
+        {/* Right: Window Controls */}
+        <div className="flex items-center h-full select-none shrink-0">
+          <button
+            onClick={() => appWindow.minimize()}
+            className="h-full px-4 hover:bg-hover text-gray-500 flex items-center justify-center transition-colors"
+            title="Minimize"
+          >
+            <Minus size={14} />
+          </button>
+          <button
+            onClick={() => appWindow.toggleMaximize()}
+            className="h-full px-4 hover:bg-hover text-gray-500 flex items-center justify-center transition-colors"
+            title="Maximize"
+          >
+            <Square size={10} />
+          </button>
+          <button
+            onClick={() => appWindow.close()}
+            className="h-full px-4 hover:bg-red-500 hover:text-white text-gray-500 flex items-center justify-center transition-colors"
+            title="Close"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Main Layout Workspace */}
+      <div className="flex-1 flex flex-row overflow-hidden relative">
+        
+        {/* Left Side Activity Bar */}
+        <div className="w-12 h-full border-r border-border bg-sidebar dark:bg-activity flex flex-col items-center justify-between py-3 select-none shrink-0 z-45">
+          <div className="flex flex-col items-center gap-2 w-full">
+            {/* Log Files Tab */}
+            <div className="relative w-full flex justify-center py-1">
+              <button
+                onClick={() => toggleTab('files')}
+                className={`p-2 rounded-lg transition-all ${
+                  activeTab === 'files' && isSidebarOpen
+                    ? 'text-accent'
+                    : 'hover:bg-hover text-gray-400'
+                }`}
+                title="Log Files (Ctrl+Shift+L)"
+              >
+                <Folder size={18} />
+              </button>
+              {activeTab === 'files' && isSidebarOpen && (
+                <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-accent rounded-r-md" />
+              )}
+            </div>
+
+            {/* Filters Tab */}
+            <div className="relative w-full flex justify-center py-1">
+              <button
+                onClick={() => toggleTab('filters')}
+                className={`relative p-2 rounded-lg transition-all ${
+                  activeTab === 'filters' && isSidebarOpen
+                    ? 'text-accent'
+                    : 'hover:bg-hover text-gray-400'
+                }`}
+                title="Filters (Ctrl+Shift+F)"
+              >
+                <Filter size={18} />
+                {enabledFiltersCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-accent text-[8px] font-bold text-white flex items-center justify-center shadow-sm">
+                    {enabledFiltersCount}
+                  </span>
+                )}
+              </button>
+              {activeTab === 'filters' && isSidebarOpen && (
+                <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-accent rounded-r-md" />
+              )}
+            </div>
+
+            {/* Notes Tab */}
+            <div className="relative w-full flex justify-center py-1">
+              <button
+                onClick={() => toggleTab('notes')}
+                className={`relative p-2 rounded-lg transition-all ${
+                  activeTab === 'notes' && isSidebarOpen
+                    ? 'text-accent'
+                    : 'hover:bg-hover text-gray-400'
+                }`}
+                title="Notes (Ctrl+Shift+N)"
+              >
+                <BookOpen size={18} />
+                {notesCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-amber-500 text-[8px] font-bold text-white flex items-center justify-center shadow-sm">
+                    {notesCount}
+                  </span>
+                )}
+              </button>
+              {activeTab === 'notes' && isSidebarOpen && (
+                <div className="absolute left-0 top-1 bottom-1 w-[3px] bg-accent rounded-r-md" />
+              )}
+            </div>
+          </div>
+
+          {/* Bottom actions */}
+          <div className="flex flex-col items-center gap-2 w-full">
+            <button
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="p-2 rounded-lg hover:bg-hover text-gray-400 transition-colors cursor-pointer"
+              title="Toggle Theme"
+            >
+              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2 rounded-lg hover:bg-hover text-gray-400 transition-colors cursor-pointer"
+              title="Workspace Settings"
+            >
+              <Settings size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Collapsible Sidebar */}
+        {isSidebarOpen && <SidebarPanels activeTab={activeTab} />}
+
+        {/* Central Log Viewport */}
+        <div className="flex-1 flex flex-col overflow-hidden relative">
+          <LogViewport />
+
+          {/* Floating Search Overlay */}
+          <SearchOverlay 
+            isOpen={isSearchOpen} 
+            onClose={() => setIsSearchOpen(false)} 
+          />
+        </div>
+      </div>
+
+      {/* 3. Interactive Status Bar */}
+      <div className="h-6 border-t border-border bg-sidebar dark:bg-activity flex items-center justify-between px-4 text-[11px] text-gray-500 select-none shrink-0 z-50">
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1 text-accent font-semibold">
+            <Info size={11} />
+            <span>Ready</span>
+          </span>
+          {activeFile && (
+            <span className="text-gray-400 truncate max-w-sm font-mono">
+              {activeFile}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => toggleShowFilteredOnly()}
+            className="hover:text-accent font-semibold flex items-center gap-1 cursor-pointer transition-colors bg-transparent border-0 p-0 text-[11px] text-gray-500"
+            title="Toggle Filter Mode (Ctrl+H)"
+          >
+            <span>Mode:</span>
+            <span className="text-accent underline decoration-dotted underline-offset-2">
+              {showFilteredOnly ? 'Filtered View' : 'Full Log'}
+            </span>
+          </button>
+
+          <button
+            onClick={() => {
+              const input = prompt(`Go to line (1 - ${lineCount}):`);
+              if (input) {
+                const line = parseInt(input);
+                if (!isNaN(line) && line >= 1 && line <= lineCount) {
+                  setSelectedLine(line - 1);
+                }
+              }
+            }}
+            className="hover:text-accent font-semibold cursor-pointer transition-colors bg-transparent border-0 p-0 text-[11px] text-gray-500"
+            title="Go to Line (Ctrl+G)"
+          >
+            Total: {lineCount.toLocaleString()} lines
+          </button>
+
+          {selectedLine !== null && (
+            <span className="font-mono font-semibold text-gray-600 dark:text-gray-300">
+              Ln {selectedLine + 1}
+            </span>
+          )}
+
+          <span className="font-semibold select-none uppercase">UTF-8 / UTF-16</span>
+        </div>
+      </div>
+
+      {/* 4. Settings Dialog Modal */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-[1.5px] flex items-center justify-center z-[100] select-none text-xs">
+          <div className="bg-card border border-border shadow-2xl rounded-2xl w-[640px] h-[460px] flex flex-row overflow-hidden text-xs">
+            {/* Left Tabs */}
+            <div className="w-44 bg-sidebar border-r border-border flex flex-col py-4 select-none shrink-0">
+              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider px-4 mb-3">Preferences</span>
+              <button
+                onClick={() => setActiveSettingsTab('general')}
+                className={`w-full text-left px-4 py-2.5 transition-colors font-medium cursor-pointer ${
+                  activeSettingsTab === 'general' ? 'bg-hover text-accent font-semibold' : 'text-gray-500 hover:bg-hover/50'
+                }`}
+              >
+                General Settings
+              </button>
+              <button
+                onClick={() => setActiveSettingsTab('logView')}
+                className={`w-full text-left px-4 py-2.5 transition-colors font-medium cursor-pointer ${
+                  activeSettingsTab === 'logView' ? 'bg-hover text-accent font-semibold' : 'text-gray-500 hover:bg-hover/50'
+                }`}
+              >
+                Log View Settings
+              </button>
+              <button
+                onClick={() => setActiveSettingsTab('appearance')}
+                className={`w-full text-left px-4 py-2.5 transition-colors font-medium cursor-pointer ${
+                  activeSettingsTab === 'appearance' ? 'bg-hover text-accent font-semibold' : 'text-gray-500 hover:bg-hover/50'
+                }`}
+              >
+                Appearance Settings
+              </button>
+            </div>
+
+            {/* Right Config Content */}
+            <div className="flex-1 flex flex-col justify-between p-6 overflow-y-auto bg-card">
+              <div className="flex-1 overflow-y-auto pr-1">
+                {/* General Page */}
+                {activeSettingsTab === 'general' && (
+                  <div className="flex flex-col gap-4">
+                    <h2 className="text-sm font-bold text-gray-700 dark:text-zinc-300 border-b border-border pb-2">General Settings</h2>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-semibold text-gray-600 dark:text-zinc-400">Default Encoding</label>
+                      <span className="text-[10px] text-gray-400">The character encoding used when opening log files.</span>
+                      <select
+                        value={defaultEncoding}
+                        onChange={(e) => setPreferences({ defaultEncoding: e.target.value })}
+                        className="w-full bg-sidebar border border-border rounded-lg p-2 focus:outline-none focus:border-accent"
+                      >
+                        <option value="UTF-8">UTF-8</option>
+                        <option value="ASCII">ASCII</option>
+                        <option value="ISO-8859-1">ISO-8859-1</option>
+                        <option value="GBK">GBK</option>
+                        <option value="Shift_JIS">Shift_JIS</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {/* Log View Page */}
+                {activeSettingsTab === 'logView' && (
+                  <div className="flex flex-col gap-4">
+                    <h2 className="text-sm font-bold text-gray-700 dark:text-zinc-300 border-b border-border pb-2">Log View Settings</h2>
+                    
+                    {/* Font Family */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-semibold text-gray-600 dark:text-zinc-400">Font Family</label>
+                      <span className="text-[10px] text-gray-400">Choose the typeface for the log content.</span>
+                      <select
+                        value={editorFontFamily}
+                        onChange={(e) => setPreferences({ editorFontFamily: e.target.value })}
+                        className="w-full bg-sidebar border border-border rounded-lg p-2 focus:outline-none focus:border-accent"
+                      >
+                        <option value="Consolas">Consolas</option>
+                        <option value="Courier New">Courier New</option>
+                        <option value="Fira Code">Fira Code</option>
+                        <option value="Source Code Pro">Source Code Pro</option>
+                        <option value="monospace">System Monospace</option>
+                      </select>
+                    </div>
+
+                    {/* Font Size */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-semibold text-gray-600 dark:text-zinc-400">Font Size (px)</label>
+                      <input
+                        type="number"
+                        min={6}
+                        max={72}
+                        value={editorFontSize}
+                        onChange={(e) => setPreferences({ editorFontSize: parseInt(e.target.value) || 12 })}
+                        className="w-full bg-sidebar border border-border rounded-lg p-2 focus:outline-none focus:border-accent"
+                      />
+                    </div>
+
+                    {/* Line Spacing */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-semibold text-gray-600 dark:text-zinc-400">Line Spacing (px)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={50}
+                        value={lineSpacing}
+                        onChange={(e) => setPreferences({ lineSpacing: parseInt(e.target.value) || 0 })}
+                        className="w-full bg-sidebar border border-border rounded-lg p-2 focus:outline-none focus:border-accent"
+                      />
+                    </div>
+
+                    {/* Show Line Numbers */}
+                    <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-hover mt-1">
+                      <input
+                        type="checkbox"
+                        checked={showLineNumbers}
+                        onChange={(e) => setPreferences({ showLineNumbers: e.target.checked })}
+                        className="rounded text-accent border-border cursor-pointer"
+                      />
+                      <span className="font-semibold text-gray-600 dark:text-zinc-400">Show Line Numbers</span>
+                    </label>
+                  </div>
+                )}
+
+                {/* Appearance Page */}
+                {activeSettingsTab === 'appearance' && (
+                  <div className="flex flex-col gap-4">
+                    <h2 className="text-sm font-bold text-gray-700 dark:text-zinc-300 border-b border-border pb-2">Appearance Settings</h2>
+                    
+                    {/* Color Theme */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-semibold text-gray-600 dark:text-zinc-400">Color Theme</label>
+                      <select
+                        value={theme}
+                        onChange={(e) => setTheme(e.target.value as 'dark' | 'light')}
+                        className="w-full bg-sidebar border border-border rounded-lg p-2 focus:outline-none focus:border-accent"
+                      >
+                        <option value="light">Light Theme</option>
+                        <option value="dark">Dark Theme</option>
+                      </select>
+                    </div>
+
+                    {/* UI Font Family */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-semibold text-gray-600 dark:text-zinc-400">Interface Font Family</label>
+                      <select
+                        value={uiFontFamily}
+                        onChange={(e) => setPreferences({ uiFontFamily: e.target.value })}
+                        className="w-full bg-sidebar border border-border rounded-lg p-2 focus:outline-none focus:border-accent"
+                      >
+                        <option value="Inter">Inter</option>
+                        <option value="Segoe UI">Segoe UI</option>
+                        <option value="system-ui">System Default</option>
+                      </select>
+                    </div>
+
+                    {/* UI Font Size */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-semibold text-gray-600 dark:text-zinc-400">Interface Font Size (px)</label>
+                      <input
+                        type="number"
+                        min={8}
+                        max={24}
+                        value={uiFontSize}
+                        onChange={(e) => setPreferences({ uiFontSize: parseInt(e.target.value) || 12 })}
+                        className="w-full bg-sidebar border border-border rounded-lg p-2 focus:outline-none focus:border-accent"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Close Button */}
+              <div className="flex justify-end pt-4 select-none font-semibold shrink-0">
+                <button
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Keyboard Shortcuts Dialog Modal */}
+      {isShortcutsOpen && (
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-[1.5px] flex items-center justify-center z-[100] select-none text-xs">
+          <div className="bg-card border border-border shadow-2xl rounded-2xl w-[580px] max-h-[480px] flex flex-col p-5 overflow-hidden text-xs">
+            <div className="flex items-center justify-between border-b border-border pb-3 mb-3 select-none">
+              <span className="text-sm font-bold text-foreground">Keyboard Shortcuts</span>
+              <button
+                onClick={() => setIsShortcutsOpen(false)}
+                className="text-gray-400 hover:text-foreground hover:bg-hover p-1 rounded-md transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto pr-1">
+              <div className="flex flex-col gap-4">
+                <div>
+                  <h4 className="font-bold text-accent mb-2 uppercase text-[10px] tracking-wider">General</h4>
+                  <table className="w-full text-left">
+                    <tbody>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Open Log File</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + O</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Go to Line...</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + G</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div>
+                  <h4 className="font-bold text-accent mb-2 uppercase text-[10px] tracking-wider">Search & Filters</h4>
+                  <table className="w-full text-left">
+                    <tbody>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Toggle Find Overlay</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + F</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Toggle Show Filtered Only</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + H</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Find Next Match</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">F3</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Find Previous Match</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">F2</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Navigate Filter Hit (Next / Prev)</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + Right / Left</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div>
+                  <h4 className="font-bold text-accent mb-2 uppercase text-[10px] tracking-wider">Sidebar Panels</h4>
+                  <table className="w-full text-left">
+                    <tbody>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Log Files Sidebar</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + Shift + L</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Filters Sidebar</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + Shift + F</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Notes Sidebar</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + Shift + N</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div>
+                  <h4 className="font-bold text-accent mb-2 uppercase text-[10px] tracking-wider">Log Editor & Notes</h4>
+                  <table className="w-full text-left">
+                    <tbody>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Add/Edit Note at Current Line</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">C</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Remove Note at Current Line</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Delete</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Copy Selection</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + C</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex justify-end pt-3 mt-1 border-t border-border/40 select-none">
+              <button
+                onClick={() => setIsShortcutsOpen(false)}
+                className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors cursor-pointer font-semibold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. Documentation Dialog Modal */}
+      {isDocsOpen && (
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-[1.5px] flex items-center justify-center z-[100] select-none text-xs">
+          <div className="bg-card border border-border shadow-2xl rounded-2xl w-[600px] max-h-[500px] flex flex-col p-5 overflow-hidden text-xs">
+            <div className="flex items-center justify-between border-b border-border pb-3 mb-3 select-none">
+              <span className="text-sm font-bold text-foreground">Documentation</span>
+              <button
+                onClick={() => setIsDocsOpen(false)}
+                className="text-gray-400 hover:text-foreground hover:bg-hover p-1 rounded-md transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto pr-1 select-text">
+              <div className="flex flex-col gap-4 font-sans text-gray-700 dark:text-gray-300 leading-relaxed text-xs">
+                <div>
+                  <h4 className="font-bold text-accent text-xs mb-1">Introduction</h4>
+                  <p>Log Analyzer is a high-performance log reading, filtering, and annotation tool designed to inspect and highlight patterns in massive text and diagnostic files.</p>
+                </div>
+                <div>
+                  <h4 className="font-bold text-accent text-xs mb-1">Smart Virtual Viewport</h4>
+                  <p>Equipped with a high-performance virtual rendering viewport. It renders only the visible lines, allowing you to scroll fluidly through 100M+ line files without any lag.</p>
+                </div>
+                <div>
+                  <h4 className="font-bold text-accent text-xs mb-1">Highlight & Exclude Filters</h4>
+                  <p>Create filters to highlight lines with custom foreground and background colors. You can also exclude lines that match noise patterns to focus solely on error tracebacks. Exclude matches are dynamically hidden in Filter Mode.</p>
+                </div>
+                <div>
+                  <h4 className="font-bold text-accent text-xs mb-1">Annotations & Notes</h4>
+                  <p>Press <kbd className="px-1 py-0.5 rounded bg-gray-150 dark:bg-zinc-800 font-mono text-[10px]">C</kbd> to add inline notes to specific log lines. Notes are persistable, searchable, and exportable. Double-clicking on a note in the sidebar instantly focuses the viewport on the annotated line.</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex justify-end pt-3 mt-3 border-t border-border/40 select-none">
+              <button
+                onClick={() => setIsDocsOpen(false)}
+                className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors cursor-pointer font-semibold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. About Dialog Modal */}
+      {isAboutOpen && (
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-[1.5px] flex items-center justify-center z-[100] select-none text-xs">
+          <div className="bg-card border border-border shadow-2xl rounded-2xl w-[380px] flex flex-col p-5 overflow-hidden text-xs text-center items-center">
+            <FileText size={48} className="text-accent mb-3 animate-pulse" />
+            <h3 className="text-sm font-bold text-foreground mb-1">Log Analyzer</h3>
+            <span className="text-[10px] text-accent font-semibold px-2 py-0.5 rounded-full bg-accent/10 mb-4">V3.0 (Tauri Release)</span>
+            
+            <div className="text-gray-500 dark:text-gray-400 font-sans leading-relaxed flex flex-col gap-2 mb-6">
+              <p>An advanced diagnostic log viewer designed for high-performance inspection and pattern matching.</p>
+              <p className="text-[10px] text-gray-400">© 2026 LogAnalyzer Team. All rights reserved.</p>
+            </div>
+            
+            <button
+              onClick={() => setIsAboutOpen(false)}
+              className="w-full py-2 bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors cursor-pointer font-semibold"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
