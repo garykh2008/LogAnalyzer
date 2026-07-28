@@ -6,6 +6,7 @@ import { SearchOverlay } from './components/SearchOverlay';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
+import readmeContent from '../README.md?raw';
 import {
   Folder,
   Filter,
@@ -278,7 +279,107 @@ export default function App() {
     window.addEventListener('wheel', blockZoom, { passive: false });
     return () => window.removeEventListener('wheel', blockZoom);
   }, []);
+  const renderReadmeMarkdown = (text: string) => {
+    const lines = text.split('\n');
+    const elements: React.ReactNode[] = [];
+    let inCodeBlock = false;
+    let codeContent: string[] = [];
 
+    const formatInline = (str: string): React.ReactNode[] => {
+      const parts: React.ReactNode[] = [];
+      let lastIdx = 0;
+      const regex = /(\*\*.*?\*\*|`.*?`)/g;
+      let match;
+      let key = 0;
+
+      while ((match = regex.exec(str)) !== null) {
+        const matchStr = match[0];
+        const matchIdx = match.index;
+
+        if (matchIdx > lastIdx) {
+          parts.push(str.substring(lastIdx, matchIdx));
+        }
+
+        if (matchStr.startsWith('**') && matchStr.endsWith('**')) {
+          parts.push(<strong key={key++} className="font-bold text-accent dark:text-accent-hover">{matchStr.slice(2, -2)}</strong>);
+        } else if (matchStr.startsWith('`') && matchStr.endsWith('`')) {
+          parts.push(<code key={key++} className="bg-sidebar px-1 py-0.5 border border-border rounded font-mono text-[10px] text-accent dark:text-accent font-semibold">{matchStr.slice(1, -1)}</code>);
+        }
+
+        lastIdx = regex.lastIndex;
+      }
+
+      if (lastIdx < str.length) {
+        parts.push(str.substring(lastIdx));
+      }
+
+      return parts.length > 0 ? parts : [str];
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      if (line.trim().startsWith('```')) {
+        if (inCodeBlock) {
+          elements.push(
+            <pre key={`code-${i}`} className="bg-sidebar dark:bg-activity border border-border rounded-lg p-3 font-mono text-[10px] my-2 select-text overflow-x-auto text-gray-750 dark:text-gray-300">
+              <code>{codeContent.join('\n')}</code>
+            </pre>
+          );
+          codeContent = [];
+          inCodeBlock = false;
+        } else {
+          inCodeBlock = true;
+        }
+        continue;
+      }
+
+      if (inCodeBlock) {
+        codeContent.push(line);
+        continue;
+      }
+
+      if (line.startsWith('# ')) {
+        elements.push(<h2 key={i} className="text-sm font-bold text-accent border-b border-border pb-1 mt-4 mb-2 select-text">{formatInline(line.slice(2))}</h2>);
+        continue;
+      }
+      if (line.startsWith('## ')) {
+        elements.push(<h3 key={i} className="text-xs font-bold text-accent mt-3 mb-1.5 select-text">{formatInline(line.slice(3))}</h3>);
+        continue;
+      }
+      if (line.startsWith('### ')) {
+        elements.push(<h4 key={i} className="text-xs font-bold text-foreground/80 mt-2 mb-1 select-text">{formatInline(line.slice(4))}</h4>);
+        continue;
+      }
+      if (line.startsWith('* ') || line.startsWith('- ')) {
+        elements.push(<li key={i} className="ml-4 list-disc text-gray-700 dark:text-gray-350 text-xs py-0.5 select-text">{formatInline(line.slice(2))}</li>);
+        continue;
+      }
+      if (line.trim().startsWith('|')) {
+        if (line.includes('---')) continue;
+        const cols = line.split('|').map(c => c.trim()).filter(c => c !== '');
+        elements.push(
+          <div key={i} className="flex border-b border-border/30 py-1.5 text-[10px] font-mono select-text">
+            {cols.map((col, idx) => (
+              <span key={idx} className="flex-1 truncate pr-2">{formatInline(col)}</span>
+            ))}
+          </div>
+        );
+        continue;
+      }
+      if (line.trim() === '---') {
+        elements.push(<hr key={i} className="border-border/40 my-3" />);
+        continue;
+      }
+      if (!line.trim()) {
+        elements.push(<div key={i} className="h-1.5" />);
+        continue;
+      }
+      elements.push(<p key={i} className="text-xs text-gray-600 dark:text-gray-400 my-1 leading-relaxed select-text">{formatInline(line)}</p>);
+    }
+
+    return elements;
+  };
   const toggleTab = (tab: 'files' | 'filters' | 'notes') => {
     if (activeTab === tab && isSidebarOpen) {
       setIsSidebarOpen(false);
@@ -1092,23 +1193,8 @@ export default function App() {
             </div>
             
             <div className="flex-1 overflow-y-auto pr-1 select-text">
-              <div className="flex flex-col gap-4 font-sans text-gray-700 dark:text-gray-300 leading-relaxed text-xs">
-                <div>
-                  <h4 className="font-bold text-accent text-xs mb-1">Introduction</h4>
-                  <p>Log Analyzer is a high-performance log reading, filtering, and annotation tool designed to inspect and highlight patterns in massive text and diagnostic files.</p>
-                </div>
-                <div>
-                  <h4 className="font-bold text-accent text-xs mb-1">Smart Virtual Viewport</h4>
-                  <p>Equipped with a high-performance virtual rendering viewport. It renders only the visible lines, allowing you to scroll fluidly through 100M+ line files without any lag.</p>
-                </div>
-                <div>
-                  <h4 className="font-bold text-accent text-xs mb-1">Highlight & Exclude Filters</h4>
-                  <p>Create filters to highlight lines with custom foreground and background colors. You can also exclude lines that match noise patterns to focus solely on error tracebacks. Exclude matches are dynamically hidden in Filter Mode.</p>
-                </div>
-                <div>
-                  <h4 className="font-bold text-accent text-xs mb-1">Annotations & Notes</h4>
-                  <p>Press <kbd className="px-1 py-0.5 rounded bg-gray-150 dark:bg-zinc-800 font-mono text-[10px]">C</kbd> to add inline notes to specific log lines. Notes are persistable, searchable, and exportable. Double-clicking on a note in the sidebar instantly focuses the viewport on the annotated line.</p>
-                </div>
+              <div className="flex flex-col gap-1 font-sans text-gray-700 dark:text-gray-300 leading-relaxed text-xs">
+                {renderReadmeMarkdown(readmeContent)}
               </div>
             </div>
             

@@ -23,6 +23,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
     deleteNote,
     setSelectedLine,
     theme,
+    currentFilterFile,
 
     // Lifted Filter Editor States
     isAddingFilter,
@@ -264,6 +265,15 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
         {/* FILTERS PANEL */}
         {activeTab === 'filters' && (
           <div className="flex flex-col gap-2.5">
+            {/* Active Filter File Info */}
+            {currentFilterFile && (
+              <div className="px-2.5 py-1.5 bg-accent/5 border border-accent/20 rounded-xl text-[10px] font-mono text-gray-500 dark:text-gray-400 flex items-center justify-between truncate select-text mb-0.5">
+                <span className="truncate" title={currentFilterFile}>
+                  📂 {currentFilterFile.split(/[\\/]/).pop()}
+                </span>
+                <span className="text-[9px] opacity-65 pl-2 shrink-0 select-none">Active</span>
+              </div>
+            )}
             {/* Inline Filter Editor */}
             {(isAddingFilter || editingFilterIdx !== null) && (
               <div className="p-3 bg-card border border-border rounded-xl shadow-lg flex flex-col gap-3">
