@@ -7,6 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import readmeContent from '../README.md?raw';
+import appLogo from './assets/logo.png';
 import {
   Folder,
   Filter,
@@ -407,7 +408,7 @@ export default function App() {
       >
         {/* Left: App Logo & Menus */}
         <div className="flex items-center gap-2 select-none">
-          <FileText size={16} className="text-accent mr-1 animate-pulse" />
+          <img src={appLogo} className="w-4 h-4 mr-1 animate-pulse select-none" />
           
           {/* Custom Dropdown Menus */}
           <div className="flex items-center text-xs font-medium">
@@ -1214,7 +1215,7 @@ export default function App() {
       {isAboutOpen && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-[1.5px] flex items-center justify-center z-[100] select-none text-xs">
           <div className="bg-card border border-border shadow-2xl rounded-2xl w-[380px] flex flex-col p-5 overflow-hidden text-xs text-center items-center">
-            <FileText size={48} className="text-accent mb-3 animate-pulse" />
+            <img src={appLogo} className="w-12 h-12 mb-3 animate-pulse select-none" />
             <h3 className="text-sm font-bold text-foreground mb-1">Log Analyzer</h3>
             <span className="text-[10px] text-accent font-semibold px-2 py-0.5 rounded-full bg-accent/10 mb-4">V3.0 (Tauri Release)</span>
             
