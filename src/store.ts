@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
 
 export interface FilterItem {
@@ -238,7 +239,9 @@ interface AppState {
   clearRecentFiles: () => void;
 }
 
-export const useStore = create<AppState>((set, get) => ({
+export const useStore = create<AppState>()(
+  persist(
+    (set, get) => ({
   theme: 'light',
   fontSize: 12,
   editorFontSize: 12,
@@ -264,34 +267,17 @@ export const useStore = create<AppState>((set, get) => ({
   lineCount: 0,
   loading: false,
 
-  recentFiles: (() => {
-    try {
-      const stored = localStorage.getItem('log_analyzer_recent_files');
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  })(),
+  recentFiles: [],
 
   addRecentFile: (filepath) => {
     const current = get().recentFiles;
     const filtered = current.filter((f) => f !== filepath);
     const updated = [filepath, ...filtered].slice(0, 10);
     set({ recentFiles: updated });
-    try {
-      localStorage.setItem('log_analyzer_recent_files', JSON.stringify(updated));
-    } catch (err) {
-      console.error('Failed to save recent files:', err);
-    }
   },
 
   clearRecentFiles: () => {
     set({ recentFiles: [] });
-    try {
-      localStorage.removeItem('log_analyzer_recent_files');
-    } catch (err) {
-      console.error('Failed to clear recent files:', err);
-    }
   },
 
   setActiveFile: async (file) => {
@@ -831,4 +817,29 @@ export const useStore = create<AppState>((set, get) => ({
       console.log('No existing notes file found for', filepath);
     }
   },
-}));
+}),
+    {
+      name: 'log-analyzer-prefs',
+      // Only persist user preference keys - not runtime state
+      partialize: (state) => ({
+        theme: state.theme,
+        editorFontSize: state.editorFontSize,
+        editorFontFamily: state.editorFontFamily,
+        showLineNumbers: state.showLineNumbers,
+        lineSpacing: state.lineSpacing,
+        defaultEncoding: state.defaultEncoding,
+        uiFontSize: state.uiFontSize,
+        uiFontFamily: state.uiFontFamily,
+        recentFiles: state.recentFiles,
+      }),
+      onRehydrateStorage: () => (state) => {
+        // Re-apply theme class to DOM after rehydration
+        if (state?.theme === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      },
+    }
+  )
+);
