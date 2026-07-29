@@ -43,6 +43,7 @@ export default function App() {
     importFilters,
     saveFiltersAs,
     quickSaveFilters,
+    clearFilters,
     notes,
     deleteNote,
     saveNotes,
@@ -561,6 +562,17 @@ export default function App() {
                   >
                     Save Filters As...
                   </button>
+                  {filters.length > 0 && (
+                    <button
+                      onClick={() => {
+                        clearFilters();
+                        setActiveMenu(null);
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-red-500/10 text-red-500 transition-colors"
+                    >
+                      Clear All Filters
+                    </button>
+                  )}
                   <div className="h-[1px] bg-border my-1" />
                   <button
                     onClick={() => setIsSettingsOpen(true)}

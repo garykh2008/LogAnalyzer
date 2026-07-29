@@ -24,6 +24,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
     setSelectedLine,
     theme,
     currentFilterFile,
+    clearFilters,
 
     // Lifted Filter Editor States
     isAddingFilter,
@@ -201,13 +202,24 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
         )}
 
         {activeTab === 'filters' && !isAddingFilter && editingFilterIdx === null && (
-          <button
-            onClick={() => setFilterEditor({ isAddingFilter: true })}
-            className="p-1 rounded-md hover:bg-hover text-accent cursor-pointer transition-colors"
-            title="Add Filter"
-          >
-            <Plus size={16} />
-          </button>
+          <div className="flex items-center gap-1">
+            {filters.length > 0 && (
+              <button
+                onClick={() => clearFilters()}
+                className="p-1 rounded-md hover:bg-red-500/10 text-gray-400 hover:text-red-500 cursor-pointer transition-colors"
+                title="Clear All Filters"
+              >
+                <Trash size={15} />
+              </button>
+            )}
+            <button
+              onClick={() => setFilterEditor({ isAddingFilter: true })}
+              className="p-1 rounded-md hover:bg-hover text-accent cursor-pointer transition-colors"
+              title="Add Filter"
+            >
+              <Plus size={16} />
+            </button>
+          </div>
         )}
       </div>
 
@@ -527,6 +539,13 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                     </div>
                   );
                 })}
+                <button
+                  onClick={() => clearFilters()}
+                  className="w-full py-2 text-xs font-medium text-red-500/80 hover:text-red-500 hover:bg-red-500/10 border border-red-500/20 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5 mt-1"
+                >
+                  <Trash size={12} />
+                  <span>Clear All Filters ({filters.length})</span>
+                </button>
               </div>
             )}
           </div>

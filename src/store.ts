@@ -201,6 +201,7 @@ interface AppState {
   loadFiltersFromPath: (path: string) => Promise<boolean>;
   saveFiltersAs: () => Promise<boolean>;
   quickSaveFilters: () => Promise<boolean>;
+  clearFilters: () => void;
 
   // Filter Editor Lifted State
   isAddingFilter: boolean;
@@ -503,6 +504,11 @@ export const useStore = create<AppState>()(
     updated.splice(toIndex, 0, moved);
     const reindexed = updated.map((f, i) => ({ ...f, idx: i }));
     set({ filters: reindexed, filtersModified: true });
+    get().applyFilters();
+  },
+
+  clearFilters: () => {
+    set({ filters: [], currentFilterFile: null, filtersModified: false });
     get().applyFilters();
   },
 
