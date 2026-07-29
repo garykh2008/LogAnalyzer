@@ -270,6 +270,38 @@ export default function App() {
     };
   }, [loadLog]);
 
+  // Listen to CLI file arguments: LogAnalyzer.exe [file1 file2 *.log ...] [-f filter.tat]
+  useEffect(() => {
+    let unlistenFiles: (() => void) | null = null;
+    let unlistenFilter: (() => void) | null = null;
+
+    const setupCliListeners = async () => {
+      // Multiple log files (with glob expansion done by Rust)
+      unlistenFiles = await listen<string[]>('cli-open-files', async (event) => {
+        const paths = event.payload;
+        if (paths && paths.length > 0) {
+          for (const filepath of paths) {
+            await loadLog(filepath);
+          }
+        }
+      });
+
+      // Optional .tat filter file
+      unlistenFilter = await listen<string>('cli-open-filter', async (event) => {
+        const filterPath = event.payload;
+        if (filterPath) {
+          await useStore.getState().loadFiltersFromPath(filterPath);
+        }
+      });
+    };
+
+    setupCliListeners();
+    return () => {
+      if (unlistenFiles) unlistenFiles();
+      if (unlistenFilter) unlistenFilter();
+    };
+  }, [loadLog]);
+
   // Block native browser page zoom on Ctrl+Wheel
   useEffect(() => {
     const blockZoom = (e: WheelEvent) => {

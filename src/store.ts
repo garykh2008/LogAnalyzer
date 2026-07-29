@@ -197,6 +197,7 @@ interface AppState {
   toggleShowFilteredOnly: () => void;
   applyFilters: () => Promise<void>;
   importFilters: () => Promise<boolean>;
+  loadFiltersFromPath: (path: string) => Promise<boolean>;
   saveFiltersAs: () => Promise<boolean>;
   quickSaveFilters: () => Promise<boolean>;
 
@@ -599,6 +600,24 @@ export const useStore = create<AppState>((set, get) => ({
       return true;
     } catch (err) {
       console.error('Failed to import filters:', err);
+      return false;
+    }
+  },
+
+  loadFiltersFromPath: async (path: string) => {
+    try {
+      const xmlText = await invoke<string>('read_text_file', { path });
+      const loaded = parseTatFilters(xmlText);
+      const newFilters = loaded.map((f, i) => ({
+        ...f,
+        idx: i,
+        hits: 0,
+      }));
+      set({ filters: newFilters, currentFilterFile: path, filtersModified: false });
+      await get().applyFilters();
+      return true;
+    } catch (err) {
+      console.error('Failed to load filters from path:', err);
       return false;
     }
   },

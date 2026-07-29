@@ -3,7 +3,7 @@ mod engine;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{State, Emitter};
 use crate::engine::{LogEngine, FilterItem};
 
 struct AppState {
@@ -86,13 +86,107 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(path, content).map_err(|e| e.to_string())
 }
 
+/// Parse CLI arguments matching the original Python app behaviour:
+///   LogAnalyzer.exe [log1 log2 *.log ...] [-f filter.tat]
+struct CliArgs {
+    /// Expanded list of log file paths (glob-resolved)
+    log_files: Vec<String>,
+    /// Optional .tat filter file path
+    filter_file: Option<String>,
+}
+
+fn parse_cli_args() -> CliArgs {
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    let mut log_patterns: Vec<String> = Vec::new();
+    let mut filter_file: Option<String> = None;
+    let mut i = 0;
+    while i < raw.len() {
+        match raw[i].as_str() {
+            "-f" | "--filter" => {
+                i += 1;
+                if i < raw.len() {
+                    filter_file = Some(raw[i].clone());
+                }
+            }
+            arg if !arg.starts_with('-') => {
+                log_patterns.push(arg.to_string());
+            }
+            _ => {} // Ignore unknown flags (Tauri own flags)
+        }
+        i += 1;
+    }
+
+    // Expand globs (e.g., *.log)
+    let mut log_files: Vec<String> = Vec::new();
+    for pattern in &log_patterns {
+        if let Ok(matches) = glob::glob(pattern) {
+            let mut matched: Vec<String> = matches
+                .filter_map(|m| m.ok())
+                .filter_map(|p| p.canonicalize().ok())
+                .map(|p| p.to_string_lossy().to_string())
+                .collect();
+            if matched.is_empty() {
+                // Fallback: pass the raw path if glob yields nothing
+                let p = std::path::Path::new(pattern);
+                if p.exists() {
+                    if let Ok(abs) = p.canonicalize() {
+                        matched.push(abs.to_string_lossy().to_string());
+                    }
+                }
+            }
+            log_files.extend(matched);
+        }
+    }
+
+    // Resolve filter path
+    let filter_file = filter_file.and_then(|f| {
+        let p = std::path::Path::new(&f);
+        if p.exists() {
+            p.canonicalize().ok().map(|a| a.to_string_lossy().to_string())
+        } else {
+            None
+        }
+    });
+
+    CliArgs { log_files, filter_file }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let cli = parse_cli_args();
+
     tauri::Builder::default()
         .manage(AppState {
             engines: Mutex::new(HashMap::new()),
         })
         .plugin(tauri_plugin_opener::init())
+        .setup(move |app| {
+            let has_logs = !cli.log_files.is_empty();
+            let has_filter = cli.filter_file.is_some();
+
+            if has_logs || has_filter {
+                let app_handle = app.handle().clone();
+                let log_files = cli.log_files.clone();
+                let filter_file = cli.filter_file.clone();
+
+                std::thread::spawn(move || {
+                    // Small delay to let the frontend finish mounting
+                    std::thread::sleep(std::time::Duration::from_millis(600));
+
+                    // Emit log files first so tabs are created
+                    if has_logs {
+                        let _ = app_handle.emit("cli-open-files", log_files);
+                    }
+
+                    // Then emit the filter file (frontend applies it after logs are loaded)
+                    if let Some(f) = filter_file {
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        let _ = app_handle.emit("cli-open-filter", f);
+                    }
+                });
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             load_log,
             close_log,

@@ -124,7 +124,17 @@ export const LogViewport: React.FC = () => {
     setStartIndex(start);
   };
 
-  // Redirect wheel scroll on content to virtual scrollbar
+  // Scroll the virtual list by a given number of lines and sync the DOM scrollbar
+  const scrollByLines = (delta: number) => {
+    if (!scrollRef.current || totalDisplayLines === 0) return;
+    const next = Math.max(0, Math.min(startIndex + delta, totalDisplayLines - fitCount));
+    setStartIndex(next);
+    // Sync DOM scrollbar position
+    const maxScroll = scrollRef.current.scrollHeight - scrollRef.current.clientHeight;
+    scrollRef.current.scrollTop = (next / Math.max(1, totalDisplayLines - fitCount)) * maxScroll;
+  };
+
+  // Redirect wheel scroll on content area to virtual line-based scrolling
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     if (e.ctrlKey) {
       e.preventDefault();
@@ -133,9 +143,51 @@ export const LogViewport: React.FC = () => {
       setPreferences({ editorFontSize: nextFontSize });
       return;
     }
+    e.preventDefault();
+    // deltaMode 0 = pixels, 1 = lines, 2 = pages
+    let lines: number;
+    if (e.deltaMode === 1) {
+      lines = Math.round(e.deltaY);
+    } else if (e.deltaMode === 2) {
+      lines = Math.round(e.deltaY) * fitCount;
+    } else {
+      // pixel mode – treat ~3px per line
+      lines = Math.round(e.deltaY / 20);
+    }
+    scrollByLines(lines);
+  };
 
-    if (!scrollRef.current) return;
-    scrollRef.current.scrollTop += e.deltaY;
+  // Keyboard navigation: arrows, PgUp/PgDn, Home/End
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (totalDisplayLines === 0) return;
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        scrollByLines(1);
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        scrollByLines(-1);
+        break;
+      case 'PageDown':
+        e.preventDefault();
+        scrollByLines(fitCount);
+        break;
+      case 'PageUp':
+        e.preventDefault();
+        scrollByLines(-fitCount);
+        break;
+      case 'Home':
+        e.preventDefault();
+        scrollByLines(-totalDisplayLines);
+        break;
+      case 'End':
+        e.preventDefault();
+        scrollByLines(totalDisplayLines);
+        break;
+      default:
+        break;
+    }
   };
 
   // Close context menu on global click
@@ -369,9 +421,11 @@ export const LogViewport: React.FC = () => {
   return (
     <div
       ref={containerRef}
+      tabIndex={0}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      onKeyDown={handleKeyDown}
       className={`relative flex-1 flex flex-row overflow-hidden bg-background select-text outline-none ${
         isDropActive ? 'border-2 border-dashed border-accent' : ''
       }`}
