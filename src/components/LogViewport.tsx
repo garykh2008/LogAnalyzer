@@ -452,7 +452,7 @@ export const LogViewport: React.FC = () => {
 
       {/* Welcome Screen */}
       {!activeFile ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-4 bg-gray-50 dark:bg-[#1a1a1a]">
+        <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-4 bg-gray-50 dark:bg-[#1e1e2e]">
           <div className="bg-white dark:bg-card border border-border p-8 rounded-2xl shadow-xl flex flex-col items-center gap-4 text-center max-w-sm select-none">
             <FileText size={48} className="text-gray-300 dark:text-zinc-700 animate-pulse" />
             <div>
@@ -489,9 +489,9 @@ export const LogViewport: React.FC = () => {
                 const adjustedFg = palette?.fg ? adjustColorForTheme(palette.fg, false, isDark) : undefined;
 
                 const rowBg = isLineSelected
-                  ? 'bg-[#add6ff]/40 dark:bg-[#264f78]/60'
+                  ? 'bg-[#add6ff]/40 dark:bg-[#45475a]/60'
                   : hasNote
-                  ? 'bg-amber-100/30 dark:bg-[#3a3d41]/50'
+                  ? 'bg-amber-100/30 dark:bg-[#313244]/50'
                   : adjustedBg
                   ? 'style-bg'
                   : 'hover:bg-gray-100/50 dark:hover:bg-white/5';
@@ -516,7 +516,7 @@ export const LogViewport: React.FC = () => {
                     {showLineNumbers && (
                       <div
                         style={{ width: `${Math.max(55, String(lineCount).length * 8 + 20)}px` }}
-                        className="flex-shrink-0 h-full flex items-center justify-end pr-3.5 border-r border-border text-gutter-fg bg-gutter dark:bg-[#1a1a1a] select-none text-[10px] font-mono"
+                        className="flex-shrink-0 h-full flex items-center justify-end pr-3.5 border-r border-border text-gutter-fg bg-gutter dark:bg-[#1e1e2e] select-none text-[10px] font-mono"
                       >
                         {hasNote && (
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5"></span>
@@ -539,7 +539,7 @@ export const LogViewport: React.FC = () => {
           </div>
 
           {/* Virtual Scrollbar & Heatmap Gutter */}
-          <div className="w-6 relative bg-gray-50/20 dark:bg-[#181818]/20 border-l border-border flex flex-row select-none">
+          <div className="w-6 relative bg-gray-50/20 dark:bg-[#11111b]/20 border-l border-border flex flex-row select-none">
             {/* Heatmap Canvas on the left */}
             <canvas
               ref={heatmapRef}
@@ -597,7 +597,7 @@ export const LogViewport: React.FC = () => {
               onChange={(e) => setNoteText(e.target.value)}
               placeholder="Type your notes or annotations here..."
               rows={3}
-              className="w-full bg-gray-50 dark:bg-[#3c3c3c] border border-border rounded-lg p-2.5 text-xs focus:outline-none focus:border-accent resize-none"
+              className="w-full bg-gray-50 dark:bg-[#313244] border border-border rounded-lg p-2.5 text-xs focus:outline-none focus:border-accent resize-none"
             />
             <div className="flex flex-row justify-end gap-2 text-xs font-semibold pt-1 select-none">
               <button

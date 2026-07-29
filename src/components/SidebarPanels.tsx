@@ -287,7 +287,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                   value={filterText}
                   onChange={(e) => setFilterEditor({ filterText: e.target.value })}
                   placeholder="Keyword or regex..."
-                  className="w-full text-xs bg-gray-50 dark:bg-[#3c3c3c] border border-border rounded-lg p-2.5 focus:outline-none focus:border-accent"
+                  className="w-full text-xs bg-gray-50 dark:bg-[#313244] border border-border rounded-lg p-2.5 focus:outline-none focus:border-accent"
                 />
 
                 {/* Checkboxes */}

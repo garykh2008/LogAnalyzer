@@ -81,7 +81,7 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ isOpen, onClose })
             onFocus={() => setShowHistory(true)}
             onBlur={() => setTimeout(() => setShowHistory(false), 200)}
             placeholder="Find (Enter to search, Esc to close)..."
-            className="w-full text-xs bg-sidebar dark:bg-[#3c3c3c] border border-border rounded-lg px-3 py-2 focus:outline-none focus:border-accent"
+            className="w-full text-xs bg-gray-50 dark:bg-[#313244] border border-border rounded-lg p-2.5 focus:outline-none focus:border-accent"
           />
 
           {/* Autocomplete Dropdown */}
