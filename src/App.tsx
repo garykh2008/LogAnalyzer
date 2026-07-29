@@ -83,6 +83,9 @@ export default function App() {
   const [isDocsOpen, setIsDocsOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
 
+  // Paste-from-clipboard feedback
+  const [pasteMsg, setPasteMsg] = useState<string | null>(null);
+
   // Export notes helper
   const handleExportNotes = async () => {
     if (!activeFile) return;
@@ -312,6 +315,35 @@ export default function App() {
     window.addEventListener('wheel', blockZoom, { passive: false });
     return () => window.removeEventListener('wheel', blockZoom);
   }, []);
+
+  // Global paste handler: Ctrl+V on viewport pastes clipboard as a new log tab
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      // Ignore paste inside input / textarea / contenteditable
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+
+      const text = e.clipboardData?.getData('text/plain') ?? '';
+      if (!text.trim()) return;
+
+      e.preventDefault();
+      try {
+        setPasteMsg('正在載入剪貼簿內容…');
+        const tmpPath = await invoke<string>('create_temp_log', { content: text });
+        await loadLog(tmpPath);
+        const lineCount = text.split('\n').length;
+        setPasteMsg(`✓ 已從剪貼簿載入 ${lineCount.toLocaleString()} 行`);
+      } catch (err) {
+        console.error('Paste failed:', err);
+        setPasteMsg('✗ 載入失敗');
+      } finally {
+        setTimeout(() => setPasteMsg(null), 3000);
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [loadLog]);
+
   const renderReadmeMarkdown = (text: string) => {
     const lines = text.split('\n');
     const elements: React.ReactNode[] = [];
@@ -427,7 +459,9 @@ export default function App() {
     setActiveMenu(activeMenu === menu ? null : menu);
   };
 
-  const activeFilename = activeFile ? activeFile.split(/[\\/]/).pop() : null;
+  const activeFilename = activeFile ? activeFile.split(/[/\\]/).pop() : null;
+  const isClipboardFile = activeFilename?.startsWith('loganalyzer_clipboard_') ?? false;
+  const displayFilename = isClipboardFile ? '📋 Clipboard' : activeFilename;
   const enabledFiltersCount = filters.filter((f) => f.enabled).length;
   const notesCount = Object.keys(notes[activeFile || ''] || {}).length;
 
@@ -769,7 +803,7 @@ export default function App() {
 
         {/* Middle: Active Filename */}
         <div data-tauri-drag-region className="flex-1 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 truncate px-4">
-          {activeFilename ? `${activeFilename} - Log Analyzer` : 'Log Analyzer V3.0'}
+          {displayFilename ? `${displayFilename} - Log Analyzer` : 'Log Analyzer V3.0'}
         </div>
 
         {/* Right: Window Controls */}
@@ -1262,6 +1296,16 @@ export default function App() {
             >
               Close
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Paste-from-clipboard status toast */}
+      {pasteMsg && (
+        <div className="fixed bottom-7 left-1/2 -translate-x-1/2 z-[200] pointer-events-none">
+          <div className="bg-card border border-border shadow-2xl rounded-xl px-4 py-2.5 flex items-center gap-2.5 text-xs font-medium animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <span className="text-accent">📋</span>
+            <span className="text-foreground">{pasteMsg}</span>
           </div>
         </div>
       )}

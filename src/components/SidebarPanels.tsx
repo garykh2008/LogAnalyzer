@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore, FilterItem, adjustColorForTheme } from '../store';
 import { invoke } from '@tauri-apps/api/core';
-import { Plus, X, Trash, Edit, Check, Settings, FileText, Filter, BookOpen } from 'lucide-react';
+import { Plus, X, Trash, Edit, Check, Settings, FileText, Filter, BookOpen, Clipboard, Download } from 'lucide-react';
 
 interface SidebarPanelsProps {
   activeTab: 'files' | 'filters' | 'notes';
@@ -224,8 +224,33 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
             ) : (
               loadedFiles.map((file) => {
                 const isActive = activeFile === file;
-                const filename = file.split(/[\\/]/).pop() || file;
-                const pathDir = file.substring(0, file.lastIndexOf(filename));
+                const filename = file.split(/[/\\]/).pop() || file;
+                const pathDir = file.substring(0, file.length - filename.length);
+                const isClipboard = filename.startsWith('loganalyzer_clipboard_');
+
+                const handleClose = async (e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  closeLog(file);
+                  // Delete temp clipboard files on close
+                  if (isClipboard) {
+                    try { await invoke('delete_file', { path: file }); } catch {}
+                  }
+                };
+
+                const handleSaveAs = async (e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  try {
+                    const savePath = await invoke<string | null>('save_file_dialog', {
+                      defaultName: 'clipboard.log',
+                      extension: 'log',
+                    });
+                    if (!savePath) return;
+                    const content = await invoke<string>('read_text_file', { path: file });
+                    await invoke('write_text_file', { path: savePath, content });
+                  } catch (err) {
+                    console.error('Save as failed:', err);
+                  }
+                };
 
                 return (
                   <div
@@ -238,23 +263,34 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                     }`}
                   >
                     <div className="flex flex-col min-w-0 pr-2">
-                      <span className="text-xs font-semibold truncate font-mono" title={file}>
-                        {filename}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {isClipboard && <Clipboard size={10} className="text-accent shrink-0" />}
+                        <span className="text-xs font-semibold truncate font-mono" title={file}>
+                          {isClipboard ? 'Clipboard' : filename}
+                        </span>
+                      </div>
                       <span className="text-[9px] text-gray-400 truncate select-none mt-0.5">
-                        {pathDir}
+                        {isClipboard ? 'Unsaved — paste buffer' : pathDir}
                       </span>
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        closeLog(file);
-                      }}
-                      className="p-1 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 rounded hover:bg-hover transition-colors cursor-pointer"
-                      title="Close File"
-                    >
-                      <X size={12} />
-                    </button>
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {isClipboard && (
+                        <button
+                          onClick={handleSaveAs}
+                          className="p-1 text-gray-400 hover:text-accent rounded hover:bg-hover transition-colors cursor-pointer"
+                          title="Save As..."
+                        >
+                          <Download size={12} />
+                        </button>
+                      )}
+                      <button
+                        onClick={handleClose}
+                        className="p-1 text-gray-400 hover:text-red-500 rounded hover:bg-hover transition-colors cursor-pointer"
+                        title="Close File"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
                   </div>
                 );
               })

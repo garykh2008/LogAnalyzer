@@ -86,6 +86,32 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(path, content).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn create_temp_log(content: String) -> Result<String, String> {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let tmp_dir = std::env::temp_dir();
+    let filename = format!("loganalyzer_clipboard_{}.log", timestamp);
+    let path = tmp_dir.join(filename);
+    std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn delete_file(path: String) -> Result<(), String> {
+    // Only allow deleting temp clipboard files for safety
+    let filename = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    if !filename.starts_with("loganalyzer_clipboard_") {
+        return Err("Only clipboard temp files can be deleted this way".to_string());
+    }
+    std::fs::remove_file(&path).map_err(|e| e.to_string())
+}
+
 /// Parse CLI arguments matching the original Python app behaviour:
 ///   LogAnalyzer.exe [log1 log2 *.log ...] [-f filter.tat]
 struct CliArgs {
@@ -196,7 +222,9 @@ pub fn run() {
             open_file_dialog,
             save_file_dialog,
             read_text_file,
-            write_text_file
+            write_text_file,
+            create_temp_log,
+            delete_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

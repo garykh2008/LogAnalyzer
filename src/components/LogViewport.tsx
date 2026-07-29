@@ -452,15 +452,25 @@ export const LogViewport: React.FC = () => {
 
       {/* Welcome Screen */}
       {!activeFile ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-4 bg-gray-50 dark:bg-[#1e1e2e]">
+        <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-5 bg-gray-50 dark:bg-[#1e1e2e]">
           <div className="bg-white dark:bg-card border border-border p-8 rounded-2xl shadow-xl flex flex-col items-center gap-4 text-center max-w-sm select-none">
             <FileText size={48} className="text-gray-300 dark:text-zinc-700 animate-pulse" />
             <div>
               <h3 className="text-sm font-bold text-gray-700 dark:text-zinc-300">No Log File Open</h3>
               <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">Drag and drop a log file here, or use File &gt; Open Log to start analyzing.</p>
             </div>
+            <div className="w-full h-[1px] bg-border" />
+            <div className="flex flex-col items-center gap-1.5">
+              <p className="text-xs text-gray-400 dark:text-gray-500">Or paste clipboard log content directly</p>
+              <div className="flex items-center gap-1.5">
+                <kbd className="px-2 py-0.5 text-[10px] font-mono font-bold bg-gray-100 dark:bg-input border border-border rounded text-gray-600 dark:text-gray-400">Ctrl</kbd>
+                <span className="text-[10px] text-gray-400">+</span>
+                <kbd className="px-2 py-0.5 text-[10px] font-mono font-bold bg-gray-100 dark:bg-input border border-border rounded text-gray-600 dark:text-gray-400">V</kbd>
+              </div>
+            </div>
           </div>
         </div>
+
       ) : (
         <>
           {/* Main Log Lines View */}
