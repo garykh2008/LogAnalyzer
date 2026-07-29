@@ -88,13 +88,16 @@ export const LogViewport: React.FC = () => {
       return;
     }
 
+    const safeStart = isNaN(startIndex) ? 0 : startIndex;
     const fetchLines = async () => {
       const fetchIndices: number[] = [];
-      const end = Math.min(startIndex + visibleCount, totalDisplayLines);
+      const end = Math.min(safeStart + visibleCount, totalDisplayLines);
 
-      for (let i = startIndex; i < end; i++) {
+      for (let i = safeStart; i < end; i++) {
         const rawIdx = filteredIndices ? filteredIndices[i] : i;
-        fetchIndices.push(rawIdx);
+        if (rawIdx !== undefined && !isNaN(rawIdx)) {
+          fetchIndices.push(rawIdx);
+        }
       }
 
       if (fetchIndices.length === 0) return;
@@ -121,17 +124,20 @@ export const LogViewport: React.FC = () => {
 
     const pct = target.scrollTop / maxScroll;
     const start = Math.floor(pct * Math.max(0, totalDisplayLines - fitCount));
-    setStartIndex(start);
+    setStartIndex(isNaN(start) ? 0 : start);
   };
 
   // Scroll the virtual list by a given number of lines and sync the DOM scrollbar
   const scrollByLines = (delta: number) => {
     if (!scrollRef.current || totalDisplayLines === 0) return;
-    const next = Math.max(0, Math.min(startIndex + delta, totalDisplayLines - fitCount));
-    setStartIndex(next);
+    const current = isNaN(startIndex) ? 0 : startIndex;
+    const next = Math.max(0, Math.min(current + delta, totalDisplayLines - fitCount));
+    const safeNext = isNaN(next) ? 0 : next;
+    setStartIndex(safeNext);
     // Sync DOM scrollbar position
     const maxScroll = scrollRef.current.scrollHeight - scrollRef.current.clientHeight;
-    scrollRef.current.scrollTop = (next / Math.max(1, totalDisplayLines - fitCount)) * maxScroll;
+    const pct = safeNext / Math.max(1, totalDisplayLines - fitCount);
+    scrollRef.current.scrollTop = isNaN(pct) ? 0 : pct * maxScroll;
   };
 
   // Redirect wheel scroll on content area to virtual line-based scrolling
@@ -219,31 +225,43 @@ export const LogViewport: React.FC = () => {
       if (displayIdx === -1) return;
     }
 
-    const pct = displayIdx / (totalDisplayLines - 1);
+    const denom = Math.max(1, totalDisplayLines - 1);
+    const pct = displayIdx / denom;
     const maxScroll = scrollRef.current.scrollHeight - scrollRef.current.clientHeight;
     
-    scrollRef.current.scrollTop = pct * maxScroll;
-    setStartIndex(Math.max(0, Math.min(displayIdx - 2, totalDisplayLines - fitCount)));
+    scrollRef.current.scrollTop = isNaN(pct) ? 0 : pct * maxScroll;
+    const newStart = Math.max(0, Math.min(displayIdx - 2, totalDisplayLines - fitCount));
+    setStartIndex(isNaN(newStart) ? 0 : newStart);
   }, [selectedLine, totalDisplayLines, filteredIndices]);
 
   // Preservation recording
   const recordAnchor = () => {
-    const topIdx = startIndex;
-    const rawTopIdx = filteredIndices ? filteredIndices[topIdx] : topIdx;
+    const topIdx = isNaN(startIndex) ? 0 : startIndex;
+    let rawTopIdx = 0;
+    if (filteredIndices) {
+      if (filteredIndices.length > 0) {
+        const safeIdx = Math.max(0, Math.min(topIdx, filteredIndices.length - 1));
+        rawTopIdx = filteredIndices[safeIdx] ?? 0;
+      } else {
+        rawTopIdx = 0;
+      }
+    } else {
+      rawTopIdx = topIdx;
+    }
     
     let visibleSelected = false;
     let selectedDisplayIdx = -1;
     if (selectedLine !== null) {
       selectedDisplayIdx = filteredIndices ? filteredIndices.indexOf(selectedLine) : selectedLine;
-      if (selectedDisplayIdx >= startIndex && selectedDisplayIdx < startIndex + visibleCount) {
+      if (selectedDisplayIdx >= topIdx && selectedDisplayIdx < topIdx + visibleCount) {
         visibleSelected = true;
       }
     }
     
-    if (visibleSelected) {
+    if (visibleSelected && selectedLine !== null) {
       setPendingAnchor({
-        raw: selectedLine!,
-        offset: selectedDisplayIdx - startIndex
+        raw: selectedLine,
+        offset: Math.max(0, selectedDisplayIdx - topIdx)
       });
     } else {
       setPendingAnchor({
@@ -262,37 +280,47 @@ export const LogViewport: React.FC = () => {
     if (!pendingAnchor || totalDisplayLines === 0 || !scrollRef.current) return;
     
     let targetDisplayIdx = 0;
+    const rawTarget = pendingAnchor.raw ?? 0;
+    const offsetTarget = pendingAnchor.offset ?? 0;
+
     if (filteredIndices) {
-      const newIdx = filteredIndices.indexOf(pendingAnchor.raw);
-      if (newIdx !== -1) {
-        targetDisplayIdx = Math.max(0, newIdx - pendingAnchor.offset);
+      if (filteredIndices.length === 0) {
+        targetDisplayIdx = 0;
       } else {
-        let low = 0;
-        let high = filteredIndices.length - 1;
-        let closest = 0;
-        while (low <= high) {
-          const mid = Math.floor((low + high) / 2);
-          if (filteredIndices[mid] === pendingAnchor.raw) {
-            closest = mid;
-            break;
-          } else if (filteredIndices[mid] < pendingAnchor.raw) {
-            closest = mid;
-            low = mid + 1;
-          } else {
-            high = mid - 1;
+        const newIdx = filteredIndices.indexOf(rawTarget);
+        if (newIdx !== -1) {
+          targetDisplayIdx = Math.max(0, newIdx - offsetTarget);
+        } else {
+          let low = 0;
+          let high = filteredIndices.length - 1;
+          let closest = 0;
+          while (low <= high) {
+            const mid = Math.floor((low + high) / 2);
+            if (filteredIndices[mid] === rawTarget) {
+              closest = mid;
+              break;
+            } else if (filteredIndices[mid] < rawTarget) {
+              closest = mid;
+              low = mid + 1;
+            } else {
+              high = mid - 1;
+            }
           }
+          targetDisplayIdx = Math.max(0, closest - offsetTarget);
         }
-        targetDisplayIdx = Math.max(0, closest - pendingAnchor.offset);
       }
     } else {
-      targetDisplayIdx = Math.max(0, pendingAnchor.raw - pendingAnchor.offset);
+      targetDisplayIdx = Math.max(0, rawTarget - offsetTarget);
     }
-    
+
+    if (isNaN(targetDisplayIdx)) targetDisplayIdx = 0;
+
     const maxScroll = scrollRef.current.scrollHeight - scrollRef.current.clientHeight;
     const pct = targetDisplayIdx / Math.max(1, totalDisplayLines - fitCount);
     
-    scrollRef.current.scrollTop = pct * maxScroll;
-    setStartIndex(Math.max(0, Math.min(targetDisplayIdx, totalDisplayLines - fitCount)));
+    scrollRef.current.scrollTop = isNaN(pct) ? 0 : pct * maxScroll;
+    const newStart = Math.max(0, Math.min(targetDisplayIdx, totalDisplayLines - fitCount));
+    setStartIndex(isNaN(newStart) ? 0 : newStart);
     setPendingAnchor(null);
   }, [filteredIndices, totalDisplayLines]);
 
