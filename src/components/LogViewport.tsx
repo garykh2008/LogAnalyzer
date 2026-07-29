@@ -63,6 +63,7 @@ export const LogViewport: React.FC = () => {
   const [isManualSelection, setIsManualSelection] = useState(false);
 
   const totalDisplayLines = filteredIndices ? filteredIndices.length : lineCount;
+  const fitCount = Math.max(1, Math.floor(containerHeight / ROW_HEIGHT));
 
   // Calculate container dimensions
   useEffect(() => {
@@ -119,7 +120,7 @@ export const LogViewport: React.FC = () => {
     if (maxScroll <= 0) return;
 
     const pct = target.scrollTop / maxScroll;
-    const start = Math.floor(pct * Math.max(0, totalDisplayLines - visibleCount + 2));
+    const start = Math.floor(pct * Math.max(0, totalDisplayLines - fitCount));
     setStartIndex(start);
   };
 
@@ -170,7 +171,7 @@ export const LogViewport: React.FC = () => {
     const maxScroll = scrollRef.current.scrollHeight - scrollRef.current.clientHeight;
     
     scrollRef.current.scrollTop = pct * maxScroll;
-    setStartIndex(Math.max(0, Math.min(displayIdx - 2, totalDisplayLines - visibleCount)));
+    setStartIndex(Math.max(0, Math.min(displayIdx - 2, totalDisplayLines - fitCount)));
   }, [selectedLine, totalDisplayLines, filteredIndices]);
 
   // Preservation recording
@@ -236,10 +237,10 @@ export const LogViewport: React.FC = () => {
     }
     
     const maxScroll = scrollRef.current.scrollHeight - scrollRef.current.clientHeight;
-    const pct = targetDisplayIdx / Math.max(1, totalDisplayLines - visibleCount);
+    const pct = targetDisplayIdx / Math.max(1, totalDisplayLines - fitCount);
     
     scrollRef.current.scrollTop = pct * maxScroll;
-    setStartIndex(Math.max(0, Math.min(targetDisplayIdx, totalDisplayLines - visibleCount)));
+    setStartIndex(Math.max(0, Math.min(targetDisplayIdx, totalDisplayLines - fitCount)));
     setPendingAnchor(null);
   }, [filteredIndices, totalDisplayLines]);
 
