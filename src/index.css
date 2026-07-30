@@ -39,22 +39,22 @@
 }
 
 .dark {
-  /* Catppuccin Mocha */
-  --background: #1e1e2e;   /* base */
-  --foreground: #cdd6f4;   /* text */
-  --border: #313244;       /* surface0 */
-  --accent: #89b4fa;       /* blue */
-  --accent-hover: #74c7ec; /* sapphire */
-  --sidebar-bg: #181825;   /* mantle */
-  --activity-bg: #11111b;  /* crust */
-  --gutter-bg: #1e1e2e;    /* base */
-  --gutter-fg: #6c7086;    /* overlay0 */
-  --selection-bg: #45475a; /* surface1 */
-  --selection-fg: #cdd6f4; /* text */
-  --hover-bg: rgba(203, 166, 247, 0.08); /* mauve tint */
-  --input-bg: #313244;     /* surface0 */
-  --titlebar-bg: #11111b;  /* crust */
-  --card-bg: #181825;      /* mantle */
+  /* Lighter variant — between Macchiato and Latte */
+  --background: #363a50;   /* base — lightened */
+  --foreground: #d0d6f0;   /* text */
+  --border: #484d68;       /* surface0 */
+  --accent: #8aadf4;       /* blue */
+  --accent-hover: #7dc4e4; /* sapphire */
+  --sidebar-bg: #2e3348;   /* mantle */
+  --activity-bg: #262b40;  /* crust */
+  --gutter-bg: #363a50;    /* base */
+  --gutter-fg: #8388a2;    /* overlay0 */
+  --selection-bg: #52577a; /* surface1 */
+  --selection-fg: #d0d6f0; /* text */
+  --hover-bg: rgba(198, 160, 246, 0.08); /* mauve tint */
+  --input-bg: #484d68;     /* surface0 */
+  --titlebar-bg: #262b40;  /* crust */
+  --card-bg: #2e3348;      /* mantle */
 }
 
 body {

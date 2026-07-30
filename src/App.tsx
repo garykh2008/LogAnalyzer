@@ -521,7 +521,7 @@ export default function App() {
                                 await loadLog(filepath);
                                 setActiveMenu(null);
                               }}
-                              className="w-full text-left px-3 py-2 hover:bg-hover truncate transition-colors text-[10px] font-mono text-gray-500 hover:text-foreground"
+                              className="w-full text-left px-3 py-2 hover:bg-hover truncate transition-colors text-[10px] font-mono text-foreground"
                               title={filepath}
                             >
                               {filepath.split(/[\\/]/).pop()}
