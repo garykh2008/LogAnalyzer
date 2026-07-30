@@ -460,6 +460,13 @@ export default function App() {
     setActiveMenu(activeMenu === menu ? null : menu);
   };
 
+  const handleMenuMouseEnter = (menu: string) => {
+    // When a menu is already open, hovering another menu item switches to it
+    if (activeMenu !== null) {
+      setActiveMenu(menu);
+    }
+  };
+
   const activeFilename = activeFile ? activeFile.split(/[/\\]/).pop() : null;
   const isClipboardFile = activeFilename?.startsWith('loganalyzer_clipboard_') ?? false;
   const displayFilename = isClipboardFile ? '📋 Clipboard' : activeFilename;
@@ -483,6 +490,7 @@ export default function App() {
             <div className="relative">
               <button
                 onClick={(e) => handleMenuClick(e, 'file')}
+                onMouseEnter={() => handleMenuMouseEnter('file')}
                 className="px-2.5 py-1 rounded-md hover:bg-hover transition-colors cursor-default"
               >
                 File
@@ -596,6 +604,7 @@ export default function App() {
             <div className="relative">
               <button
                 onClick={(e) => handleMenuClick(e, 'edit')}
+                onMouseEnter={() => handleMenuMouseEnter('edit')}
                 className="px-2.5 py-1 rounded-md hover:bg-hover transition-colors cursor-default"
               >
                 Edit
@@ -640,6 +649,7 @@ export default function App() {
             <div className="relative">
               <button
                 onClick={(e) => handleMenuClick(e, 'view')}
+                onMouseEnter={() => handleMenuMouseEnter('view')}
                 className="px-2.5 py-1 rounded-md hover:bg-hover transition-colors cursor-default"
               >
                 View
@@ -704,6 +714,7 @@ export default function App() {
             <div className="relative">
               <button
                 onClick={(e) => handleMenuClick(e, 'notesMenu')}
+                onMouseEnter={() => handleMenuMouseEnter('notesMenu')}
                 className="px-2.5 py-1 rounded-md hover:bg-hover transition-colors cursor-default"
               >
                 Notes
@@ -772,6 +783,7 @@ export default function App() {
             <div className="relative">
               <button
                 onClick={(e) => handleMenuClick(e, 'help')}
+                onMouseEnter={() => handleMenuMouseEnter('help')}
                 className="px-2.5 py-1 rounded-md hover:bg-hover transition-colors cursor-default"
               >
                 Help
