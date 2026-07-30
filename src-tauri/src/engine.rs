@@ -4,6 +4,8 @@ use std::fs::File;
 use std::sync::Arc;
 use serde::{Serialize, Deserialize};
 
+static TS_REGEX: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+
 #[derive(Clone)]
 pub struct LogEngine {
     lines: Arc<Vec<String>>,
@@ -19,13 +21,55 @@ pub struct FilterItem {
     pub idx: usize,
 }
 
+fn detect_encoding(bytes: &[u8]) -> &'static encoding_rs::Encoding {
+    // Check BOM markers
+    if bytes.len() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF {
+        return encoding_rs::UTF_8;
+    }
+    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        return encoding_rs::UTF_16LE;
+    }
+    if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
+        return encoding_rs::UTF_16BE;
+    }
+
+    // No BOM — sample first 64KB and try candidates in priority order
+    let sample = if bytes.len() > 64 * 1024 { &bytes[..64 * 1024] } else { bytes };
+
+    // Priority order: UTF-8 first (most common), then common CJK, then others
+    let candidates: &[&'static encoding_rs::Encoding] = &[
+        encoding_rs::UTF_8,
+        encoding_rs::GBK,
+        encoding_rs::BIG5,
+        encoding_rs::SHIFT_JIS,
+        encoding_rs::EUC_JP,
+        encoding_rs::WINDOWS_1252,
+    ];
+
+    for enc in candidates {
+        let (_, _, had_errors) = enc.decode(sample);
+        if !had_errors {
+            return enc;
+        }
+    }
+
+    // Fallback: UTF-8 (best effort)
+    encoding_rs::UTF_8
+}
+
 impl LogEngine {
     pub fn new(path: &str) -> Result<Self, String> {
         let file = File::open(path).map_err(|e| e.to_string())?;
+        let metadata = file.metadata().map_err(|e| e.to_string())?;
+        const MAX_FILE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+        if metadata.len() > MAX_FILE_SIZE {
+            return Err(format!("File too large: {} bytes (max {} bytes)", metadata.len(), MAX_FILE_SIZE));
+        }
         let mmap = unsafe { memmap2::Mmap::map(&file).map_err(|e| e.to_string())? };
 
-        // Handle Encoding with BOM removal
-        let (decoded, _encoding_used, _had_errors) = encoding_rs::UTF_8.decode(&mmap);
+        // Auto-detect encoding
+        let encoding = detect_encoding(&mmap);
+        let (decoded, _, _) = encoding.decode(&mmap);
         let content = decoded.into_owned();
 
         // Split lines handling \r\n, \n, and \r
@@ -73,15 +117,11 @@ impl LogEngine {
                     })
                     .collect()
             } else {
-                let re = regex::RegexBuilder::new(&regex::escape(query))
-                    .case_insensitive(true)
-                    .build()
-                    .map_err(|e| e.to_string())?;
-
+                let query_lower = query.to_lowercase();
                 lines.par_iter()
                     .enumerate()
                     .filter_map(|(i, line)| {
-                        if re.is_match(line) { Some(i) } else { None }
+                        if line.to_lowercase().contains(&query_lower) { Some(i) } else { None }
                     })
                     .collect()
             }
@@ -97,16 +137,29 @@ impl LogEngine {
 
         let lines = &self.lines;
 
+        let mut regex_errors: Vec<String> = Vec::new();
         let compiled_filters: Vec<_> = filters.iter().map(|f| {
             let re = if f.is_regex {
-                Regex::new(&f.text).ok()
+                match Regex::new(&f.text) {
+                    Ok(r) => Some(r),
+                    Err(e) => {
+                        regex_errors.push(format!("Filter '{}': {}", f.text, e));
+                        None
+                    }
+                }
             } else {
                 None
             };
             (f.text.clone(), re, f.is_regex, f.is_exclude, f.is_event, f.idx)
         }).collect();
 
-        let ts_regex = Regex::new(r"(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b)").unwrap();
+        if !regex_errors.is_empty() {
+            return Err(format!("Invalid regex patterns:\n{}", regex_errors.join("\n")));
+        }
+
+        let ts_regex = TS_REGEX.get_or_init(|| {
+            Regex::new(r"(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?|\d{2}/\d{2}/\d{4}-\d{2}:\d{2}:\d{2}\.\d+|\b\d{1,2}:\d{2}:\d{2}\.\d+\s+(?:AM|PM)\b|\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b)").unwrap()
+        });
 
         let results: Vec<(u8, Option<usize>, Option<(String, String, usize)>)> = lines.par_iter().enumerate().map(|(raw_idx, line)| {
             let mut tag_code: u8 = 0; 

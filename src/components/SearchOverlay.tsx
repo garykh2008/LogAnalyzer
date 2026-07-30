@@ -8,19 +8,17 @@ interface SearchOverlayProps {
 }
 
 export const SearchOverlay: React.FC<SearchOverlayProps> = ({ isOpen, onClose }) => {
-  const {
-    searchQuery,
-    isRegexSearch,
-    isCaseSensitiveSearch,
-    activeSearchResults,
-    searchIndex,
-    isSearching,
-    setSearchQuery,
-    runSearch,
-    nextSearchMatch,
-    prevSearchMatch,
-    clearSearch,
-  } = useStore();
+  const searchQuery = useStore((s) => s.searchQuery);
+  const isRegexSearch = useStore((s) => s.isRegexSearch);
+  const isCaseSensitiveSearch = useStore((s) => s.isCaseSensitiveSearch);
+  const activeSearchResults = useStore((s) => s.activeSearchResults);
+  const searchIndex = useStore((s) => s.searchIndex);
+  const isSearching = useStore((s) => s.isSearching);
+  const setSearchQuery = useStore((s) => s.setSearchQuery);
+  const runSearch = useStore((s) => s.runSearch);
+  const nextSearchMatch = useStore((s) => s.nextSearchMatch);
+  const prevSearchMatch = useStore((s) => s.prevSearchMatch);
+  const clearSearch = useStore((s) => s.clearSearch);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const [history, setHistory] = useState<string[]>([]);

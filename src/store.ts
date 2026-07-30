@@ -19,62 +19,6 @@ export interface NoteItem {
   text: string;
 }
 
-// Smart color adjustment for theme contrast (matches Python adjust_color_for_theme)
-function hexToRgb(hexStr: string): [number, number, number] {
-  let cleanHex = hexStr.replace('#', '').trim();
-  if (cleanHex.length === 3) {
-    cleanHex = cleanHex.split('').map(c => c + c).join('');
-  }
-  const num = parseInt(cleanHex, 16);
-  if (isNaN(num)) return [0, 0, 0];
-  return [
-    (num >> 16) & 255,
-    (num >> 8) & 255,
-    num & 255
-  ];
-}
-
-export function adjustColorForTheme(hexColor: string, isBackground: boolean, isDarkMode: boolean): string {
-  if (!hexColor) return hexColor;
-  let cleanColor = hexColor.trim().toLowerCase();
-  if (!cleanColor.startsWith('#')) {
-    cleanColor = '#' + cleanColor;
-  }
-
-  if (!isDarkMode) {
-    return cleanColor;
-  }
-
-  // 1. Defaults adjustment
-  if (isBackground && (cleanColor === '#ffffff' || cleanColor === '#fff')) {
-    return '#1e1e1e';
-  }
-  if (!isBackground && (cleanColor === '#000000' || cleanColor === '#000')) {
-    return '#d4d4d4';
-  }
-
-  // 2. Luminance checks
-  const rgb = hexToRgb(cleanColor);
-  const lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255.0;
-
-  if (isBackground && lum > 0.4) {
-    // Dim the color for dark mode background
-    const r = Math.floor(rgb[0] * 0.25);
-    const g = Math.floor(rgb[1] * 0.25);
-    const b = Math.floor(rgb[2] * 0.25);
-    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-  }
-  if (!isBackground && lum < 0.5) {
-    // Lighten the text for readability
-    const r = Math.floor(rgb[0] + (255 - rgb[0]) * 0.6);
-    const g = Math.floor(rgb[1] + (255 - rgb[1]) * 0.6);
-    const b = Math.floor(rgb[2] + (255 - rgb[2]) * 0.6);
-    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-  }
-
-  return cleanColor;
-}
-
 function parseTatFilters(xmlText: string): Omit<FilterItem, 'idx' | 'hits'>[] {
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(xmlText, "text/xml");
@@ -141,7 +85,6 @@ function generateTatFiltersXml(filters: FilterItem[]): string {
 interface AppState {
   // Theme & Preferences
   theme: 'dark' | 'light';
-  fontSize: number;
   editorFontSize: number;
   editorFontFamily: string;
   showLineNumbers: boolean;
@@ -191,6 +134,8 @@ interface AppState {
   timelineEvents: Array<[string, string, number]>;
   currentFilterFile: string | null;
   filtersModified: boolean;
+  filterDebounceTimer: ReturnType<typeof setTimeout> | null;
+  debouncedApplyFilters: () => void;
   addFilter: (filter: Omit<FilterItem, 'idx' | 'hits'>) => void;
   updateFilter: (index: number, filter: Partial<FilterItem>) => void;
   removeFilter: (index: number) => void;
@@ -244,7 +189,6 @@ export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
   theme: 'light',
-  fontSize: 12,
   editorFontSize: 12,
   editorFontFamily: 'Consolas',
   showLineNumbers: true,
@@ -261,7 +205,7 @@ export const useStore = create<AppState>()(
       document.documentElement.classList.remove('dark');
     }
   },
-  setPreferences: (prefs) => set(prefs as any),
+  setPreferences: (prefs) => set(() => prefs as Partial<AppState>),
 
   loadedFiles: [],
   activeFile: null,
@@ -474,6 +418,19 @@ export const useStore = create<AppState>()(
   timelineEvents: [],
   currentFilterFile: null,
   filtersModified: false,
+  filterDebounceTimer: null as ReturnType<typeof setTimeout> | null,
+
+  // Debounced filter re-application to prevent race conditions on rapid edits
+  debouncedApplyFilters: () => {
+    const state = get();
+    if (state.filterDebounceTimer) {
+      clearTimeout(state.filterDebounceTimer);
+    }
+    const timer = setTimeout(() => {
+      get().applyFilters();
+    }, 150);
+    set({ filterDebounceTimer: timer });
+  },
 
   addFilter: (f) => {
     const filters = get().filters;
@@ -483,19 +440,19 @@ export const useStore = create<AppState>()(
       hits: 0,
     };
     set({ filters: [...filters, newFilter], filtersModified: true });
-    get().applyFilters();
+    get().debouncedApplyFilters();
   },
 
   updateFilter: (index, f) => {
     const updated = get().filters.map((item, i) => (i === index ? { ...item, ...f } : item));
     set({ filters: updated, filtersModified: true });
-    get().applyFilters();
+    get().debouncedApplyFilters();
   },
 
   removeFilter: (index) => {
     const updated = get().filters.filter((_, i) => i !== index).map((f, i) => ({ ...f, idx: i }));
     set({ filters: updated, filtersModified: true });
-    get().applyFilters();
+    get().debouncedApplyFilters();
   },
 
   moveFilter: (fromIndex, toIndex) => {
@@ -504,7 +461,7 @@ export const useStore = create<AppState>()(
     updated.splice(toIndex, 0, moved);
     const reindexed = updated.map((f, i) => ({ ...f, idx: i }));
     set({ filters: reindexed, filtersModified: true });
-    get().applyFilters();
+    get().debouncedApplyFilters();
   },
 
   clearFilters: () => {
@@ -826,7 +783,7 @@ export const useStore = create<AppState>()(
 }),
     {
       name: 'log-analyzer-prefs',
-      // Only persist user preference keys - not runtime state
+      // Persist user preference keys only — filters are per-session (not persisted)
       partialize: (state) => ({
         theme: state.theme,
         editorFontSize: state.editorFontSize,

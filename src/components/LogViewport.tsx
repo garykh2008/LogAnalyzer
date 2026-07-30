@@ -1,44 +1,41 @@
 import React, { useRef, useEffect, useState, UIEvent } from 'react';
-import { useStore, adjustColorForTheme } from '../store';
+import { useStore } from '../store';
+import { adjustColorForTheme } from '../utils/color';
 import { invoke } from '@tauri-apps/api/core';
-import { FileText, Edit, Trash, Copy } from 'lucide-react';
+import { FileText, Edit, Copy } from 'lucide-react';
 
 const ROW_HEIGHT = 20;
 const MAX_DOM_HEIGHT = 4000000;
 
 export const LogViewport: React.FC = () => {
-  const {
-    activeFile,
-    lineCount,
-    loading,
-    selectedLine,
-    selectedLines,
-    setSelectedLine,
-    searchQuery,
-    activeSearchResults,
-    tagCodes,
-    filteredIndices,
-    filterPalette,
-    notes,
-    addNote,
-    deleteNote,
-    editorFontSize,
-    editorFontFamily,
-    showLineNumbers,
-    lineSpacing,
-    showFilteredOnly,
-    loadLog,
-    copySelection,
-    theme,
-    setPreferences,
-
-    // Lifted states
-    openAddFilter,
-    setActiveTab,
-    setIsSidebarOpen,
-    noteEditLine,
-    setNoteEditLine,
-  } = useStore();
+  const activeFile = useStore((s) => s.activeFile);
+  const lineCount = useStore((s) => s.lineCount);
+  const loading = useStore((s) => s.loading);
+  const selectedLine = useStore((s) => s.selectedLine);
+  const selectedLines = useStore((s) => s.selectedLines);
+  const setSelectedLine = useStore((s) => s.setSelectedLine);
+  const searchQuery = useStore((s) => s.searchQuery);
+  const activeSearchResults = useStore((s) => s.activeSearchResults);
+  const tagCodes = useStore((s) => s.tagCodes);
+  const filteredIndices = useStore((s) => s.filteredIndices);
+  const filterPalette = useStore((s) => s.filterPalette);
+  const notes = useStore((s) => s.notes);
+  const addNote = useStore((s) => s.addNote);
+  const deleteNote = useStore((s) => s.deleteNote);
+  const editorFontSize = useStore((s) => s.editorFontSize);
+  const editorFontFamily = useStore((s) => s.editorFontFamily);
+  const showLineNumbers = useStore((s) => s.showLineNumbers);
+  const lineSpacing = useStore((s) => s.lineSpacing);
+  const showFilteredOnly = useStore((s) => s.showFilteredOnly);
+  const loadLog = useStore((s) => s.loadLog);
+  const copySelection = useStore((s) => s.copySelection);
+  const theme = useStore((s) => s.theme);
+  const setPreferences = useStore((s) => s.setPreferences);
+  const openAddFilter = useStore((s) => s.openAddFilter);
+  const setActiveTab = useStore((s) => s.setActiveTab);
+  const setIsSidebarOpen = useStore((s) => s.setIsSidebarOpen);
+  const noteEditLine = useStore((s) => s.noteEditLine);
+  const setNoteEditLine = useStore((s) => s.setNoteEditLine);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);

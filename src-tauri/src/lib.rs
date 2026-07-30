@@ -2,41 +2,42 @@
 mod engine;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::RwLock;
 use tauri::{State, Emitter};
 use crate::engine::{LogEngine, FilterItem};
 
 struct AppState {
-    engines: Mutex<HashMap<String, LogEngine>>,
+    engines: RwLock<HashMap<String, LogEngine>>,
 }
 
 #[tauri::command]
 fn load_log(state: State<'_, AppState>, filepath: String) -> Result<usize, String> {
-    let mut engines = state.engines.lock().map_err(|e| e.to_string())?;
-    
-    // If already loaded, return line count
-    if let Some(engine) = engines.get(&filepath) {
-        return Ok(engine.line_count());
+    {
+        let engines = state.engines.read().map_err(|e| e.to_string())?;
+        if let Some(engine) = engines.get(&filepath) {
+            return Ok(engine.line_count());
+        }
     }
-    
+    // Create engine OUTSIDE any lock
     let engine = LogEngine::new(&filepath)?;
     let count = engine.line_count();
+    let mut engines = state.engines.write().map_err(|e| e.to_string())?;
     engines.insert(filepath, engine);
     Ok(count)
 }
 
 #[tauri::command]
 fn close_log(state: State<'_, AppState>, filepath: String) -> Result<(), String> {
-    let mut engines = state.engines.lock().map_err(|e| e.to_string())?;
+    let mut engines = state.engines.write().map_err(|e| e.to_string())?;
     engines.remove(&filepath);
     Ok(())
 }
 
 #[tauri::command]
 fn get_lines(state: State<'_, AppState>, filepath: String, indices: Vec<usize>) -> Result<Vec<String>, String> {
-    let engines = state.engines.lock().map_err(|e| e.to_string())?;
+    let engines = state.engines.read().map_err(|e| e.to_string())?;
     let engine = engines.get(&filepath).ok_or_else(|| "Log file not loaded".to_string())?;
-    
+
     let lines = indices.iter()
         .map(|&idx| engine.get_line(idx))
         .collect();
@@ -45,17 +46,17 @@ fn get_lines(state: State<'_, AppState>, filepath: String, indices: Vec<usize>) 
 
 #[tauri::command]
 fn search_log(state: State<'_, AppState>, filepath: String, query: String, is_regex: bool, case_sensitive: bool) -> Result<Vec<usize>, String> {
-    let engines = state.engines.lock().map_err(|e| e.to_string())?;
+    let engines = state.engines.read().map_err(|e| e.to_string())?;
     let engine = engines.get(&filepath).ok_or_else(|| "Log file not loaded".to_string())?;
-    
+
     engine.search(&query, is_regex, case_sensitive)
 }
 
 #[tauri::command]
 fn filter_log(state: State<'_, AppState>, filepath: String, filters: Vec<FilterItem>) -> Result<(Vec<u8>, Vec<usize>, Vec<usize>, Vec<(String, String, usize)>), String> {
-    let engines = state.engines.lock().map_err(|e| e.to_string())?;
+    let engines = state.engines.read().map_err(|e| e.to_string())?;
     let engine = engines.get(&filepath).ok_or_else(|| "Log file not loaded".to_string())?;
-    
+
     engine.filter(&filters)
 }
 
@@ -101,15 +102,20 @@ fn create_temp_log(content: String) -> Result<String, String> {
 
 #[tauri::command]
 fn delete_file(path: String) -> Result<(), String> {
-    // Only allow deleting temp clipboard files for safety
-    let filename = std::path::Path::new(&path)
-        .file_name()
+    let canonical = std::path::Path::new(&path).canonicalize()
+        .map_err(|e| format!("Path not found: {}", e))?;
+    let tmp_dir = std::env::temp_dir().canonicalize()
+        .map_err(|e| format!("Temp dir error: {}", e))?;
+    if !canonical.starts_with(&tmp_dir) {
+        return Err("Only temp directory files can be deleted this way".to_string());
+    }
+    let filename = canonical.file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("");
     if !filename.starts_with("loganalyzer_clipboard_") {
         return Err("Only clipboard temp files can be deleted this way".to_string());
     }
-    std::fs::remove_file(&path).map_err(|e| e.to_string())
+    std::fs::remove_file(&canonical).map_err(|e| e.to_string())
 }
 
 /// Parse CLI arguments matching the original Python app behaviour:
@@ -183,7 +189,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(AppState {
-            engines: Mutex::new(HashMap::new()),
+            engines: RwLock::new(HashMap::new()),
         })
         .plugin(tauri_plugin_opener::init())
         .setup(move |app| {

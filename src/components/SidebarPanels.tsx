@@ -1,45 +1,42 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useStore, FilterItem, adjustColorForTheme } from '../store';
+import { useStore, FilterItem } from '../store';
+import { adjustColorForTheme } from '../utils/color';
 import { invoke } from '@tauri-apps/api/core';
-import { Plus, X, Trash, Edit, Check, Settings, FileText, Filter, BookOpen, Clipboard, Download } from 'lucide-react';
+import { Plus, X, Trash, Edit, Check, FileText, Filter, BookOpen, Clipboard, Download } from 'lucide-react';
 
 interface SidebarPanelsProps {
   activeTab: 'files' | 'filters' | 'notes';
 }
 
 export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
-  const {
-    loadedFiles,
-    activeFile,
-    loadLog,
-    closeLog,
-    setActiveFile,
-    filters,
-    addFilter,
-    updateFilter,
-    removeFilter,
-    moveFilter,
-    notes,
-    deleteNote,
-    setSelectedLine,
-    theme,
-    currentFilterFile,
-    clearFilters,
-
-    // Lifted Filter Editor States
-    isAddingFilter,
-    editingFilterIdx,
-    filterText,
-    filterIsRegex,
-    filterIsExclude,
-    filterIsEvent,
-    filterFgColor,
-    filterBgColor,
-    setFilterEditor,
-    resetFilterEditor,
-    selectedFilterIdx,
-    setSelectedFilterIdx,
-  } = useStore();
+  const loadedFiles = useStore((s) => s.loadedFiles);
+  const activeFile = useStore((s) => s.activeFile);
+  const loadLog = useStore((s) => s.loadLog);
+  const closeLog = useStore((s) => s.closeLog);
+  const setActiveFile = useStore((s) => s.setActiveFile);
+  const filters = useStore((s) => s.filters);
+  const addFilter = useStore((s) => s.addFilter);
+  const updateFilter = useStore((s) => s.updateFilter);
+  const removeFilter = useStore((s) => s.removeFilter);
+  const moveFilter = useStore((s) => s.moveFilter);
+  const notes = useStore((s) => s.notes);
+  const deleteNote = useStore((s) => s.deleteNote);
+  const setSelectedLine = useStore((s) => s.setSelectedLine);
+  const theme = useStore((s) => s.theme);
+  const currentFilterFile = useStore((s) => s.currentFilterFile);
+  const clearFilters = useStore((s) => s.clearFilters);
+  const isAddingFilter = useStore((s) => s.isAddingFilter);
+  const editingFilterIdx = useStore((s) => s.editingFilterIdx);
+  const filterText = useStore((s) => s.filterText);
+  const filterIsRegex = useStore((s) => s.filterIsRegex);
+  const filterIsExclude = useStore((s) => s.filterIsExclude);
+  const filterIsEvent = useStore((s) => s.filterIsEvent);
+  const filterFgColor = useStore((s) => s.filterFgColor);
+  const filterBgColor = useStore((s) => s.filterBgColor);
+  const setFilterEditor = useStore((s) => s.setFilterEditor);
+  const resetFilterEditor = useStore((s) => s.resetFilterEditor);
+  const selectedFilterIdx = useStore((s) => s.selectedFilterIdx);
+  const setSelectedFilterIdx = useStore((s) => s.setSelectedFilterIdx);
 
   const handleOpenFileDialog = async () => {
     try {

@@ -16,61 +16,53 @@ import {
   Minus,
   Square,
   X,
-  FileText,
   Check,
   Sun,
   Moon,
-  Info,
-  ChevronDown
+  Info
 } from 'lucide-react';
 
 const appWindow = getCurrentWindow();
 
 export default function App() {
-  const {
-    theme,
-    setTheme,
-    activeFile,
-    loadLog,
-    lineCount,
-    selectedLine,
-    setSelectedLine,
-    selectedLines,
-    copySelection,
-    filters,
-    showFilteredOnly,
-    toggleShowFilteredOnly,
-    importFilters,
-    saveFiltersAs,
-    quickSaveFilters,
-    clearFilters,
-    notes,
-    deleteNote,
-    saveNotes,
-    recentFiles,
-    clearRecentFiles,
-    filtersModified,
-    activeTab,
-    setActiveTab,
-    isSidebarOpen,
-    setIsSidebarOpen,
-    setNoteEditLine,
-
-    // Setting configurations
-    editorFontSize,
-    editorFontFamily,
-    showLineNumbers,
-    lineSpacing,
-    defaultEncoding,
-    uiFontSize,
-    uiFontFamily,
-    setPreferences,
-
-    // Search and filter navigation
-    nextSearchMatch,
-    prevSearchMatch,
-    navigateFilterHit,
-  } = useStore();
+  const theme = useStore((s) => s.theme);
+  const setTheme = useStore((s) => s.setTheme);
+  const activeFile = useStore((s) => s.activeFile);
+  const loadLog = useStore((s) => s.loadLog);
+  const lineCount = useStore((s) => s.lineCount);
+  const selectedLine = useStore((s) => s.selectedLine);
+  const setSelectedLine = useStore((s) => s.setSelectedLine);
+  const selectedLines = useStore((s) => s.selectedLines);
+  const copySelection = useStore((s) => s.copySelection);
+  const filters = useStore((s) => s.filters);
+  const showFilteredOnly = useStore((s) => s.showFilteredOnly);
+  const toggleShowFilteredOnly = useStore((s) => s.toggleShowFilteredOnly);
+  const importFilters = useStore((s) => s.importFilters);
+  const saveFiltersAs = useStore((s) => s.saveFiltersAs);
+  const quickSaveFilters = useStore((s) => s.quickSaveFilters);
+  const clearFilters = useStore((s) => s.clearFilters);
+  const notes = useStore((s) => s.notes);
+  const deleteNote = useStore((s) => s.deleteNote);
+  const saveNotes = useStore((s) => s.saveNotes);
+  const recentFiles = useStore((s) => s.recentFiles);
+  const clearRecentFiles = useStore((s) => s.clearRecentFiles);
+  const filtersModified = useStore((s) => s.filtersModified);
+  const activeTab = useStore((s) => s.activeTab);
+  const setActiveTab = useStore((s) => s.setActiveTab);
+  const isSidebarOpen = useStore((s) => s.isSidebarOpen);
+  const setIsSidebarOpen = useStore((s) => s.setIsSidebarOpen);
+  const setNoteEditLine = useStore((s) => s.setNoteEditLine);
+  const editorFontSize = useStore((s) => s.editorFontSize);
+  const editorFontFamily = useStore((s) => s.editorFontFamily);
+  const showLineNumbers = useStore((s) => s.showLineNumbers);
+  const lineSpacing = useStore((s) => s.lineSpacing);
+  const defaultEncoding = useStore((s) => s.defaultEncoding);
+  const uiFontSize = useStore((s) => s.uiFontSize);
+  const uiFontFamily = useStore((s) => s.uiFontFamily);
+  const setPreferences = useStore((s) => s.setPreferences);
+  const nextSearchMatch = useStore((s) => s.nextSearchMatch);
+  const prevSearchMatch = useStore((s) => s.prevSearchMatch);
+  const navigateFilterHit = useStore((s) => s.navigateFilterHit);
 
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
