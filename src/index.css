@@ -92,3 +92,10 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
 }
+
+/* UI font-size scaling — tied to --ui-font-size set by user preference */
+.ui-text { font-size: calc(var(--ui-font-size, 12px) * 1); }
+.ui-text-sm { font-size: calc(var(--ui-font-size, 12px) * 11 / 12); }
+.ui-text-xs { font-size: calc(var(--ui-font-size, 12px) * 10 / 12); }
+.ui-text-2xs { font-size: calc(var(--ui-font-size, 12px) * 9 / 12); }
+.ui-text-3xs { font-size: calc(var(--ui-font-size, 12px) * 8 / 12); }

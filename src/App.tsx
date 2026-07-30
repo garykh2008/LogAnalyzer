@@ -369,7 +369,7 @@ export default function App() {
         if (matchStr.startsWith('**') && matchStr.endsWith('**')) {
           parts.push(<strong key={key++} className="font-bold text-accent dark:text-accent-hover">{matchStr.slice(2, -2)}</strong>);
         } else if (matchStr.startsWith('`') && matchStr.endsWith('`')) {
-          parts.push(<code key={key++} className="bg-sidebar px-1 py-0.5 border border-border rounded font-mono text-[10px] text-accent dark:text-accent font-semibold">{matchStr.slice(1, -1)}</code>);
+          parts.push(<code key={key++} className="bg-sidebar px-1 py-0.5 border border-border rounded font-mono ui-text-xs text-accent dark:text-accent font-semibold">{matchStr.slice(1, -1)}</code>);
         }
 
         lastIdx = regex.lastIndex;
@@ -388,7 +388,7 @@ export default function App() {
       if (line.trim().startsWith('```')) {
         if (inCodeBlock) {
           elements.push(
-            <pre key={`code-${i}`} className="bg-sidebar dark:bg-activity border border-border rounded-lg p-3 font-mono text-[10px] my-2 select-text overflow-x-auto text-gray-750 dark:text-gray-300">
+            <pre key={`code-${i}`} className="bg-sidebar dark:bg-activity border border-border rounded-lg p-3 font-mono ui-text-xs my-2 select-text overflow-x-auto text-gray-750 dark:text-gray-300">
               <code>{codeContent.join('\n')}</code>
             </pre>
           );
@@ -425,7 +425,7 @@ export default function App() {
         if (line.includes('---')) continue;
         const cols = line.split('|').map(c => c.trim()).filter(c => c !== '');
         elements.push(
-          <div key={i} className="flex border-b border-border/30 py-1.5 text-[10px] font-mono select-text">
+          <div key={i} className="flex border-b border-border/30 py-1.5 ui-text-xs font-mono select-text">
             {cols.map((col, idx) => (
               <span key={idx} className="flex-1 truncate pr-2">{formatInline(col)}</span>
             ))}
@@ -467,7 +467,7 @@ export default function App() {
   const notesCount = Object.keys(notes[activeFile || ''] || {}).length;
 
   return (
-    <div className={`h-screen w-screen flex flex-col overflow-hidden select-none bg-background text-foreground ${theme}`}>
+    <div className={`h-screen w-screen flex flex-col overflow-hidden select-none bg-background text-foreground ${theme}`} style={{ '--ui-font-size': `${uiFontSize}px` } as React.CSSProperties}>
       {/* 1. Custom Frameless Titlebar */}
       <div 
         data-tauri-drag-region
@@ -498,7 +498,7 @@ export default function App() {
                     className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
                   >
                     <span>Open Log...</span>
-                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+O</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">Ctrl+O</span>
                   </button>
 
                   {/* Open Recent Submenu */}
@@ -507,7 +507,7 @@ export default function App() {
                       className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors cursor-default"
                     >
                       <span>Open Recent</span>
-                      <span className="text-[10px] text-gray-400">▶</span>
+                      <span className="ui-text-xs text-gray-400">▶</span>
                     </button>
                     <div className="absolute top-0 left-full ml-0.5 w-64 bg-card border border-border rounded-lg shadow-2xl py-1.5 hidden group-hover/recent:block text-xs font-normal">
                       {recentFiles.length === 0 ? (
@@ -521,11 +521,11 @@ export default function App() {
                                 await loadLog(filepath);
                                 setActiveMenu(null);
                               }}
-                              className="w-full text-left px-3 py-2 hover:bg-hover truncate transition-colors text-[10px] font-mono text-foreground"
+                              className="w-full text-left px-3 py-2 hover:bg-hover truncate transition-colors ui-text-xs font-mono text-foreground"
                               title={filepath}
                             >
                               {filepath.split(/[\\/]/).pop()}
-                              <span className="block text-[8px] text-gray-400 truncate mt-0.5">{filepath}</span>
+                              <span className="block ui-text-3xs text-gray-400 truncate mt-0.5">{filepath}</span>
                             </button>
                           ))}
                           <div className="h-[1px] bg-border my-1" />
@@ -586,7 +586,7 @@ export default function App() {
                     className="w-full text-left px-3 py-2 hover:bg-red-500/10 text-red-500 flex justify-between items-center transition-colors"
                   >
                     <span>Exit</span>
-                    <span className="text-[10px] text-red-500/60 font-mono">Ctrl+Q</span>
+                    <span className="ui-text-xs text-red-500/60 font-mono">Ctrl+Q</span>
                   </button>
                 </div>
               )}
@@ -607,7 +607,7 @@ export default function App() {
                     className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
                   >
                     <span>Copy Selected Lines</span>
-                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+C</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">Ctrl+C</span>
                   </button>
                   <div className="h-[1px] bg-border my-1" />
                   <button
@@ -615,7 +615,7 @@ export default function App() {
                     className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
                   >
                     <span>Find...</span>
-                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+F</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">Ctrl+F</span>
                   </button>
                   <button
                     onClick={() => {
@@ -630,7 +630,7 @@ export default function App() {
                     className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
                   >
                     <span>Go to Line...</span>
-                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+G</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">Ctrl+G</span>
                   </button>
                 </div>
               )}
@@ -654,7 +654,7 @@ export default function App() {
                     className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
                   >
                     <span>Log Files</span>
-                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+Shift+L</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">Ctrl+Shift+L</span>
                   </button>
                   <button
                     onClick={() => {
@@ -664,7 +664,7 @@ export default function App() {
                     className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
                   >
                     <span>Filters</span>
-                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+Shift+F</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">Ctrl+Shift+F</span>
                   </button>
                   <button
                     onClick={() => {
@@ -674,7 +674,7 @@ export default function App() {
                     className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
                   >
                     <span>Notes</span>
-                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+Shift+N</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">Ctrl+Shift+N</span>
                   </button>
                   <div className="h-[1px] bg-border my-1" />
                   <button
@@ -684,7 +684,7 @@ export default function App() {
                     <span>Show Filtered Only</span>
                     <span className="flex items-center gap-1.5">
                       {showFilteredOnly && <Check size={12} className="text-accent" />}
-                      <span className="text-[10px] text-gray-400 font-mono">Ctrl+H</span>
+                      <span className="ui-text-xs text-gray-400 font-mono">Ctrl+H</span>
                     </span>
                   </button>
                   <button
@@ -722,7 +722,7 @@ export default function App() {
                     className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
                   >
                     <span>Add/Edit Note</span>
-                    <span className="text-[10px] text-gray-400 font-mono">C</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">C</span>
                   </button>
                   <button
                     onClick={() => {
@@ -736,7 +736,7 @@ export default function App() {
                     className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors text-red-500"
                   >
                     <span>Remove Note</span>
-                    <span className="text-[10px] text-red-400 font-mono">Delete</span>
+                    <span className="ui-text-xs text-red-400 font-mono">Delete</span>
                   </button>
                   <div className="h-[1px] bg-border my-1" />
                   <button
@@ -752,7 +752,7 @@ export default function App() {
                     className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
                   >
                     <span>Save Notes</span>
-                    <span className="text-[10px] text-gray-400 font-mono">Ctrl+S</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">Ctrl+S</span>
                   </button>
                   <div className="h-[1px] bg-border my-1" />
                   <button
@@ -786,7 +786,7 @@ export default function App() {
                     className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
                   >
                     <span>Keyboard Shortcuts</span>
-                    <span className="text-[10px] text-gray-400 font-mono">H</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">H</span>
                   </button>
                   <button
                     onClick={() => {
@@ -950,7 +950,7 @@ export default function App() {
       </div>
 
       {/* 3. Interactive Status Bar */}
-      <div className="h-6 border-t border-border bg-sidebar dark:bg-activity flex items-center justify-between px-4 text-[11px] text-gray-500 select-none shrink-0 z-50">
+      <div className="h-6 border-t border-border bg-sidebar dark:bg-activity flex items-center justify-between px-4 ui-text-sm text-gray-500 select-none shrink-0 z-50">
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1 text-accent font-semibold">
             <Info size={11} />
@@ -966,7 +966,7 @@ export default function App() {
         <div className="flex items-center gap-4">
           <button
             onClick={() => toggleShowFilteredOnly()}
-            className="hover:text-accent font-semibold flex items-center gap-1 cursor-pointer transition-colors bg-transparent border-0 p-0 text-[11px] text-gray-500"
+            className="hover:text-accent font-semibold flex items-center gap-1 cursor-pointer transition-colors bg-transparent border-0 p-0 ui-text-sm text-gray-500"
             title="Toggle Filter Mode (Ctrl+H)"
           >
             <span>Mode:</span>
@@ -985,7 +985,7 @@ export default function App() {
                 }
               }
             }}
-            className="hover:text-accent font-semibold cursor-pointer transition-colors bg-transparent border-0 p-0 text-[11px] text-gray-500"
+            className="hover:text-accent font-semibold cursor-pointer transition-colors bg-transparent border-0 p-0 ui-text-sm text-gray-500"
             title="Go to Line (Ctrl+G)"
           >
             Total: {lineCount.toLocaleString()} lines
@@ -1007,7 +1007,7 @@ export default function App() {
           <div className="bg-card border border-border shadow-2xl rounded-2xl w-[640px] h-[460px] flex flex-row overflow-hidden text-xs">
             {/* Left Tabs */}
             <div className="w-44 bg-sidebar border-r border-border flex flex-col py-4 select-none shrink-0">
-              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider px-4 mb-3">Preferences</span>
+              <span className="ui-text-2xs font-bold text-gray-400 uppercase tracking-wider px-4 mb-3">Preferences</span>
               <button
                 onClick={() => setActiveSettingsTab('general')}
                 className={`w-full text-left px-4 py-2.5 transition-colors font-medium cursor-pointer ${
@@ -1043,7 +1043,7 @@ export default function App() {
                     <h2 className="text-sm font-bold text-gray-700 dark:text-zinc-300 border-b border-border pb-2">General Settings</h2>
                     <div className="flex flex-col gap-1.5">
                       <label className="font-semibold text-gray-600 dark:text-zinc-400">Default Encoding</label>
-                      <span className="text-[10px] text-gray-400">The character encoding used when opening log files.</span>
+                      <span className="ui-text-xs text-gray-400">The character encoding used when opening log files.</span>
                       <select
                         value={defaultEncoding}
                         onChange={(e) => setPreferences({ defaultEncoding: e.target.value })}
@@ -1067,7 +1067,7 @@ export default function App() {
                     {/* Font Family */}
                     <div className="flex flex-col gap-1.5">
                       <label className="font-semibold text-gray-600 dark:text-zinc-400">Font Family</label>
-                      <span className="text-[10px] text-gray-400">Choose the typeface for the log content.</span>
+                      <span className="ui-text-xs text-gray-400">Choose the typeface for the log content.</span>
                       <select
                         value={editorFontFamily}
                         onChange={(e) => setPreferences({ editorFontFamily: e.target.value })}
@@ -1199,7 +1199,7 @@ export default function App() {
             <div className="flex-1 overflow-y-auto pr-1">
               <div className="flex flex-col gap-4">
                 <div>
-                  <h4 className="font-bold text-accent mb-2 uppercase text-[10px] tracking-wider">General</h4>
+                  <h4 className="font-bold text-accent mb-2 uppercase ui-text-xs tracking-wider">General</h4>
                   <table className="w-full text-left">
                     <tbody>
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Open Log File</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + O</td></tr>
@@ -1209,7 +1209,7 @@ export default function App() {
                 </div>
 
                 <div>
-                  <h4 className="font-bold text-accent mb-2 uppercase text-[10px] tracking-wider">Search & Filters</h4>
+                  <h4 className="font-bold text-accent mb-2 uppercase ui-text-xs tracking-wider">Search & Filters</h4>
                   <table className="w-full text-left">
                     <tbody>
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Toggle Find Overlay</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + F</td></tr>
@@ -1222,7 +1222,7 @@ export default function App() {
                 </div>
 
                 <div>
-                  <h4 className="font-bold text-accent mb-2 uppercase text-[10px] tracking-wider">Sidebar Panels</h4>
+                  <h4 className="font-bold text-accent mb-2 uppercase ui-text-xs tracking-wider">Sidebar Panels</h4>
                   <table className="w-full text-left">
                     <tbody>
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Log Files Sidebar</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + Shift + L</td></tr>
@@ -1233,7 +1233,7 @@ export default function App() {
                 </div>
 
                 <div>
-                  <h4 className="font-bold text-accent mb-2 uppercase text-[10px] tracking-wider">Log Editor & Notes</h4>
+                  <h4 className="font-bold text-accent mb-2 uppercase ui-text-xs tracking-wider">Log Editor & Notes</h4>
                   <table className="w-full text-left">
                     <tbody>
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Add/Edit Note at Current Line</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">C</td></tr>
@@ -1295,11 +1295,11 @@ export default function App() {
           <div className="bg-card border border-border shadow-2xl rounded-2xl w-[380px] flex flex-col p-5 overflow-hidden text-xs text-center items-center">
             <img src={appLogo} className="w-12 h-12 mb-3 animate-pulse select-none" />
             <h3 className="text-sm font-bold text-foreground mb-1">Log Analyzer</h3>
-            <span className="text-[10px] text-accent font-semibold px-2 py-0.5 rounded-full bg-accent/10 mb-4">V3.0 (Tauri Release)</span>
+            <span className="ui-text-xs text-accent font-semibold px-2 py-0.5 rounded-full bg-accent/10 mb-4">V3.0 (Tauri Release)</span>
             
             <div className="text-gray-500 dark:text-gray-400 font-sans leading-relaxed flex flex-col gap-2 mb-6">
               <p>An advanced diagnostic log viewer designed for high-performance inspection and pattern matching.</p>
-              <p className="text-[10px] text-gray-400">© 2026 LogAnalyzer Team. All rights reserved.</p>
+              <p className="ui-text-xs text-gray-400">© 2026 LogAnalyzer Team. All rights reserved.</p>
             </div>
             
             <button

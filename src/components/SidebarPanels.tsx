@@ -184,7 +184,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
     <div className="w-80 h-full bg-sidebar border-r border-border flex flex-col overflow-hidden select-none">
       {/* Header */}
       <div className="h-10 border-b border-border flex items-center justify-between px-4 bg-sidebar dark:bg-activity">
-        <span className="text-[10px] font-bold tracking-wider text-gray-500 dark:text-gray-400 uppercase select-none">
+        <span className="ui-text-xs font-bold tracking-wider text-gray-500 dark:text-gray-400 uppercase select-none">
           {activeTab === 'files' && 'Log Files'}
           {activeTab === 'filters' && 'Filters'}
           {activeTab === 'notes' && 'Notes'}
@@ -281,7 +281,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                           {isClipboard ? 'Clipboard' : filename}
                         </span>
                       </div>
-                      <span className="text-[9px] text-gray-400 truncate select-none mt-0.5">
+                      <span className="ui-text-2xs text-gray-400 truncate select-none mt-0.5">
                         {isClipboard ? 'Unsaved — paste buffer' : pathDir}
                       </span>
                     </div>
@@ -315,17 +315,17 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
           <div className="flex flex-col gap-2.5">
             {/* Active Filter File Info */}
             {currentFilterFile && (
-              <div className="px-2.5 py-1.5 bg-accent/5 border border-accent/20 rounded-xl text-[10px] font-mono text-gray-500 dark:text-gray-400 flex items-center justify-between truncate select-text mb-0.5">
+              <div className="px-2.5 py-1.5 bg-accent/5 border border-accent/20 rounded-xl ui-text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center justify-between truncate select-text mb-0.5">
                 <span className="truncate" title={currentFilterFile}>
                   📂 {currentFilterFile.split(/[\\/]/).pop()}
                 </span>
-                <span className="text-[9px] opacity-65 pl-2 shrink-0 select-none">Active</span>
+                <span className="ui-text-2xs opacity-65 pl-2 shrink-0 select-none">Active</span>
               </div>
             )}
             {/* Inline Filter Editor */}
             {(isAddingFilter || editingFilterIdx !== null) && (
               <div className="p-3 bg-card border border-border rounded-xl shadow-lg flex flex-col gap-3">
-                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                <div className="ui-text-xs font-bold text-gray-400 uppercase tracking-wider">
                   {isAddingFilter ? 'Create Filter' : 'Edit Filter'}
                 </div>
 
@@ -371,7 +371,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
 
                 {/* Premium Colors Swatch Grid */}
                 <div className="flex flex-col gap-2">
-                  <span className="text-[9px] text-gray-400 font-bold uppercase select-none">Color Swatches</span>
+                  <span className="ui-text-2xs text-gray-400 font-bold uppercase select-none">Color Swatches</span>
                   <div className="grid grid-cols-4 gap-1.5">
                     {[
                       { fg: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', name: 'Red' },
@@ -394,7 +394,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                             color: preset.fg,
                             borderColor: isSelected ? preset.fg : 'var(--border)'
                           }}
-                          className={`h-7 px-1 rounded-md border text-[10px] font-mono font-bold flex items-center justify-center transition-all cursor-pointer select-none hover:opacity-100 ${
+                          className={`h-7 px-1 rounded-md border ui-text-xs font-mono font-bold flex items-center justify-center transition-all cursor-pointer select-none hover:opacity-100 ${
                             isSelected ? 'ring-2 ring-accent/30 scale-105 opacity-100 font-black' : 'opacity-75'
                           }`}
                         >
@@ -405,11 +405,11 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                   </div>
 
                   {/* Collapsible custom picker for advanced styles */}
-                  <details className="text-[10px] text-gray-500 cursor-pointer select-none mt-1 outline-none">
+                  <details className="ui-text-xs text-gray-500 cursor-pointer select-none mt-1 outline-none">
                     <summary className="hover:text-accent font-medium outline-none">Custom colors picker...</summary>
                     <div className="flex items-center gap-3 mt-2 pl-2 border-l border-border">
                       <div className="flex flex-col gap-1 flex-1">
-                        <span className="text-[8px] text-gray-400">Text color</span>
+                        <span className="ui-text-3xs text-gray-400">Text color</span>
                         <input
                           type="color"
                           value={filterFgColor}
@@ -418,7 +418,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                         />
                       </div>
                       <div className="flex flex-col gap-1 flex-1">
-                        <span className="text-[8px] text-gray-400">Background</span>
+                        <span className="ui-text-3xs text-gray-400">Background</span>
                         <input
                           type="color"
                           value={filterBgColor.startsWith('rgba') ? '#ffffff' : filterBgColor}
@@ -502,7 +502,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                           >
                             {f.text}
                           </span>
-                          <span className="text-[9px] text-gray-400 uppercase select-none mt-0.5 font-sans font-medium">
+                          <span className="ui-text-2xs text-gray-400 uppercase select-none mt-0.5 font-sans font-medium">
                             {f.is_exclude ? 'exclude' : 'highlight'}
                             {f.is_regex ? ' • regex' : ''}
                             {f.is_event ? ' • timeline' : ''}
@@ -513,7 +513,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                       <div className={`flex items-center gap-1.5 select-none ${draggedIdx !== null ? 'pointer-events-none' : ''}`}>
                         {/* Hit counts */}
                         {f.enabled && (
-                          <span className="text-[10px] font-bold font-mono px-1.5 py-0.5 rounded bg-gray-150/40 dark:bg-zinc-800/40 text-gray-500 dark:text-gray-400">
+                          <span className="ui-text-xs font-bold font-mono px-1.5 py-0.5 rounded bg-gray-150/40 dark:bg-zinc-800/40 text-gray-500 dark:text-gray-400">
                             {f.hits.toLocaleString()}
                           </span>
                         )}
@@ -566,7 +566,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                   onClick={() => setSelectedLine(n.line)}
                   className="p-2.5 border border-border bg-card hover:border-gray-300 dark:hover:border-zinc-700 rounded-lg cursor-pointer flex flex-col gap-1.5 select-text hover:shadow-sm transition-all"
                 >
-                  <div className="flex items-center justify-between border-b border-border pb-1.5 text-[9px] font-mono text-gray-400 select-none">
+                  <div className="flex items-center justify-between border-b border-border pb-1.5 ui-text-2xs font-mono text-gray-400 select-none">
                     <span>Line {n.line + 1}</span>
                     <button
                       onClick={(e) => {

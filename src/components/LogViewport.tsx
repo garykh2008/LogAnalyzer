@@ -491,9 +491,9 @@ export const LogViewport: React.FC = () => {
             <div className="flex flex-col items-center gap-1.5">
               <p className="text-xs text-gray-400 dark:text-gray-500">Or paste clipboard log content directly</p>
               <div className="flex items-center gap-1.5">
-                <kbd className="px-2 py-0.5 text-[10px] font-mono font-bold bg-gray-100 dark:bg-input border border-border rounded text-gray-600 dark:text-gray-400">Ctrl</kbd>
-                <span className="text-[10px] text-gray-400">+</span>
-                <kbd className="px-2 py-0.5 text-[10px] font-mono font-bold bg-gray-100 dark:bg-input border border-border rounded text-gray-600 dark:text-gray-400">V</kbd>
+                <kbd className="px-2 py-0.5 ui-text-xs font-mono font-bold bg-gray-100 dark:bg-input border border-border rounded text-gray-600 dark:text-gray-400">Ctrl</kbd>
+                <span className="ui-text-xs text-gray-400">+</span>
+                <kbd className="px-2 py-0.5 ui-text-xs font-mono font-bold bg-gray-100 dark:bg-input border border-border rounded text-gray-600 dark:text-gray-400">V</kbd>
               </div>
             </div>
           </div>

@@ -129,7 +129,7 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ isOpen, onClose })
         </button>
 
         {/* Counter */}
-        <div className="text-[10px] text-gray-400 min-w-[55px] text-center font-bold select-none font-mono">
+        <div className="ui-text-xs text-gray-400 min-w-[55px] text-center font-bold select-none font-mono">
           {isSearching ? (
             <span className="animate-pulse">Searching...</span>
           ) : matchCount > 0 ? (
