@@ -114,6 +114,14 @@ pub struct LiveEngine {
     /// Total lines dropped from the front since the source started.
     dropped: usize,
     filters: Vec<CompiledFilter>,
+    /// Whether any filter is a highlight (non-exclude) / an exclude filter.
+    has_highlight: bool,
+    has_exclude: bool,
+    /// Current view mode (mirrors the frontend "show filtered only" toggle).
+    show_filtered_only: bool,
+    /// Absolute indices of the lines visible in the current mode, ascending.
+    /// Only maintained when a display list is actually needed (see tracking_needed).
+    filtered_abs: VecDeque<usize>,
 }
 
 impl LiveEngine {
@@ -126,38 +134,92 @@ impl LiveEngine {
             cap,
             dropped: 0,
             filters: Vec::new(),
+            has_highlight: false,
+            has_exclude: false,
+            show_filtered_only: false,
+            filtered_abs: VecDeque::new(),
         }
     }
 
-    fn append(&mut self, batch: Vec<String>) {
+    /// Whether a display index list is needed at all. Full view with no exclude
+    /// filters is just identity (every line shown), so no list is tracked.
+    fn tracking_needed(&self) -> bool {
+        self.show_filtered_only || self.has_exclude
+    }
+
+    /// Is a line visible in the current mode?
+    ///  - filtered view: matched a highlight (code>=2), or — with no highlight
+    ///    filters — simply not excluded (code 0);
+    ///  - full view: anything not excluded (code != 1).
+    fn is_visible(&self, code: u8) -> bool {
+        if self.show_filtered_only {
+            code >= 2 || (code == 0 && !self.has_highlight)
+        } else {
+            code != 1
+        }
+    }
+
+    /// Append a batch and return (newly matched absolute indices, count of
+    /// matched indices trimmed off the front by ring-buffer eviction).
+    fn append(&mut self, batch: Vec<String>) -> (Vec<usize>, usize) {
+        let mut added: Vec<usize> = Vec::new();
+        let mut trimmed = 0usize;
         for line in batch {
+            let abs = self.total;
             let code = classify_line(&line, &self.filters);
             self.lines.push_back(line);
             self.codes.push_back(code);
             self.total += 1;
+            if self.tracking_needed() && self.is_visible(code) {
+                self.filtered_abs.push_back(abs);
+                added.push(abs);
+            }
             if self.lines.len() > self.cap {
                 self.lines.pop_front();
                 self.codes.pop_front();
                 self.first_abs += 1;
                 self.dropped += 1;
+                while let Some(&front) = self.filtered_abs.front() {
+                    if front < self.first_abs {
+                        self.filtered_abs.pop_front();
+                        trimmed += 1;
+                    } else {
+                        break;
+                    }
+                }
             }
         }
+        (added, trimmed)
     }
 
     fn clear(&mut self) {
         self.lines.clear();
         self.codes.clear();
+        self.filtered_abs.clear();
         self.first_abs = 0;
         self.total = 0;
         self.dropped = 0;
     }
 
-    fn set_filters(&mut self, compiled: Vec<CompiledFilter>) {
+    fn set_filters(&mut self, compiled: Vec<CompiledFilter>, show_filtered_only: bool) {
+        self.has_highlight = compiled.iter().any(|f| !f.is_exclude);
+        self.has_exclude = compiled.iter().any(|f| f.is_exclude);
+        self.show_filtered_only = show_filtered_only;
         self.filters = compiled;
-        // Reclassify the current buffer (bounded by cap, so one-shot is fine).
+        // Reclassify the whole buffer and rebuild the display index list.
+        self.filtered_abs.clear();
+        let track = self.tracking_needed();
         for i in 0..self.lines.len() {
-            self.codes[i] = classify_line(&self.lines[i], &self.filters);
+            let code = classify_line(&self.lines[i], &self.filters);
+            self.codes[i] = code;
+            if track && self.is_visible(code) {
+                self.filtered_abs.push_back(self.first_abs + i);
+            }
         }
+    }
+
+    fn filtered_snapshot(&self) -> Vec<usize> {
+        self.filtered_abs.iter().copied().collect()
     }
 
     fn line_at(&self, abs: usize) -> String {
@@ -176,19 +238,22 @@ impl LiveEngine {
         }
     }
 
-    fn snapshot(&self, source_id: &str) -> StreamDelta {
+    fn make_delta(&self, source_id: &str, filtered_added: Vec<usize>, filtered_trimmed: usize) -> StreamDelta {
         StreamDelta {
             source_id: source_id.to_string(),
             total: self.total,
             first_abs: self.first_abs,
             buffer_len: self.lines.len(),
             dropped: self.dropped,
+            filtered_added,
+            filtered_trimmed,
         }
     }
 }
 
-/// Delta emitted to the frontend on each batch (and on demand). The frontend
-/// fetches line text/codes for its visible window lazily via commands.
+/// Delta emitted to the frontend on each batch. The frontend fetches line
+/// text/codes for its visible window lazily via commands; `filtered_added` /
+/// `filtered_trimmed` let it maintain the filtered-view index list incrementally.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamDelta {
@@ -197,6 +262,8 @@ pub struct StreamDelta {
     pub first_abs: usize,
     pub buffer_len: usize,
     pub dropped: usize,
+    pub filtered_added: Vec<usize>,
+    pub filtered_trimmed: usize,
 }
 
 /// A running live source: its engine plus a stop flag and producer thread.
@@ -299,8 +366,8 @@ fn spawn_file_tail(
                                         Ok(e) => e,
                                         Err(_) => break,
                                     };
-                                    eng.append(batch);
-                                    eng.snapshot(&source_id)
+                                    let (added, trimmed) = eng.append(batch);
+                                    eng.make_delta(&source_id, added, trimmed)
                                 };
                                 let _ = app.emit("stream-appended", delta);
                             }
@@ -474,9 +541,10 @@ pub fn set_stream_filters(
     state: tauri::State<'_, StreamState>,
     source_id: String,
     filters: Vec<FilterItem>,
+    show_filtered_only: bool,
 ) -> Result<(), String> {
     let compiled = compile_filters(&filters)?;
-    state.with_engine(&source_id, move |eng| eng.set_filters(compiled))
+    state.with_engine(&source_id, move |eng| eng.set_filters(compiled, show_filtered_only))
 }
 
 #[tauri::command]
@@ -486,6 +554,14 @@ pub fn get_stream_lines(
     indices: Vec<usize>,
 ) -> Result<Vec<String>, String> {
     state.with_engine(&source_id, |eng| indices.iter().map(|&i| eng.line_at(i)).collect())
+}
+
+#[tauri::command]
+pub fn get_stream_filtered(
+    state: tauri::State<'_, StreamState>,
+    source_id: String,
+) -> Result<Vec<usize>, String> {
+    state.with_engine(&source_id, |eng| eng.filtered_snapshot())
 }
 
 #[tauri::command]

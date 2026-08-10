@@ -71,8 +71,13 @@ export const LogViewport: React.FC = () => {
   // Track if selection changes are manual clicks (to prevent scroll jumps)
   const [isManualSelection, setIsManualSelection] = useState(false);
 
+  // For live sources: when a display list exists (filtered view, or full view
+  // with excludes) map through it; otherwise show the whole retained buffer.
+  const liveFiltered = !!liveSource && !!filteredIndices;
   const totalDisplayLines = liveSource
-    ? liveSource.bufferLen
+    ? liveFiltered
+      ? filteredIndices!.length
+      : liveSource.bufferLen
     : filteredIndices
     ? filteredIndices.length
     : lineCount;
@@ -109,7 +114,8 @@ export const LogViewport: React.FC = () => {
     if (liveSource) {
       const absIndices: number[] = [];
       for (let i = safeStart; i < end; i++) {
-        absIndices.push(liveSource.firstAbs + i);
+        const abs = liveFiltered ? filteredIndices![i] : liveSource.firstAbs + i;
+        if (abs !== undefined && !isNaN(abs)) absIndices.push(abs);
       }
       if (absIndices.length === 0) return;
 
@@ -153,7 +159,7 @@ export const LogViewport: React.FC = () => {
     };
 
     fetchLines();
-  }, [activeFile, startIndex, visibleCount, totalDisplayLines, filteredIndices, liveSource, liveSource?.firstAbs, liveCodesTick]);
+  }, [activeFile, startIndex, visibleCount, totalDisplayLines, filteredIndices, liveSource, liveSource?.firstAbs, liveFiltered, liveCodesTick]);
 
   // Live auto-tail: follow the bottom as new lines arrive (unless paused).
   useEffect(() => {
@@ -614,10 +620,13 @@ export const LogViewport: React.FC = () => {
             >
               {visibleLines.map((lineText, index) => {
                 const itemIndex = startIndex + index;
-                // Live sources map display slot -> absolute line via the buffer front;
-                // static sources map through filteredIndices (or identity).
+                // Live sources map display slot -> absolute line: filtered mode
+                // via the matched-index list, otherwise via the buffer front.
+                // Static sources map through filteredIndices (or identity).
                 const rawIdx = liveSource
-                  ? liveSource.firstAbs + itemIndex
+                  ? liveFiltered
+                    ? filteredIndices![itemIndex]
+                    : liveSource.firstAbs + itemIndex
                   : filteredIndices
                   ? filteredIndices[itemIndex]
                   : itemIndex;

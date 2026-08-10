@@ -36,6 +36,8 @@ export interface StreamDelta {
   firstAbs: number;
   bufferLen: number;
   dropped: number;
+  filteredAdded: number[];  // newly matched absolute indices this batch
+  filteredTrimmed: number;  // matched indices evicted from the front this batch
 }
 
 function parseTatFilters(xmlText: string): Omit<FilterItem, 'idx' | 'hits'>[] {
@@ -425,6 +427,12 @@ export const useStore = create<AppState>()(
       const pend = id ? s.livePending[id] : undefined;
       if (id && pend) {
         set({ liveSources: { ...s.liveSources, [id]: pend }, lineCount: pend.bufferLen });
+        // Re-sync the display index list (it wasn't maintained while paused).
+        if (Array.isArray(s.filteredIndices)) {
+          invoke<number[]>('get_stream_filtered', { sourceId: id })
+            .then((fi) => set({ filteredIndices: fi }))
+            .catch(() => {});
+        }
       }
     }
   },
@@ -443,13 +451,18 @@ export const useStore = create<AppState>()(
         liveSources: { ...s.liveSources, [sourceId]: meta },
         livePending: { ...s.livePending, [sourceId]: meta },
       };
-      if (s.activeFile === sourceId) patch.lineCount = 0;
+      if (s.activeFile === sourceId) {
+        patch.lineCount = 0;
+        // The buffer (and its matched-index list) is wiped; reset the display
+        // list so incremental deltas don't append onto stale absolute indices.
+        if (Array.isArray(s.filteredIndices)) patch.filteredIndices = [];
+      }
       return patch;
     });
   },
 
   applyStreamDelta: (delta) => {
-    const { sourceId, total, firstAbs, bufferLen, dropped } = delta;
+    const { sourceId, total, firstAbs, bufferLen, dropped, filteredAdded, filteredTrimmed } = delta;
     set((s) => {
       const existing = s.liveSources[sourceId] || s.livePending[sourceId];
       if (!existing) return {} as Partial<AppState>;
@@ -463,7 +476,18 @@ export const useStore = create<AppState>()(
         return patch;
       }
       patch.liveSources = { ...s.liveSources, [sourceId]: meta };
-      if (s.activeFile === sourceId) patch.lineCount = bufferLen;
+      if (s.activeFile === sourceId) {
+        patch.lineCount = bufferLen;
+        // Maintain the display index list incrementally when one is in use
+        // (filtered view, or full view with excludes): drop evicted entries off
+        // the front, append newly visible indices.
+        if (Array.isArray(s.filteredIndices)) {
+          patch.filteredIndices =
+            filteredTrimmed > 0 || filteredAdded.length > 0
+              ? [...s.filteredIndices.slice(filteredTrimmed), ...filteredAdded]
+              : s.filteredIndices;
+        }
+      }
       return patch;
     });
   },
@@ -693,16 +717,35 @@ export const useStore = create<AppState>()(
       });
     }
 
-    // Live source: push filters to the streaming engine (highlight-only for now).
+    // Live source: push filters to the streaming engine; in filtered mode also
+    // pull the current matched-index snapshot to seed the hidden-line view.
+    // A display index list is needed when hiding lines: filtered mode, or any
+    // enabled exclude filter (which hides matched lines in full mode too).
+    const hasExclude = filters.some((f) => f.enabled && f.is_exclude);
+    const usesDisplayList = showFilteredOnly || hasExclude;
+
     if (get().liveSources[activeFile]) {
       try {
-        await invoke('set_stream_filters', { sourceId: activeFile, filters: rustFilters });
+        await invoke('set_stream_filters', {
+          sourceId: activeFile,
+          filters: rustFilters,
+          showFilteredOnly,
+        });
       } catch (err) {
         console.error('set_stream_filters failed:', err);
       }
+      let fi: number[] | null = null;
+      if (usesDisplayList) {
+        try {
+          fi = await invoke<number[]>('get_stream_filtered', { sourceId: activeFile });
+        } catch (err) {
+          console.error('get_stream_filtered failed:', err);
+          fi = [];
+        }
+      }
       set((s) => ({
         filterPalette: palette,
-        filteredIndices: null,
+        filteredIndices: fi,
         tagCodes: [],
         liveCodesTick: s.liveCodesTick + 1,
       }));
@@ -732,16 +775,32 @@ export const useStore = create<AppState>()(
         };
       });
 
+      // Resolve the display index list for the current mode:
+      //  - filtered view: backend's matched-line set;
+      //  - full view with excludes: all non-excluded lines (code != 1);
+      //  - full view, no excludes: identity (null).
+      let displayIndices: number[] | null;
+      if (showFilteredOnly) {
+        displayIndices = filteredIndices;
+      } else if (hasExclude) {
+        displayIndices = [];
+        for (let i = 0; i < tagCodes.length; i++) {
+          if (tagCodes[i] !== 1) displayIndices.push(i);
+        }
+      } else {
+        displayIndices = null;
+      }
+
       const searchResults = get().searchResults;
       let activeResults = searchResults;
-      if (showFilteredOnly) {
-        const filterSet = new Set(filteredIndices);
+      if (displayIndices) {
+        const filterSet = new Set(displayIndices);
         activeResults = searchResults.filter((r) => filterSet.has(r));
       }
 
       set({
         tagCodes,
-        filteredIndices: showFilteredOnly ? filteredIndices : null,
+        filteredIndices: displayIndices,
         filterPalette: palette,
         timelineEvents: events,
         filters: updatedFilters,

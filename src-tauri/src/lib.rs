@@ -249,7 +249,8 @@ pub fn run() {
             stream::clear_stream,
             stream::set_stream_filters,
             stream::get_stream_lines,
-            stream::get_stream_codes
+            stream::get_stream_codes,
+            stream::get_stream_filtered
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

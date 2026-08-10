@@ -215,6 +215,10 @@ impl LogEngine {
         let mut hit_counts = vec![0; filters.len()];
         let mut timeline_events = Vec::new();
 
+        // When no highlight (non-exclude) filters exist, "filtered view" shows all
+        // non-excluded lines (code 0) rather than being empty.
+        let has_highlight = compiled_filters.iter().any(|(_, _, _, is_exclude, _, _)| !*is_exclude);
+
         for (raw_idx, (code, matched_idx, event)) in results.into_iter().enumerate() {
             line_tags_codes.push(code);
 
@@ -222,9 +226,11 @@ impl LogEngine {
                 hit_counts[idx] += 1;
             }
 
-            if code >= 2 {
+            if code >= 2 || (code == 0 && !has_highlight) {
                 filtered_indices.push(raw_idx);
+            }
 
+            if code >= 2 {
                 if let Some(evt) = event {
                     timeline_events.push(evt);
                 }
