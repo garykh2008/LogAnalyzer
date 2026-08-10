@@ -20,6 +20,7 @@ const BG_COLOR_PRESETS = [
 
 export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
   const loadedFiles = useStore((s) => s.loadedFiles);
+  const liveSources = useStore((s) => s.liveSources);
   const activeFile = useStore((s) => s.activeFile);
   const loadLog = useStore((s) => s.loadLog);
   const closeLog = useStore((s) => s.closeLog);
@@ -260,9 +261,10 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
             ) : (
               loadedFiles.map((file) => {
                 const isActive = activeFile === file;
-                const filename = file.split(/[/\\]/).pop() || file;
-                const pathDir = file.substring(0, file.length - filename.length);
-                const isClipboard = filename.startsWith('loganalyzer_clipboard_');
+                const live = liveSources[file];
+                const filename = live ? live.label : (file.split(/[/\\]/).pop() || file);
+                const pathDir = live ? live.path : file.substring(0, file.length - filename.length);
+                const isClipboard = !live && filename.startsWith('loganalyzer_clipboard_');
 
                 const handleClose = async (e: React.MouseEvent) => {
                   e.stopPropagation();
@@ -300,13 +302,19 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                   >
                     <div className="flex flex-col min-w-0 pr-2">
                       <div className="flex items-center gap-1.5">
+                        {live && <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 animate-pulse" />}
                         {isClipboard && <Clipboard size={10} className="text-accent shrink-0" />}
-                        <span className="text-xs font-semibold truncate font-mono" title={file}>
+                        <span className="text-xs font-semibold truncate font-mono" title={live ? live.path : file}>
                           {isClipboard ? 'Clipboard' : filename}
                         </span>
+                        {live && (
+                          <span className="ui-text-3xs font-bold text-red-500 bg-red-500/10 px-1 rounded shrink-0 select-none">
+                            LIVE
+                          </span>
+                        )}
                       </div>
                       <span className="ui-text-2xs text-gray-400 truncate select-none mt-0.5">
-                        {isClipboard ? 'Unsaved — paste buffer' : pathDir}
+                        {isClipboard ? 'Unsaved — paste buffer' : live ? `${live.total.toLocaleString()} lines` : pathDir}
                       </span>
                     </div>
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">

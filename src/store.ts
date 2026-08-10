@@ -19,6 +19,25 @@ export interface NoteItem {
   text: string;
 }
 
+/** Metadata for a live streaming source (kept keyed by its synthetic source id). */
+export interface LiveSourceMeta {
+  path: string;
+  label: string;
+  total: number;      // total lines ever appended
+  firstAbs: number;   // absolute index of the ring buffer front
+  bufferLen: number;  // lines currently retained
+  dropped: number;    // lines evicted from the front
+}
+
+/** Delta payload emitted by the backend on each stream batch. */
+export interface StreamDelta {
+  sourceId: string;
+  total: number;
+  firstAbs: number;
+  bufferLen: number;
+  dropped: number;
+}
+
 function parseTatFilters(xmlText: string): Omit<FilterItem, 'idx' | 'hits'>[] {
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(xmlText, "text/xml");
@@ -103,6 +122,18 @@ interface AppState {
   setActiveFile: (file: string | null) => Promise<void>;
   loadLog: (filepath: string) => Promise<void>;
   closeLog: (filepath: string) => Promise<void>;
+
+  // Live streaming (opt-in feature)
+  enableLiveStream: boolean;
+  liveSources: Record<string, LiveSourceMeta>;
+  liveTailing: boolean;
+  livePaused: boolean;
+  liveCodesTick: number;
+  startFileTail: (path: string) => Promise<void>;
+  stopStream: (sourceId: string) => Promise<void>;
+  setLiveTailing: (on: boolean) => void;
+  setLivePaused: (paused: boolean) => void;
+  applyStreamDelta: (delta: StreamDelta) => void;
 
   // Selection
   selectedLine: number | null;
@@ -212,6 +243,13 @@ export const useStore = create<AppState>()(
   lineCount: 0,
   loading: false,
 
+  // Live streaming
+  enableLiveStream: false,
+  liveSources: {},
+  liveTailing: true,
+  livePaused: false,
+  liveCodesTick: 0,
+
   recentFiles: [],
 
   addRecentFile: (filepath) => {
@@ -228,6 +266,24 @@ export const useStore = create<AppState>()(
   setActiveFile: async (file) => {
     if (!file) {
       set({ activeFile: null, lineCount: 0, selectedLine: null, selectedLines: [], searchResults: [], searchIndex: -1 });
+      return;
+    }
+    // Live source: no file to load; drive the view from stream metadata.
+    const live = get().liveSources[file];
+    if (live) {
+      set({
+        activeFile: file,
+        lineCount: live.bufferLen,
+        filteredIndices: null,
+        tagCodes: [],
+        selectedLine: null,
+        selectedLines: [],
+        searchResults: [],
+        activeSearchResults: [],
+        searchIndex: -1,
+        loading: false,
+      });
+      await get().applyFilters();
       return;
     }
     set({ activeFile: file, loading: true });
@@ -266,6 +322,10 @@ export const useStore = create<AppState>()(
   },
 
   closeLog: async (filepath) => {
+    if (get().liveSources[filepath]) {
+      await get().stopStream(filepath);
+      return;
+    }
     try {
       await invoke('close_log', { filepath });
       const updated = get().loadedFiles.filter((f) => f !== filepath);
@@ -278,6 +338,81 @@ export const useStore = create<AppState>()(
     } catch (err) {
       console.error('Failed to close log:', err);
     }
+  },
+
+  // Live streaming
+  startFileTail: async (path) => {
+    set({ loading: true });
+    try {
+      const sourceId = await invoke<string>('start_file_tail', { path });
+      const label = path.split(/[/\\]/).pop() || path;
+      set((s) => ({
+        liveSources: {
+          ...s.liveSources,
+          [sourceId]: { path, label, total: 0, firstAbs: 0, bufferLen: 0, dropped: 0 },
+        },
+        loadedFiles: s.loadedFiles.includes(sourceId) ? s.loadedFiles : [...s.loadedFiles, sourceId],
+        loading: false,
+        liveTailing: true,
+        livePaused: false,
+      }));
+      await get().setActiveFile(sourceId);
+    } catch (err) {
+      console.error('Failed to start file tail:', err);
+      set({ loading: false });
+    }
+  },
+
+  stopStream: async (sourceId) => {
+    try {
+      await invoke('stop_stream', { sourceId });
+    } catch (err) {
+      console.error('Failed to stop stream:', err);
+    }
+    const wasActive = get().activeFile === sourceId;
+    set((s) => {
+      const next = { ...s.liveSources };
+      delete next[sourceId];
+      return {
+        liveSources: next,
+        loadedFiles: s.loadedFiles.filter((f) => f !== sourceId),
+      };
+    });
+    if (wasActive) {
+      const remaining = get().loadedFiles;
+      await get().setActiveFile(remaining.length > 0 ? remaining[0] : null);
+    }
+  },
+
+  setLiveTailing: (on) => set({ liveTailing: on }),
+
+  setLivePaused: (paused) => {
+    set({ livePaused: paused });
+    // On resume, snap the visible count back to the latest buffer length.
+    if (!paused) {
+      const s = get();
+      const live = s.activeFile ? s.liveSources[s.activeFile] : null;
+      if (live) set({ lineCount: live.bufferLen });
+    }
+  },
+
+  applyStreamDelta: (delta) => {
+    const { sourceId, total, firstAbs, bufferLen, dropped } = delta;
+    set((s) => {
+      const existing = s.liveSources[sourceId];
+      if (!existing) return {} as Partial<AppState>;
+      const patch: Partial<AppState> = {
+        liveSources: {
+          ...s.liveSources,
+          [sourceId]: { ...existing, total, firstAbs, bufferLen, dropped },
+        },
+      };
+      // Only advance the active view when it's this source and not paused.
+      if (s.activeFile === sourceId && !s.livePaused) {
+        patch.lineCount = bufferLen;
+      }
+      return patch;
+    });
   },
 
   // Selection
@@ -335,6 +470,11 @@ export const useStore = create<AppState>()(
   runSearch: async () => {
     const { activeFile, searchQuery, isRegexSearch, isCaseSensitiveSearch, showFilteredOnly, filteredIndices } = get();
     if (!activeFile || !searchQuery) {
+      set({ searchResults: [], activeSearchResults: [], searchIndex: -1 });
+      return;
+    }
+    // Search over live streams is not supported yet (M1).
+    if (get().liveSources[activeFile]) {
       set({ searchResults: [], activeSearchResults: [], searchIndex: -1 });
       return;
     }
@@ -487,6 +627,34 @@ export const useStore = create<AppState>()(
         is_event: f.is_event,
         idx: f.idx,
       }));
+
+    // Palette is shared by static and live paths (code = enabled position + 2).
+    const palette: Record<number, { fg: string; bg: string }> = {};
+    {
+      let activeCount = 0;
+      filters.forEach((f) => {
+        if (f.enabled) {
+          palette[activeCount + 2] = { fg: f.fg_color, bg: f.bg_color };
+          activeCount++;
+        }
+      });
+    }
+
+    // Live source: push filters to the streaming engine (highlight-only for now).
+    if (get().liveSources[activeFile]) {
+      try {
+        await invoke('set_stream_filters', { sourceId: activeFile, filters: rustFilters });
+      } catch (err) {
+        console.error('set_stream_filters failed:', err);
+      }
+      set((s) => ({
+        filterPalette: palette,
+        filteredIndices: null,
+        tagCodes: [],
+        liveCodesTick: s.liveCodesTick + 1,
+      }));
+      return;
+    }
 
     try {
       const [tagCodes, filteredIndices, hitCounts, events] = await invoke<[number[], number[], number[], Array<[string, string, number]>]>(
@@ -794,6 +962,7 @@ export const useStore = create<AppState>()(
         uiFontSize: state.uiFontSize,
         uiFontFamily: state.uiFontFamily,
         recentFiles: state.recentFiles,
+        enableLiveStream: state.enableLiveStream,
       }),
       onRehydrateStorage: () => (state) => {
         // Re-apply theme class to DOM after rehydration

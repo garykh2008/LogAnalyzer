@@ -1,10 +1,12 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod engine;
+mod stream;
 
 use std::collections::HashMap;
 use std::sync::RwLock;
 use tauri::{State, Emitter};
 use crate::engine::{LogEngine, FilterItem};
+use crate::stream::StreamState;
 
 struct AppState {
     engines: RwLock<HashMap<String, LogEngine>>,
@@ -191,6 +193,7 @@ pub fn run() {
         .manage(AppState {
             engines: RwLock::new(HashMap::new()),
         })
+        .manage(StreamState::new())
         .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
             let has_logs = !cli.log_files.is_empty();
@@ -230,7 +233,12 @@ pub fn run() {
             read_text_file,
             write_text_file,
             create_temp_log,
-            delete_file
+            delete_file,
+            stream::start_file_tail,
+            stream::stop_stream,
+            stream::set_stream_filters,
+            stream::get_stream_lines,
+            stream::get_stream_codes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

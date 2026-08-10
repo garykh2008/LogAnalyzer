@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useStore } from './store';
+import { useStore, StreamDelta } from './store';
 import { LogViewport } from './components/LogViewport';
 import { SidebarPanels } from './components/SidebarPanels';
 import { SearchOverlay } from './components/SearchOverlay';
@@ -63,6 +63,9 @@ export default function App() {
   const nextSearchMatch = useStore((s) => s.nextSearchMatch);
   const prevSearchMatch = useStore((s) => s.prevSearchMatch);
   const navigateFilterHit = useStore((s) => s.navigateFilterHit);
+  const enableLiveStream = useStore((s) => s.enableLiveStream);
+  const startFileTail = useStore((s) => s.startFileTail);
+  const applyStreamDelta = useStore((s) => s.applyStreamDelta);
 
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -298,6 +301,20 @@ export default function App() {
     };
   }, [loadLog]);
 
+  // Listen to live stream append deltas from the backend
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    const setup = async () => {
+      unlisten = await listen<StreamDelta>('stream-appended', (event) => {
+        if (event.payload) applyStreamDelta(event.payload);
+      });
+    };
+    setup();
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [applyStreamDelta]);
+
   // Block native browser page zoom on Ctrl+Wheel
   useEffect(() => {
     const blockZoom = (e: WheelEvent) => {
@@ -500,6 +517,20 @@ export default function App() {
                     <span>Open Log...</span>
                     <span className="ui-text-xs text-gray-400 font-mono">Ctrl+O</span>
                   </button>
+
+                  {enableLiveStream && (
+                    <button
+                      onClick={async () => {
+                        const path = await invoke<string | null>('open_file_dialog');
+                        if (path) await startFileTail(path);
+                        setActiveMenu(null);
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                    >
+                      <span>Tail File (Live)...</span>
+                      <span className="ui-text-xs text-accent font-mono">◉</span>
+                    </button>
+                  )}
 
                   {/* Open Recent Submenu */}
                   <div className="relative group/recent">
@@ -1059,6 +1090,22 @@ export default function App() {
                         <option value="GBK">GBK</option>
                         <option value="Shift_JIS">Shift_JIS</option>
                       </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 border-t border-border pt-4">
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-hover">
+                        <input
+                          type="checkbox"
+                          checked={enableLiveStream}
+                          onChange={(e) => setPreferences({ enableLiveStream: e.target.checked })}
+                          className="rounded text-accent border-border cursor-pointer"
+                        />
+                        <span className="font-semibold text-gray-600 dark:text-zinc-400">Enable Live Streaming</span>
+                      </label>
+                      <span className="ui-text-xs text-gray-400">
+                        Tail a growing file in real time (foundation for live DbgView / kernel log capture).
+                        Adds a "Tail File (Live)" action to the File menu.
+                      </span>
                     </div>
                   </div>
                 )}

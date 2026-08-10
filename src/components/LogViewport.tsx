@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState, UIEvent } from 'react';
 import { useStore } from '../store';
 import { adjustColorForTheme } from '../utils/color';
 import { invoke } from '@tauri-apps/api/core';
-import { FileText, Edit, Copy } from 'lucide-react';
+import { FileText, Edit, Copy, Play, Pause, ArrowDownToLine, Square } from 'lucide-react';
 
 const ROW_HEIGHT = 20;
 const MAX_DOM_HEIGHT = 4000000;
@@ -36,12 +36,23 @@ export const LogViewport: React.FC = () => {
   const setIsSidebarOpen = useStore((s) => s.setIsSidebarOpen);
   const noteEditLine = useStore((s) => s.noteEditLine);
   const setNoteEditLine = useStore((s) => s.setNoteEditLine);
+  const liveSources = useStore((s) => s.liveSources);
+  const liveTailing = useStore((s) => s.liveTailing);
+  const livePaused = useStore((s) => s.livePaused);
+  const liveCodesTick = useStore((s) => s.liveCodesTick);
+  const setLiveTailing = useStore((s) => s.setLiveTailing);
+  const setLivePaused = useStore((s) => s.setLivePaused);
+  const stopStream = useStore((s) => s.stopStream);
+
+  const liveSource = activeFile ? liveSources[activeFile] : undefined;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const heatmapRef = useRef<HTMLCanvasElement>(null);
 
   const [visibleLines, setVisibleLines] = useState<string[]>([]);
+  // Per-window tag codes for live sources (static sources use the global tagCodes array).
+  const [visibleCodes, setVisibleCodes] = useState<number[]>([]);
   const [startIndex, setStartIndex] = useState(0);
   const [visibleCount, setVisibleCount] = useState(30);
   const [containerHeight, setContainerHeight] = useState(600);
@@ -59,7 +70,11 @@ export const LogViewport: React.FC = () => {
   // Track if selection changes are manual clicks (to prevent scroll jumps)
   const [isManualSelection, setIsManualSelection] = useState(false);
 
-  const totalDisplayLines = filteredIndices ? filteredIndices.length : lineCount;
+  const totalDisplayLines = liveSource
+    ? liveSource.bufferLen
+    : filteredIndices
+    ? filteredIndices.length
+    : lineCount;
   const fitCount = Math.max(1, Math.floor(containerHeight / ROW_HEIGHT));
 
   // Calculate container dimensions
@@ -82,13 +97,39 @@ export const LogViewport: React.FC = () => {
   useEffect(() => {
     if (!activeFile || totalDisplayLines === 0) {
       setVisibleLines([]);
+      setVisibleCodes([]);
       return;
     }
 
     const safeStart = isNaN(startIndex) ? 0 : startIndex;
+    const end = Math.min(safeStart + visibleCount, totalDisplayLines);
+
+    // Live source: fetch text + per-window tag codes by absolute index.
+    if (liveSource) {
+      const absIndices: number[] = [];
+      for (let i = safeStart; i < end; i++) {
+        absIndices.push(liveSource.firstAbs + i);
+      }
+      if (absIndices.length === 0) return;
+
+      const fetchLive = async () => {
+        try {
+          const [lines, codes] = await Promise.all([
+            invoke<string[]>('get_stream_lines', { sourceId: activeFile, indices: absIndices }),
+            invoke<number[]>('get_stream_codes', { sourceId: activeFile, indices: absIndices }),
+          ]);
+          setVisibleLines(lines);
+          setVisibleCodes(codes);
+        } catch (err) {
+          console.error('Failed to fetch stream window:', err);
+        }
+      };
+      fetchLive();
+      return;
+    }
+
     const fetchLines = async () => {
       const fetchIndices: number[] = [];
-      const end = Math.min(safeStart + visibleCount, totalDisplayLines);
 
       for (let i = safeStart; i < end; i++) {
         const rawIdx = filteredIndices ? filteredIndices[i] : i;
@@ -111,7 +152,17 @@ export const LogViewport: React.FC = () => {
     };
 
     fetchLines();
-  }, [activeFile, startIndex, visibleCount, totalDisplayLines, filteredIndices]);
+  }, [activeFile, startIndex, visibleCount, totalDisplayLines, filteredIndices, liveSource, liveSource?.firstAbs, liveCodesTick]);
+
+  // Live auto-tail: follow the bottom as new lines arrive (unless paused).
+  useEffect(() => {
+    if (!liveSource || !liveTailing || livePaused) return;
+    const bottom = Math.max(0, totalDisplayLines - fitCount);
+    setStartIndex(bottom);
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [liveSource?.total, liveSource?.bufferLen, liveTailing, livePaused, totalDisplayLines, fitCount, liveSource]);
 
   // Handle scrolling
   const handleScroll = (e: UIEvent<HTMLDivElement>) => {
@@ -499,10 +550,52 @@ export const LogViewport: React.FC = () => {
       ) : (
         <>
           {/* Main Log Lines View */}
-          <div 
+          <div
             className="flex-1 overflow-hidden relative select-text"
             onWheel={handleWheel}
           >
+            {/* Live stream control pill */}
+            {liveSource && (
+              <div className="absolute top-2 right-3 z-40 flex items-center gap-2 bg-card/95 border border-border rounded-full shadow-lg pl-3 pr-1.5 py-1 select-none backdrop-blur-[2px] text-xs">
+                <span className="flex items-center gap-1.5 font-bold text-red-500">
+                  <span className={`w-2 h-2 rounded-full bg-red-500 ${livePaused ? '' : 'animate-pulse'}`} />
+                  LIVE
+                </span>
+                <span className="font-mono text-gray-500 dark:text-gray-400">
+                  {liveSource.total.toLocaleString()} lines
+                  {liveSource.dropped > 0 && (
+                    <span className="text-amber-500" title="Lines evicted from the ring buffer">
+                      {' '}(−{liveSource.dropped.toLocaleString()})
+                    </span>
+                  )}
+                </span>
+                <div className="w-[1px] h-4 bg-border" />
+                <button
+                  onClick={() => setLivePaused(!livePaused)}
+                  className="p-1 rounded-md hover:bg-hover text-gray-500 hover:text-accent transition-colors cursor-pointer"
+                  title={livePaused ? 'Resume' : 'Pause'}
+                >
+                  {livePaused ? <Play size={13} /> : <Pause size={13} />}
+                </button>
+                <button
+                  onClick={() => setLiveTailing(!liveTailing)}
+                  className={`p-1 rounded-md hover:bg-hover transition-colors cursor-pointer ${
+                    liveTailing ? 'text-accent' : 'text-gray-400'
+                  }`}
+                  title={liveTailing ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
+                >
+                  <ArrowDownToLine size={13} />
+                </button>
+                <button
+                  onClick={() => activeFile && stopStream(activeFile)}
+                  className="p-1 rounded-md hover:bg-red-500/10 text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
+                  title="Stop stream"
+                >
+                  <Square size={12} />
+                </button>
+              </div>
+            )}
+
             <div
               className="absolute inset-0 select-text"
               style={{
@@ -513,12 +606,18 @@ export const LogViewport: React.FC = () => {
             >
               {visibleLines.map((lineText, index) => {
                 const itemIndex = startIndex + index;
-                const rawIdx = filteredIndices ? filteredIndices[itemIndex] : itemIndex;
+                // Live sources map display slot -> absolute line via the buffer front;
+                // static sources map through filteredIndices (or identity).
+                const rawIdx = liveSource
+                  ? liveSource.firstAbs + itemIndex
+                  : filteredIndices
+                  ? filteredIndices[itemIndex]
+                  : itemIndex;
                 // Guard: during a mode switch, visibleLines can transiently be longer than
                 // the new filteredIndices, yielding an out-of-range (undefined/NaN) rawIdx.
                 // Skip those stale rows so we never render NaN line numbers.
                 if (rawIdx === undefined || isNaN(rawIdx)) return null;
-                const code = tagCodes[rawIdx];
+                const code = liveSource ? (visibleCodes[index] ?? 0) : tagCodes[rawIdx];
                 const palette = filterPalette[code];
                 const hasNote = notes[activeFile]?.hasOwnProperty(rawIdx);
                 const isLineSelected = selectedLines.includes(rawIdx);
