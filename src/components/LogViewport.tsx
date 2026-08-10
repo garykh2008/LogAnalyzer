@@ -514,6 +514,10 @@ export const LogViewport: React.FC = () => {
               {visibleLines.map((lineText, index) => {
                 const itemIndex = startIndex + index;
                 const rawIdx = filteredIndices ? filteredIndices[itemIndex] : itemIndex;
+                // Guard: during a mode switch, visibleLines can transiently be longer than
+                // the new filteredIndices, yielding an out-of-range (undefined/NaN) rawIdx.
+                // Skip those stale rows so we never render NaN line numbers.
+                if (rawIdx === undefined || isNaN(rawIdx)) return null;
                 const code = tagCodes[rawIdx];
                 const palette = filterPalette[code];
                 const hasNote = notes[activeFile]?.hasOwnProperty(rawIdx);
@@ -535,7 +539,11 @@ export const LogViewport: React.FC = () => {
 
                 return (
                   <div
-                    key={itemIndex}
+                    // Key by slot (unique, never NaN) + color code so a filter recolor
+                    // forces a remount (WebView2 can skip repainting inline-style-only
+                    // changes on reused nodes, leaving newly-filtered rows uncolored
+                    // until a click).
+                    key={`${itemIndex}-${code ?? 0}`}
                     onClick={(e) => handleLineClick(rawIdx, e)}
                     onDoubleClick={() => handleDoubleClickLine(lineText)}
                     onContextMenu={(e) => handleContextMenu(e, rawIdx)}

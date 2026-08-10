@@ -8,6 +8,16 @@ interface SidebarPanelsProps {
   activeTab: 'files' | 'filters' | 'notes';
 }
 
+// Quick-pick palettes for the Custom Colors picker
+const TEXT_COLOR_PRESETS = [
+  '#000000', '#ffffff', '#ef4444', '#f97316', '#f59e0b',
+  '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#9ca3af',
+];
+const BG_COLOR_PRESETS = [
+  '#ffffff', '#000000', '#fee2e2', '#ffedd5', '#fef3c7',
+  '#d1fae5', '#dbeafe', '#ede9fe', '#fce7f3', '#f3f4f6',
+];
+
 export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
   const loadedFiles = useStore((s) => s.loadedFiles);
   const activeFile = useStore((s) => s.activeFile);
@@ -97,6 +107,23 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
     window.addEventListener('click', closeMenu);
     return () => window.removeEventListener('click', closeMenu);
   }, []);
+
+  // Filter editor modal: focus the text field on open, Esc to close
+  const isFilterEditorOpen = isAddingFilter || editingFilterIdx !== null;
+  const filterTextRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isFilterEditorOpen) return;
+    setTimeout(() => filterTextRef.current?.focus(), 50);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        resetFilterEditor();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isFilterEditorOpen, resetFilterEditor]);
 
   // Drag & drop logic for reordering filters (custom MouseEvent implementation to bypass Tauri webview limitations)
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -319,135 +346,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                 <span className="ui-text-2xs opacity-65 pl-2 shrink-0 select-none">Active</span>
               </div>
             )}
-            {/* Inline Filter Editor */}
-            {(isAddingFilter || editingFilterIdx !== null) && (
-              <div className="p-3 bg-card border border-border rounded-xl shadow-lg flex flex-col gap-3">
-                <div className="ui-text-xs font-bold text-gray-400 uppercase tracking-wider">
-                  {isAddingFilter ? 'Create Filter' : 'Edit Filter'}
-                </div>
-
-                {/* Filter Text */}
-                <input
-                  type="text"
-                  value={filterText}
-                  onChange={(e) => setFilterEditor({ filterText: e.target.value })}
-                  placeholder="Keyword or regex..."
-                  className="w-full text-xs bg-gray-50 dark:bg-[#313244] border border-border rounded-lg p-2.5 focus:outline-none focus:border-accent"
-                />
-
-                {/* Checkboxes */}
-                <div className="flex flex-col gap-1 text-xs text-gray-600 dark:text-gray-350">
-                  <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded-md hover:bg-hover">
-                    <input
-                      type="checkbox"
-                      checked={filterIsRegex}
-                      onChange={(e) => setFilterEditor({ filterIsRegex: e.target.checked })}
-                      className="rounded text-accent border-border"
-                    />
-                    <span>Regular Expression (Regex)</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded-md hover:bg-hover">
-                    <input
-                      type="checkbox"
-                      checked={filterIsExclude}
-                      onChange={(e) => setFilterEditor({ filterIsExclude: e.target.checked })}
-                      className="rounded text-accent border-border"
-                    />
-                    <span>Exclude Match (Hide rows)</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded-md hover:bg-hover">
-                    <input
-                      type="checkbox"
-                      checked={filterIsEvent}
-                      onChange={(e) => setFilterEditor({ filterIsEvent: e.target.checked })}
-                      className="rounded text-accent border-border"
-                    />
-                    <span>Timeline Event</span>
-                  </label>
-                </div>
-
-                {/* Premium Colors Swatch Grid */}
-                <div className="flex flex-col gap-2">
-                  <span className="ui-text-2xs text-gray-400 font-bold uppercase select-none">Color Swatches</span>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {[
-                      { fg: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', name: 'Red' },
-                      { fg: '#f97316', bg: 'rgba(249, 115, 22, 0.15)', name: 'Orange' },
-                      { fg: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)', name: 'Amber' },
-                      { fg: '#10b981', bg: 'rgba(16, 185, 129, 0.15)', name: 'Green' },
-                      { fg: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)', name: 'Blue' },
-                      { fg: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)', name: 'Purple' },
-                      { fg: '#ec4899', bg: 'rgba(236, 72, 153, 0.15)', name: 'Pink' },
-                      { fg: '#9ca3af', bg: 'transparent', name: 'Grey' },
-                    ].map((preset) => {
-                      const isSelected = filterFgColor === preset.fg && filterBgColor === preset.bg;
-                      return (
-                        <button
-                          key={preset.name}
-                          type="button"
-                          onClick={() => setFilterEditor({ filterFgColor: preset.fg, filterBgColor: preset.bg })}
-                          style={{
-                            backgroundColor: preset.bg || 'transparent',
-                            color: preset.fg,
-                            borderColor: isSelected ? preset.fg : 'var(--border)'
-                          }}
-                          className={`h-7 px-1 rounded-md border ui-text-xs font-mono font-bold flex items-center justify-center transition-all cursor-pointer select-none hover:opacity-100 ${
-                            isSelected ? 'ring-2 ring-accent/30 scale-105 opacity-100 font-black' : 'opacity-75'
-                          }`}
-                        >
-                          Aa
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Collapsible custom picker for advanced styles */}
-                  <details className="ui-text-xs text-gray-500 cursor-pointer select-none mt-1 outline-none">
-                    <summary className="hover:text-accent font-medium outline-none">Custom colors picker...</summary>
-                    <div className="flex items-center gap-3 mt-2 pl-2 border-l border-border">
-                      <div className="flex flex-col gap-1 flex-1">
-                        <span className="ui-text-3xs text-gray-400">Text color</span>
-                        <input
-                          type="color"
-                          value={filterFgColor}
-                          onChange={(e) => setFilterEditor({ filterFgColor: e.target.value })}
-                          className="w-full h-7 border border-border rounded cursor-pointer p-0.5 bg-transparent"
-                        />
-                      </div>
-                      <div className="flex flex-col gap-1 flex-1">
-                        <span className="ui-text-3xs text-gray-400">Background</span>
-                        <input
-                          type="color"
-                          value={filterBgColor.startsWith('rgba') ? '#ffffff' : filterBgColor}
-                          onChange={(e) => setFilterEditor({ filterBgColor: e.target.value })}
-                          className="w-full h-7 border border-border rounded cursor-pointer p-0.5 bg-transparent"
-                        />
-                      </div>
-                    </div>
-                  </details>
-                </div>
-
-                {/* Actions */}
-                <div className="flex justify-end gap-2 text-xs font-semibold pt-1">
-                  <button
-                    onClick={resetFilterEditor}
-                    className="px-3 py-1.5 border border-border rounded-md hover:bg-hover transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() =>
-                      isAddingFilter
-                        ? handleAddFilterSubmit()
-                        : handleEditFilterSubmit(editingFilterIdx!)
-                    }
-                    className="px-3 py-1.5 bg-accent hover:bg-accent-hover text-white rounded-md transition-colors cursor-pointer"
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            )}
+            {/* Filter editor is rendered as a centered modal (see below) */}
 
             {/* Filters Checklist */}
             {filters.length === 0 ? (
@@ -585,6 +484,234 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
           </div>
         )}
       </div>
+
+      {/* Filter Editor Modal (Add / Edit) */}
+      {isFilterEditorOpen && (
+        <div
+          onMouseDown={resetFilterEditor}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] p-4"
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            className="w-[360px] max-h-[85vh] overflow-y-auto p-4 bg-card border border-border rounded-2xl shadow-2xl flex flex-col gap-3"
+          >
+            <div className="flex items-center justify-between">
+              <div className="ui-text-xs font-bold text-gray-400 uppercase tracking-wider">
+                {isAddingFilter ? 'Create Filter' : 'Edit Filter'}
+              </div>
+              <button
+                onClick={resetFilterEditor}
+                className="p-1 rounded-md hover:bg-hover text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
+                title="Close (Esc)"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Filter Text */}
+            <input
+              ref={filterTextRef}
+              type="text"
+              value={filterText}
+              onChange={(e) => setFilterEditor({ filterText: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  isAddingFilter ? handleAddFilterSubmit() : handleEditFilterSubmit(editingFilterIdx!);
+                }
+              }}
+              placeholder="Keyword or regex..."
+              className="w-full text-xs bg-gray-50 dark:bg-[#313244] border border-border rounded-lg p-2.5 focus:outline-none focus:border-accent"
+            />
+
+            {/* Checkboxes */}
+            <div className="flex flex-col gap-1 text-xs text-gray-600 dark:text-gray-350">
+              <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded-md hover:bg-hover">
+                <input
+                  type="checkbox"
+                  checked={filterIsRegex}
+                  onChange={(e) => setFilterEditor({ filterIsRegex: e.target.checked })}
+                  className="rounded text-accent border-border"
+                />
+                <span>Regular Expression (Regex)</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded-md hover:bg-hover">
+                <input
+                  type="checkbox"
+                  checked={filterIsExclude}
+                  onChange={(e) => setFilterEditor({ filterIsExclude: e.target.checked })}
+                  className="rounded text-accent border-border"
+                />
+                <span>Exclude Match (Hide rows)</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded-md hover:bg-hover">
+                <input
+                  type="checkbox"
+                  checked={filterIsEvent}
+                  onChange={(e) => setFilterEditor({ filterIsEvent: e.target.checked })}
+                  className="rounded text-accent border-border"
+                />
+                <span>Timeline Event</span>
+              </label>
+            </div>
+
+            {/* Premium Colors Swatch Grid */}
+            <div className="flex flex-col gap-2">
+              <span className="ui-text-2xs text-gray-400 font-bold uppercase select-none">Color Swatches</span>
+              <div className="grid grid-cols-4 gap-1.5">
+                {[
+                  { fg: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', name: 'Red' },
+                  { fg: '#f97316', bg: 'rgba(249, 115, 22, 0.15)', name: 'Orange' },
+                  { fg: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)', name: 'Amber' },
+                  { fg: '#10b981', bg: 'rgba(16, 185, 129, 0.15)', name: 'Green' },
+                  { fg: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)', name: 'Blue' },
+                  { fg: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)', name: 'Purple' },
+                  { fg: '#ec4899', bg: 'rgba(236, 72, 153, 0.15)', name: 'Pink' },
+                  { fg: '#9ca3af', bg: 'transparent', name: 'Grey' },
+                ].map((preset) => {
+                  const isSelected = filterFgColor === preset.fg && filterBgColor === preset.bg;
+                  return (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      onClick={() => setFilterEditor({ filterFgColor: preset.fg, filterBgColor: preset.bg })}
+                      style={{
+                        backgroundColor: preset.bg || 'transparent',
+                        color: preset.fg,
+                        borderColor: isSelected ? preset.fg : 'var(--border)'
+                      }}
+                      className={`h-7 px-1 rounded-md border ui-text-xs font-mono font-bold flex items-center justify-center transition-all cursor-pointer select-none hover:opacity-100 ${
+                        isSelected ? 'ring-2 ring-accent/30 scale-105 opacity-100 font-black' : 'opacity-75'
+                      }`}
+                    >
+                      Aa
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Collapsible custom picker for advanced styles */}
+              <details className="ui-text-xs text-gray-500 cursor-pointer select-none mt-1 outline-none">
+                <summary className="hover:text-accent font-medium outline-none">Custom colors picker...</summary>
+                <div className="flex flex-col gap-3 mt-2 pl-2 border-l border-border">
+                  {/* Text color */}
+                  <div className="flex flex-col gap-1.5">
+                    <span className="ui-text-3xs text-gray-400">Text color</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {TEXT_COLOR_PRESETS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setFilterEditor({ filterFgColor: c })}
+                          style={{ backgroundColor: c }}
+                          className={`h-5 w-5 rounded border transition-transform cursor-pointer ${
+                            filterFgColor.toLowerCase() === c.toLowerCase()
+                              ? 'ring-2 ring-accent/40 scale-110 border-accent'
+                              : 'border-border hover:scale-110'
+                          }`}
+                          title={c}
+                        />
+                      ))}
+                      <input
+                        type="color"
+                        value={filterFgColor}
+                        onChange={(e) => setFilterEditor({ filterFgColor: e.target.value })}
+                        className="h-5 w-7 border border-border rounded cursor-pointer p-0.5 bg-transparent"
+                        title="Custom text color"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Background */}
+                  <div className="flex flex-col gap-1.5">
+                    <span className="ui-text-3xs text-gray-400">Background</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {/* Transparent / none */}
+                      <button
+                        type="button"
+                        onClick={() => setFilterEditor({ filterBgColor: 'transparent' })}
+                        style={{
+                          backgroundColor: '#fff',
+                          backgroundImage:
+                            'linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%), linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%)',
+                          backgroundSize: '6px 6px',
+                          backgroundPosition: '0 0, 3px 3px',
+                        }}
+                        className={`h-5 w-5 rounded border transition-transform cursor-pointer ${
+                          filterBgColor === 'transparent'
+                            ? 'ring-2 ring-accent/40 scale-110 border-accent'
+                            : 'border-border hover:scale-110'
+                        }`}
+                        title="Transparent"
+                      />
+                      {BG_COLOR_PRESETS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setFilterEditor({ filterBgColor: c })}
+                          style={{ backgroundColor: c }}
+                          className={`h-5 w-5 rounded border transition-transform cursor-pointer ${
+                            filterBgColor.toLowerCase() === c.toLowerCase()
+                              ? 'ring-2 ring-accent/40 scale-110 border-accent'
+                              : 'border-border hover:scale-110'
+                          }`}
+                          title={c}
+                        />
+                      ))}
+                      <input
+                        type="color"
+                        value={filterBgColor.startsWith('rgba') || filterBgColor === 'transparent' ? '#ffffff' : filterBgColor}
+                        onChange={(e) => setFilterEditor({ filterBgColor: e.target.value })}
+                        className="h-5 w-7 border border-border rounded cursor-pointer p-0.5 bg-transparent"
+                        title="Custom background color"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            {/* Live preview — shows the real theme-adjusted result */}
+            <div className="flex flex-col gap-1.5">
+              <span className="ui-text-2xs text-gray-400 font-bold uppercase select-none">
+                Preview {isDark ? '(dark)' : '(light)'}
+              </span>
+              <div
+                className="rounded-lg border border-border px-3 py-2 font-mono text-xs truncate"
+                style={{
+                  backgroundColor:
+                    filterBgColor && filterBgColor !== 'transparent'
+                      ? adjustColorForTheme(filterBgColor, true, isDark)
+                      : undefined,
+                  color: adjustColorForTheme(filterFgColor, false, isDark),
+                }}
+              >
+                {filterText.trim() || 'Sample log text'}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-end gap-2 text-xs font-semibold pt-1">
+              <button
+                onClick={resetFilterEditor}
+                className="px-3 py-1.5 border border-border rounded-md hover:bg-hover transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() =>
+                  isAddingFilter
+                    ? handleAddFilterSubmit()
+                    : handleEditFilterSubmit(editingFilterIdx!)
+                }
+                className="px-3 py-1.5 bg-accent hover:bg-accent-hover text-white rounded-md transition-colors cursor-pointer"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floating Filter Context Menu */}
       {contextMenu !== null && (

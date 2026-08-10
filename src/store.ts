@@ -608,7 +608,7 @@ export const useStore = create<AppState>()(
   filterIsRegex: false,
   filterIsExclude: false,
   filterIsEvent: false,
-  filterFgColor: '#ff0000',
+  filterFgColor: '#000000',
   filterBgColor: 'transparent',
   setFilterEditor: (state) => set(state),
   openAddFilter: (initialText) => {
@@ -619,8 +619,8 @@ export const useStore = create<AppState>()(
       filterIsRegex: false,
       filterIsExclude: false,
       filterIsEvent: false,
-      filterFgColor: '#ff0000',
-      filterBgColor: 'transparent'
+      filterFgColor: '#000000',
+      filterBgColor: '#ffffff'
     });
   },
   resetFilterEditor: () => set({
@@ -630,7 +630,7 @@ export const useStore = create<AppState>()(
     filterIsRegex: false,
     filterIsExclude: false,
     filterIsEvent: false,
-    filterFgColor: '#ff0000',
+    filterFgColor: '#000000',
     filterBgColor: 'transparent'
   }),
 
