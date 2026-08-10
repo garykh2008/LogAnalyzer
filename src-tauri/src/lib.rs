@@ -71,6 +71,14 @@ fn open_file_dialog() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+fn open_exe_dialog() -> Result<Option<String>, String> {
+    let file = rfd::FileDialog::new()
+        .add_filter("Executable", &["exe"])
+        .pick_file();
+    Ok(file.map(|p| p.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
 fn save_file_dialog(default_name: String, extension: String) -> Result<Option<String>, String> {
     let file = rfd::FileDialog::new()
         .set_file_name(&default_name)
@@ -229,13 +237,16 @@ pub fn run() {
             search_log,
             filter_log,
             open_file_dialog,
+            open_exe_dialog,
             save_file_dialog,
             read_text_file,
             write_text_file,
             create_temp_log,
             delete_file,
             stream::start_file_tail,
+            stream::start_dbgview_local,
             stream::stop_stream,
+            stream::clear_stream,
             stream::set_stream_filters,
             stream::get_stream_lines,
             stream::get_stream_codes

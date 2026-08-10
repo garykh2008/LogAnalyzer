@@ -64,7 +64,9 @@ export default function App() {
   const prevSearchMatch = useStore((s) => s.prevSearchMatch);
   const navigateFilterHit = useStore((s) => s.navigateFilterHit);
   const enableLiveStream = useStore((s) => s.enableLiveStream);
+  const dbgviewPath = useStore((s) => s.dbgviewPath);
   const startFileTail = useStore((s) => s.startFileTail);
+  const startDbgviewLocal = useStore((s) => s.startDbgviewLocal);
   const applyStreamDelta = useStore((s) => s.applyStreamDelta);
 
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -529,6 +531,28 @@ export default function App() {
                     >
                       <span>Tail File (Live)...</span>
                       <span className="ui-text-xs text-accent font-mono">◉</span>
+                    </button>
+                  )}
+
+                  {enableLiveStream && (
+                    <button
+                      onClick={async () => {
+                        setActiveMenu(null);
+                        if (!useStore.getState().dbgviewPath) {
+                          alert('Please set the DbgView.exe path in Settings first.');
+                          setIsSettingsOpen(true);
+                          return;
+                        }
+                        try {
+                          await startDbgviewLocal();
+                        } catch (err) {
+                          alert('Failed to start DbgView capture:\n' + err);
+                        }
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                    >
+                      <span>Capture DbgView (Kernel)...</span>
+                      <span className="ui-text-xs text-red-500 font-mono">◉</span>
                     </button>
                   )}
 
@@ -1104,9 +1128,36 @@ export default function App() {
                       </label>
                       <span className="ui-text-xs text-gray-400">
                         Tail a growing file in real time (foundation for live DbgView / kernel log capture).
-                        Adds a "Tail File (Live)" action to the File menu.
+                        Adds "Tail File (Live)" and "Capture DbgView (Kernel)" actions to the File menu.
                       </span>
                     </div>
+
+                    {enableLiveStream && (
+                      <div className="flex flex-col gap-1.5">
+                        <label className="font-semibold text-gray-600 dark:text-zinc-400">DbgView.exe Path</label>
+                        <span className="ui-text-xs text-gray-400">
+                          Bring your own Sysinternals DebugView. Kernel capture launches it elevated (one UAC prompt).
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={dbgviewPath}
+                            onChange={(e) => setPreferences({ dbgviewPath: e.target.value })}
+                            placeholder="C:\\Tools\\Dbgview.exe"
+                            className="flex-1 bg-sidebar border border-border rounded-lg p-2 font-mono focus:outline-none focus:border-accent"
+                          />
+                          <button
+                            onClick={async () => {
+                              const path = await invoke<string | null>('open_exe_dialog');
+                              if (path) setPreferences({ dbgviewPath: path });
+                            }}
+                            className="px-3 py-2 border border-border rounded-lg hover:bg-hover transition-colors cursor-pointer shrink-0 font-semibold"
+                          >
+                            Browse...
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

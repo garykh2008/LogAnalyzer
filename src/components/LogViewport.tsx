@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState, UIEvent } from 'react';
 import { useStore } from '../store';
 import { adjustColorForTheme } from '../utils/color';
 import { invoke } from '@tauri-apps/api/core';
-import { FileText, Edit, Copy, Play, Pause, ArrowDownToLine, Square } from 'lucide-react';
+import { FileText, Edit, Copy, Play, Pause, ArrowDownToLine, Square, Eraser } from 'lucide-react';
 
 const ROW_HEIGHT = 20;
 const MAX_DOM_HEIGHT = 4000000;
@@ -43,6 +43,7 @@ export const LogViewport: React.FC = () => {
   const setLiveTailing = useStore((s) => s.setLiveTailing);
   const setLivePaused = useStore((s) => s.setLivePaused);
   const stopStream = useStore((s) => s.stopStream);
+  const clearStream = useStore((s) => s.clearStream);
 
   const liveSource = activeFile ? liveSources[activeFile] : undefined;
 
@@ -585,6 +586,13 @@ export const LogViewport: React.FC = () => {
                   title={liveTailing ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
                 >
                   <ArrowDownToLine size={13} />
+                </button>
+                <button
+                  onClick={() => activeFile && clearStream(activeFile)}
+                  className="p-1 rounded-md hover:bg-hover text-gray-500 hover:text-accent transition-colors cursor-pointer"
+                  title="Clear buffer"
+                >
+                  <Eraser size={13} />
                 </button>
                 <button
                   onClick={() => activeFile && stopStream(activeFile)}

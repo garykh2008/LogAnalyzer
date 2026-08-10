@@ -125,12 +125,16 @@ interface AppState {
 
   // Live streaming (opt-in feature)
   enableLiveStream: boolean;
+  dbgviewPath: string;
   liveSources: Record<string, LiveSourceMeta>;
+  livePending: Record<string, LiveSourceMeta>;
   liveTailing: boolean;
   livePaused: boolean;
   liveCodesTick: number;
   startFileTail: (path: string) => Promise<void>;
+  startDbgviewLocal: () => Promise<void>;
   stopStream: (sourceId: string) => Promise<void>;
+  clearStream: (sourceId: string) => Promise<void>;
   setLiveTailing: (on: boolean) => void;
   setLivePaused: (paused: boolean) => void;
   applyStreamDelta: (delta: StreamDelta) => void;
@@ -245,7 +249,9 @@ export const useStore = create<AppState>()(
 
   // Live streaming
   enableLiveStream: false,
+  dbgviewPath: '',
   liveSources: {},
+  livePending: {},
   liveTailing: true,
   livePaused: false,
   liveCodesTick: 0,
@@ -363,6 +369,30 @@ export const useStore = create<AppState>()(
     }
   },
 
+  startDbgviewLocal: async () => {
+    const path = get().dbgviewPath;
+    if (!path) throw new Error('DbgView.exe path is not set');
+    set({ loading: true });
+    try {
+      const sourceId = await invoke<string>('start_dbgview_local', { dbgviewPath: path });
+      set((s) => ({
+        liveSources: {
+          ...s.liveSources,
+          [sourceId]: { path, label: 'DbgView (kernel)', total: 0, firstAbs: 0, bufferLen: 0, dropped: 0 },
+        },
+        loadedFiles: s.loadedFiles.includes(sourceId) ? s.loadedFiles : [...s.loadedFiles, sourceId],
+        loading: false,
+        liveTailing: true,
+        livePaused: false,
+      }));
+      await get().setActiveFile(sourceId);
+    } catch (err) {
+      console.error('Failed to start DbgView capture:', err);
+      set({ loading: false });
+      throw err;
+    }
+  },
+
   stopStream: async (sourceId) => {
     try {
       await invoke('stop_stream', { sourceId });
@@ -388,29 +418,52 @@ export const useStore = create<AppState>()(
 
   setLivePaused: (paused) => {
     set({ livePaused: paused });
-    // On resume, snap the visible count back to the latest buffer length.
+    // On resume, flush the latest pending snapshot into the live view.
     if (!paused) {
       const s = get();
-      const live = s.activeFile ? s.liveSources[s.activeFile] : null;
-      if (live) set({ lineCount: live.bufferLen });
+      const id = s.activeFile;
+      const pend = id ? s.livePending[id] : undefined;
+      if (id && pend) {
+        set({ liveSources: { ...s.liveSources, [id]: pend }, lineCount: pend.bufferLen });
+      }
     }
+  },
+
+  clearStream: async (sourceId) => {
+    try {
+      await invoke('clear_stream', { sourceId });
+    } catch (err) {
+      console.error('Failed to clear stream:', err);
+    }
+    set((s) => {
+      const existing = s.liveSources[sourceId];
+      if (!existing) return {} as Partial<AppState>;
+      const meta = { ...existing, total: 0, firstAbs: 0, bufferLen: 0, dropped: 0 };
+      const patch: Partial<AppState> = {
+        liveSources: { ...s.liveSources, [sourceId]: meta },
+        livePending: { ...s.livePending, [sourceId]: meta },
+      };
+      if (s.activeFile === sourceId) patch.lineCount = 0;
+      return patch;
+    });
   },
 
   applyStreamDelta: (delta) => {
     const { sourceId, total, firstAbs, bufferLen, dropped } = delta;
     set((s) => {
-      const existing = s.liveSources[sourceId];
+      const existing = s.liveSources[sourceId] || s.livePending[sourceId];
       if (!existing) return {} as Partial<AppState>;
+      const meta: LiveSourceMeta = { ...existing, total, firstAbs, bufferLen, dropped };
+      // The latest snapshot is always tracked in livePending.
       const patch: Partial<AppState> = {
-        liveSources: {
-          ...s.liveSources,
-          [sourceId]: { ...existing, total, firstAbs, bufferLen, dropped },
-        },
+        livePending: { ...s.livePending, [sourceId]: meta },
       };
-      // Only advance the active view when it's this source and not paused.
-      if (s.activeFile === sourceId && !s.livePaused) {
-        patch.lineCount = bufferLen;
+      // Freeze the active source's view while paused; otherwise advance it.
+      if (s.livePaused && s.activeFile === sourceId) {
+        return patch;
       }
+      patch.liveSources = { ...s.liveSources, [sourceId]: meta };
+      if (s.activeFile === sourceId) patch.lineCount = bufferLen;
       return patch;
     });
   },
@@ -963,6 +1016,7 @@ export const useStore = create<AppState>()(
         uiFontFamily: state.uiFontFamily,
         recentFiles: state.recentFiles,
         enableLiveStream: state.enableLiveStream,
+        dbgviewPath: state.dbgviewPath,
       }),
       onRehydrateStorage: () => (state) => {
         // Re-apply theme class to DOM after rehydration

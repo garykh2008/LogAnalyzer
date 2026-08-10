@@ -9,6 +9,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
@@ -143,6 +144,14 @@ impl LiveEngine {
         }
     }
 
+    fn clear(&mut self) {
+        self.lines.clear();
+        self.codes.clear();
+        self.first_abs = 0;
+        self.total = 0;
+        self.dropped = 0;
+    }
+
     fn set_filters(&mut self, compiled: Vec<CompiledFilter>) {
         self.filters = compiled;
         // Reclassify the current buffer (bounded by cap, so one-shot is fine).
@@ -195,10 +204,17 @@ pub struct LiveSource {
     pub engine: Arc<Mutex<LiveEngine>>,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
+    /// For DbgView sources: writing this file signals the elevated watcher to
+    /// terminate DbgView and clean up (see `start_dbgview_local`).
+    stop_file: Option<PathBuf>,
 }
 
 impl LiveSource {
     fn stop(&mut self) {
+        // Signal the elevated watcher (if any) before stopping the tail thread.
+        if let Some(sf) = &self.stop_file {
+            let _ = std::fs::write(sf, b"stop");
+        }
         self.stop.store(true, Ordering::Relaxed);
         if let Some(h) = self.handle.take() {
             let _ = h.join();
@@ -325,9 +341,118 @@ pub fn start_file_tail(
             engine,
             stop,
             handle: Some(handle),
+            stop_file: None,
         },
     );
     Ok(source_id)
+}
+
+/// Build the elevated PowerShell watcher: it accepts the EULA, kills any stale
+/// DbgView, launches DbgView with kernel capture logging to `log`, then waits
+/// for `stop` to appear (written by the app) before terminating DbgView.
+#[cfg(target_os = "windows")]
+fn build_watcher_script(dbgview: &str, log: &Path, stop: &Path) -> String {
+    let esc = |s: &str| s.replace('\'', "''");
+    format!(
+        "$ErrorActionPreference='SilentlyContinue'\n\
+         reg add \"HKCU\\Software\\Sysinternals\\DebugView\" /v EulaAccepted /t REG_DWORD /d 1 /f | Out-Null\n\
+         Get-Process Dbgview* | Stop-Process -Force\n\
+         Start-Process -FilePath '{dbg}' -ArgumentList '/t','/f','/v','/k','/g','/l','{log}'\n\
+         while (-not (Test-Path -LiteralPath '{stop}')) {{ Start-Sleep -Milliseconds 300 }}\n\
+         Get-Process Dbgview* | Stop-Process -Force\n\
+         Remove-Item -LiteralPath '{stop}' -Force\n",
+        dbg = esc(dbgview),
+        log = esc(&log.to_string_lossy()),
+        stop = esc(&stop.to_string_lossy()),
+    )
+}
+
+/// Launch the watcher script elevated (single UAC prompt) via a non-elevated
+/// PowerShell that calls `Start-Process -Verb RunAs`.
+#[cfg(target_os = "windows")]
+fn launch_elevated_watcher(ps1: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let ps1s = ps1.to_string_lossy().replace('\'', "''");
+    let inner = format!(
+        "@('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File','{}')",
+        ps1s
+    );
+    let outer = format!(
+        "Start-Process -Verb RunAs -WindowStyle Hidden -FilePath 'powershell' -ArgumentList {}",
+        inner
+    );
+
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &outer])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|e| e.to_string())?;
+
+    if !status.success() {
+        return Err("Failed to launch elevated DbgView (UAC declined or blocked).".to_string());
+    }
+    Ok(())
+}
+
+/// Start local kernel-mode capture with a user-provided DbgView.exe.
+#[tauri::command]
+pub fn start_dbgview_local(
+    app: AppHandle,
+    state: tauri::State<'_, StreamState>,
+    dbgview_path: String,
+) -> Result<String, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, state, dbgview_path);
+        Err("DbgView capture is only supported on Windows.".to_string())
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if !Path::new(&dbgview_path).exists() {
+            return Err(format!("DbgView.exe not found: {}", dbgview_path));
+        }
+
+        let source_id = state.next_id();
+        let tmp = std::env::temp_dir();
+        let log = tmp.join(format!("loganalyzer_dbgview_{}.log", source_id));
+        let stop = tmp.join(format!("loganalyzer_dbgview_{}.stop", source_id));
+        let ps1 = tmp.join(format!("loganalyzer_dbgview_{}.ps1", source_id));
+
+        // Start from a clean slate; create the log so the tailer can open it.
+        let _ = std::fs::remove_file(&log);
+        let _ = std::fs::remove_file(&stop);
+        std::fs::write(&log, b"").map_err(|e| e.to_string())?;
+
+        std::fs::write(&ps1, build_watcher_script(&dbgview_path, &log, &stop))
+            .map_err(|e| e.to_string())?;
+
+        launch_elevated_watcher(&ps1)?;
+
+        let engine = Arc::new(Mutex::new(LiveEngine::new(RING_CAP)));
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let handle = spawn_file_tail(
+            app,
+            source_id.clone(),
+            log.to_string_lossy().to_string(),
+            Arc::clone(&engine),
+            Arc::clone(&stop_flag),
+        );
+
+        let mut sources = state.sources.write().map_err(|e| e.to_string())?;
+        sources.insert(
+            source_id.clone(),
+            LiveSource {
+                engine,
+                stop: stop_flag,
+                handle: Some(handle),
+                stop_file: Some(stop),
+            },
+        );
+        Ok(source_id)
+    }
 }
 
 #[tauri::command]
@@ -337,6 +462,11 @@ pub fn stop_stream(state: tauri::State<'_, StreamState>, source_id: String) -> R
         src.stop();
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn clear_stream(state: tauri::State<'_, StreamState>, source_id: String) -> Result<(), String> {
+    state.with_engine(&source_id, |eng| eng.clear())
 }
 
 #[tauri::command]
