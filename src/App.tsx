@@ -65,8 +65,13 @@ export default function App() {
   const navigateFilterHit = useStore((s) => s.navigateFilterHit);
   const enableLiveStream = useStore((s) => s.enableLiveStream);
   const dbgviewPath = useStore((s) => s.dbgviewPath);
+  const remoteHost = useStore((s) => s.remoteHost);
+  const remotePort = useStore((s) => s.remotePort);
+  const remoteUser = useStore((s) => s.remoteUser);
+  const remoteDbgviewPath = useStore((s) => s.remoteDbgviewPath);
   const startFileTail = useStore((s) => s.startFileTail);
   const startDbgviewLocal = useStore((s) => s.startDbgviewLocal);
+  const startDbgviewRemote = useStore((s) => s.startDbgviewRemote);
   const applyStreamDelta = useStore((s) => s.applyStreamDelta);
 
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -83,6 +88,12 @@ export default function App() {
 
   // Paste-from-clipboard feedback
   const [pasteMsg, setPasteMsg] = useState<string | null>(null);
+
+  // Remote DbgView connect dialog
+  const [isRemoteOpen, setIsRemoteOpen] = useState(false);
+  const [remotePassword, setRemotePassword] = useState('');
+  const [remoteConnecting, setRemoteConnecting] = useState(false);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
 
   // Export notes helper
   const handleExportNotes = async () => {
@@ -552,6 +563,21 @@ export default function App() {
                       className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
                     >
                       <span>Capture DbgView (Kernel)...</span>
+                      <span className="ui-text-xs text-red-500 font-mono">◉</span>
+                    </button>
+                  )}
+
+                  {enableLiveStream && (
+                    <button
+                      onClick={() => {
+                        setActiveMenu(null);
+                        setRemoteError(null);
+                        setRemotePassword('');
+                        setIsRemoteOpen(true);
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                    >
+                      <span>Capture DbgView (Remote)...</span>
                       <span className="ui-text-xs text-red-500 font-mono">◉</span>
                     </button>
                   )}
@@ -1410,6 +1436,122 @@ export default function App() {
             >
               Close
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Remote DbgView Connect Dialog */}
+      {isRemoteOpen && (
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-[1.5px] flex items-center justify-center z-[100] select-none text-xs">
+          <div className="bg-card border border-border shadow-2xl rounded-2xl w-[420px] flex flex-col p-5 gap-3 text-xs">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <span className="text-sm font-bold text-foreground">Remote DbgView Capture (Kernel)</span>
+              <button
+                onClick={() => setIsRemoteOpen(false)}
+                className="text-gray-400 hover:text-foreground hover:bg-hover p-1 rounded-md transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <span className="ui-text-xs text-gray-400">
+              SSH to a target machine and run its DebugView elevated (scheduled task, kernel capture),
+              streaming the log back. Host/user/path are saved; the password is not.
+            </span>
+            <span className="ui-text-xs text-gray-400">
+              Target prep (run once, as admin on the target):{' '}
+              <code className="font-mono text-accent">scripts\setup-remote-target.bat</code>{' '}
+              — installs OpenSSH and enables admin network elevation. The SSH account must be a local admin.
+            </span>
+
+            <div className="flex gap-2">
+              <div className="flex flex-col gap-1 flex-1">
+                <label className="font-semibold text-gray-600 dark:text-zinc-400">Host / IP</label>
+                <input
+                  type="text"
+                  value={remoteHost}
+                  onChange={(e) => setPreferences({ remoteHost: e.target.value })}
+                  placeholder="192.168.0.10"
+                  className="bg-sidebar border border-border rounded-lg p-2 font-mono focus:outline-none focus:border-accent"
+                />
+              </div>
+              <div className="flex flex-col gap-1 w-20">
+                <label className="font-semibold text-gray-600 dark:text-zinc-400">Port</label>
+                <input
+                  type="number"
+                  value={remotePort}
+                  onChange={(e) => setPreferences({ remotePort: parseInt(e.target.value) || 22 })}
+                  className="bg-sidebar border border-border rounded-lg p-2 font-mono focus:outline-none focus:border-accent"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="font-semibold text-gray-600 dark:text-zinc-400">Username</label>
+              <input
+                type="text"
+                value={remoteUser}
+                onChange={(e) => setPreferences({ remoteUser: e.target.value })}
+                placeholder="Administrator"
+                className="bg-sidebar border border-border rounded-lg p-2 font-mono focus:outline-none focus:border-accent"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="font-semibold text-gray-600 dark:text-zinc-400">Password</label>
+              <input
+                type="password"
+                value={remotePassword}
+                onChange={(e) => setRemotePassword(e.target.value)}
+                placeholder="(not saved)"
+                className="bg-sidebar border border-border rounded-lg p-2 font-mono focus:outline-none focus:border-accent"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="font-semibold text-gray-600 dark:text-zinc-400">Target DbgView.exe Path</label>
+              <input
+                type="text"
+                value={remoteDbgviewPath}
+                onChange={(e) => setPreferences({ remoteDbgviewPath: e.target.value })}
+                placeholder="C:\\Tools\\Dbgview.exe"
+                className="bg-sidebar border border-border rounded-lg p-2 font-mono focus:outline-none focus:border-accent"
+              />
+            </div>
+
+            {remoteError && (
+              <div className="text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-2 break-words">
+                {remoteError}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1 font-semibold">
+              <button
+                onClick={() => setIsRemoteOpen(false)}
+                className="px-3 py-2 border border-border rounded-lg hover:bg-hover transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={remoteConnecting}
+                onClick={async () => {
+                  setRemoteError(null);
+                  setRemoteConnecting(true);
+                  try {
+                    await startDbgviewRemote(remotePassword);
+                    setIsRemoteOpen(false);
+                    setRemotePassword('');
+                  } catch (err) {
+                    setRemoteError(String(err));
+                  } finally {
+                    setRemoteConnecting(false);
+                  }
+                }}
+                className="px-3 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {remoteConnecting ? 'Connecting…' : 'Connect'}
+              </button>
+            </div>
           </div>
         </div>
       )}

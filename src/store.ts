@@ -128,6 +128,11 @@ interface AppState {
   // Live streaming (opt-in feature)
   enableLiveStream: boolean;
   dbgviewPath: string;
+  // Remote capture settings (password is never persisted; passed per connect).
+  remoteHost: string;
+  remotePort: number;
+  remoteUser: string;
+  remoteDbgviewPath: string;
   liveSources: Record<string, LiveSourceMeta>;
   livePending: Record<string, LiveSourceMeta>;
   liveTailing: boolean;
@@ -135,6 +140,7 @@ interface AppState {
   liveCodesTick: number;
   startFileTail: (path: string) => Promise<void>;
   startDbgviewLocal: () => Promise<void>;
+  startDbgviewRemote: (password: string) => Promise<void>;
   stopStream: (sourceId: string) => Promise<void>;
   clearStream: (sourceId: string) => Promise<void>;
   setLiveTailing: (on: boolean) => void;
@@ -252,6 +258,10 @@ export const useStore = create<AppState>()(
   // Live streaming
   enableLiveStream: false,
   dbgviewPath: '',
+  remoteHost: '',
+  remotePort: 22,
+  remoteUser: '',
+  remoteDbgviewPath: '',
   liveSources: {},
   livePending: {},
   liveTailing: true,
@@ -390,6 +400,47 @@ export const useStore = create<AppState>()(
       await get().setActiveFile(sourceId);
     } catch (err) {
       console.error('Failed to start DbgView capture:', err);
+      set({ loading: false });
+      throw err;
+    }
+  },
+
+  startDbgviewRemote: async (password) => {
+    const { remoteHost, remotePort, remoteUser, remoteDbgviewPath } = get();
+    if (!remoteHost || !remoteUser || !remoteDbgviewPath) {
+      throw new Error('Remote host, user, and DbgView path are required');
+    }
+    set({ loading: true });
+    try {
+      const sourceId = await invoke<string>('start_dbgview_remote', {
+        config: {
+          host: remoteHost,
+          port: remotePort || 22,
+          user: remoteUser,
+          password,
+          dbgviewPath: remoteDbgviewPath,
+        },
+      });
+      set((s) => ({
+        liveSources: {
+          ...s.liveSources,
+          [sourceId]: {
+            path: `${remoteUser}@${remoteHost}`,
+            label: `DbgView @ ${remoteHost}`,
+            total: 0,
+            firstAbs: 0,
+            bufferLen: 0,
+            dropped: 0,
+          },
+        },
+        loadedFiles: s.loadedFiles.includes(sourceId) ? s.loadedFiles : [...s.loadedFiles, sourceId],
+        loading: false,
+        liveTailing: true,
+        livePaused: false,
+      }));
+      await get().setActiveFile(sourceId);
+    } catch (err) {
+      console.error('Failed to start remote DbgView capture:', err);
       set({ loading: false });
       throw err;
     }
@@ -1076,6 +1127,10 @@ export const useStore = create<AppState>()(
         recentFiles: state.recentFiles,
         enableLiveStream: state.enableLiveStream,
         dbgviewPath: state.dbgviewPath,
+        remoteHost: state.remoteHost,
+        remotePort: state.remotePort,
+        remoteUser: state.remoteUser,
+        remoteDbgviewPath: state.remoteDbgviewPath,
       }),
       onRehydrateStorage: () => (state) => {
         // Re-apply theme class to DOM after rehydration

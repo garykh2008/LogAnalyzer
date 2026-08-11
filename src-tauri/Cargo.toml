@@ -28,4 +28,6 @@ memmap2 = "0.9"
 encoding_rs = "0.8"
 rfd = "0.14"
 glob = "0.3"
+ssh2 = "0.9"
+base64 = "0.22"
 

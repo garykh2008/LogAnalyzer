@@ -8,17 +8,19 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use crate::engine::FilterItem;
+use crate::remote::{self, SshConfig};
 
 /// Max lines retained per live source. Bounds memory under continuous
 /// high-volume kernel logging; older lines are dropped from the front.
@@ -461,6 +463,187 @@ fn launch_elevated_watcher(ps1: &Path) -> Result<(), String> {
         return Err("Failed to launch elevated DbgView (UAC declined or blocked).".to_string());
     }
     Ok(())
+}
+
+fn strip_ansi(s: &str) -> String {
+    static ANSI_RE: OnceLock<Regex> = OnceLock::new();
+    let re = ANSI_RE.get_or_init(|| Regex::new(r"\x1b\[[0-9;?]*[ -/]*[@-~]").unwrap());
+    re.replace_all(s, "").into_owned()
+}
+
+fn ps_escape(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
+/// Config for remote kernel capture over SSH (DbgView on a target machine).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDbgConfig {
+    pub host: String,
+    pub port: Option<u16>,
+    pub user: String,
+    pub password: String,
+    pub dbgview_path: String,
+}
+
+/// Producer thread for a remote DbgView source: SSH to the target, run DbgView
+/// elevated (scheduled task, RunLevel Highest) logging to a temp file, then tail
+/// that file over SSH (`Get-Content -Wait`) and feed the engine. Cleans up on stop.
+fn spawn_ssh_dbgview(
+    app: AppHandle,
+    source_id: String,
+    cfg: SshConfig,
+    dbgview_path: String,
+    engine: Arc<Mutex<LiveEngine>>,
+    stop: Arc<AtomicBool>,
+) -> JoinHandle<()> {
+    std::thread::spawn(move || {
+        let sess = match remote::connect(&cfg) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Remote DbgView connect failed: {}", e);
+                return;
+            }
+        };
+
+        let safe = source_id.replace('-', "_");
+        let log = format!("C:\\Windows\\Temp\\loganalyzer_{}.log", safe);
+        let task = format!("LogAnalyzer_{}", safe);
+
+        let setup = format!(
+            "$ErrorActionPreference='SilentlyContinue'\n\
+             reg add \"HKCU\\Software\\Sysinternals\\DebugView\" /v EulaAccepted /t REG_DWORD /d 1 /f | Out-Null\n\
+             Get-Process Dbgview* | Stop-Process -Force\n\
+             Remove-Item -LiteralPath '{log}' -Force\n\
+             New-Item -ItemType File -Path '{log}' -Force | Out-Null\n\
+             Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false\n\
+             $a = New-ScheduledTaskAction -Execute '{dbg}' -Argument '/t /f /v /k /g /l \"{logq}\"'\n\
+             $p = New-ScheduledTaskPrincipal -UserId '{user}' -RunLevel Highest -LogonType Password\n\
+             $t = New-ScheduledTask -Action $a -Principal $p\n\
+             Register-ScheduledTask -TaskName '{task}' -InputObject $t -User '{user}' -Password '{pass}' -Force | Out-Null\n\
+             Start-ScheduledTask -TaskName '{task}'\n",
+            log = ps_escape(&log),
+            logq = log,
+            task = ps_escape(&task),
+            dbg = ps_escape(&dbgview_path),
+            user = ps_escape(&cfg.user),
+            pass = ps_escape(&cfg.password),
+        );
+        if let Err(e) = remote::run_ps(&sess, &setup) {
+            eprintln!("Remote DbgView setup failed: {}", e);
+        }
+
+        // Give the scheduled task a moment to launch DbgView.
+        std::thread::sleep(Duration::from_secs(2));
+
+        let stream_script = format!("Get-Content -LiteralPath '{}' -Wait -Tail 0", ps_escape(&log));
+        let mut ch = match sess.channel_session() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Remote stream channel failed: {}", e);
+                return;
+            }
+        };
+        if ch.exec(&remote::ps_command(&stream_script)).is_err() {
+            return;
+        }
+
+        sess.set_blocking(false);
+        let mut carry = String::new();
+        let mut buf = [0u8; 8192];
+
+        while !stop.load(Ordering::Relaxed) {
+            match ch.read(&mut buf) {
+                Ok(0) => {
+                    if ch.eof() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Ok(n) => {
+                    carry.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    let mut parts: Vec<&str> = carry.split('\n').collect();
+                    let last = parts.pop().unwrap_or("").to_string();
+                    let batch: Vec<String> = parts
+                        .into_iter()
+                        .map(|p| strip_ansi(p.trim_end_matches('\r')))
+                        .collect();
+                    carry = last;
+
+                    if !batch.is_empty() {
+                        let delta = {
+                            let mut eng = match engine.lock() {
+                                Ok(e) => e,
+                                Err(_) => break,
+                            };
+                            let (added, trimmed) = eng.append(batch);
+                            eng.make_delta(&source_id, added, trimmed)
+                        };
+                        let _ = app.emit("stream-appended", delta);
+                    }
+                }
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(_) => break,
+            }
+        }
+
+        // Cleanup: stop DbgView and remove the task/log on the target.
+        sess.set_blocking(true);
+        let cleanup = format!(
+            "$ErrorActionPreference='SilentlyContinue'\n\
+             Get-Process Dbgview* | Stop-Process -Force\n\
+             Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false\n\
+             Remove-Item -LiteralPath '{log}' -Force\n",
+            task = ps_escape(&task),
+            log = ps_escape(&log),
+        );
+        let _ = remote::run_ps(&sess, &cleanup);
+    })
+}
+
+/// Start remote kernel-mode capture over SSH.
+#[tauri::command]
+pub fn start_dbgview_remote(
+    app: AppHandle,
+    state: tauri::State<'_, StreamState>,
+    config: RemoteDbgConfig,
+) -> Result<String, String> {
+    let cfg = SshConfig {
+        host: config.host,
+        port: config.port.unwrap_or(22),
+        user: config.user,
+        password: config.password,
+    };
+
+    // Validate connectivity/credentials up front so the UI gets an error.
+    let test = remote::connect(&cfg)?;
+    drop(test);
+
+    let source_id = state.next_id();
+    let engine = Arc::new(Mutex::new(LiveEngine::new(RING_CAP)));
+    let stop = Arc::new(AtomicBool::new(false));
+    let handle = spawn_ssh_dbgview(
+        app,
+        source_id.clone(),
+        cfg,
+        config.dbgview_path,
+        Arc::clone(&engine),
+        Arc::clone(&stop),
+    );
+
+    let mut sources = state.sources.write().map_err(|e| e.to_string())?;
+    sources.insert(
+        source_id.clone(),
+        LiveSource {
+            engine,
+            stop,
+            handle: Some(handle),
+            stop_file: None,
+        },
+    );
+    Ok(source_id)
 }
 
 /// Start local kernel-mode capture with a user-provided DbgView.exe.

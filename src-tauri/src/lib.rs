@@ -1,5 +1,6 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod engine;
+mod remote;
 mod stream;
 
 use std::collections::HashMap;
@@ -245,6 +246,7 @@ pub fn run() {
             delete_file,
             stream::start_file_tail,
             stream::start_dbgview_local,
+            stream::start_dbgview_remote,
             stream::stop_stream,
             stream::clear_stream,
             stream::set_stream_filters,
