@@ -436,6 +436,13 @@ pub fn start_file_tail(
 /// Build the elevated PowerShell watcher: it accepts the EULA, kills any stale
 /// DbgView, launches DbgView with kernel capture logging to `log`, then waits
 /// for `stop` to appear (written by the app) before terminating DbgView.
+///
+/// NB: we deliberately do NOT pass `/g` (Capture Global Win32 / session 0). That
+/// switch makes DebugView the global `OutputDebugString` reader, which forces
+/// every session-0 process (services) to synchronize on the DBWIN protocol and
+/// wait for our hidden, file-logging instance to drain each call — throttling
+/// user-mode debuggers/services (e.g. socket-based test harnesses) and hanging
+/// them. Kernel capture (`/k`) uses the Dbgv.sys driver and is unaffected by it.
 #[cfg(target_os = "windows")]
 fn build_watcher_script(dbgview: &str, log: &Path, stop: &Path) -> String {
     let esc = |s: &str| s.replace('\'', "''");
@@ -443,7 +450,7 @@ fn build_watcher_script(dbgview: &str, log: &Path, stop: &Path) -> String {
         "$ErrorActionPreference='SilentlyContinue'\n\
          reg add \"HKCU\\Software\\Sysinternals\\DebugView\" /v EulaAccepted /t REG_DWORD /d 1 /f | Out-Null\n\
          Get-Process Dbgview* | Stop-Process -Force\n\
-         Start-Process -FilePath '{dbg}' -ArgumentList '/t','/f','/v','/k','/g','/l','{log}'\n\
+         Start-Process -FilePath '{dbg}' -ArgumentList '/t','/f','/v','/k','/l','{log}'\n\
          while (-not (Test-Path -LiteralPath '{stop}')) {{ Start-Sleep -Milliseconds 300 }}\n\
          Get-Process Dbgview* | Stop-Process -Force\n\
          Remove-Item -LiteralPath '{stop}' -Force\n",
@@ -534,7 +541,7 @@ fn spawn_ssh_dbgview(
              Remove-Item -LiteralPath '{log}' -Force\n\
              New-Item -ItemType File -Path '{log}' -Force | Out-Null\n\
              Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false\n\
-             $a = New-ScheduledTaskAction -Execute '{dbg}' -Argument '/t /f /v /k /g /l \"{logq}\"'\n\
+             $a = New-ScheduledTaskAction -Execute '{dbg}' -Argument '/t /f /v /k /l \"{logq}\"'\n\
              $p = New-ScheduledTaskPrincipal -UserId '{user}' -RunLevel Highest -LogonType Password\n\
              $t = New-ScheduledTask -Action $a -Principal $p\n\
              Register-ScheduledTask -TaskName '{task}' -InputObject $t -User '{user}' -Password '{pass}' -Force | Out-Null\n\

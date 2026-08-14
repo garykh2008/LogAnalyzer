@@ -84,6 +84,12 @@ can't be verified headlessly — ask the user to test those.
 - **Pause** freezes the active live view by stashing deltas in `livePending`; **resume**
   flushes and re-syncs `filteredIndices`. **Clear** wipes the ring buffer and resets the list.
 - Secrets: SSH **password is never persisted** (host/user/port/path are).
+- **DbgView args — never add `/g`** (Capture Global Win32 / session 0). It makes our
+  hidden, file-logging DebugView the global `OutputDebugString` reader, so every
+  session-0 process must synchronize on the DBWIN protocol and wait for us to drain
+  each call — this throttles/hangs socket-based test harnesses (win_ca/win_dut). Kernel
+  capture (`/k`, via Dbgv.sys) needs nothing from `/g`. Launch args live in
+  `build_watcher_script` (local) and `spawn_ssh_dbgview` (remote) in `stream.rs`.
 
 ## Conventions
 
