@@ -154,6 +154,7 @@ interface AppState {
   clearSelection: () => void;
   selectAll: () => void;
   copySelection: () => Promise<void>;
+  saveLog: () => Promise<boolean>;
 
   // Search
   searchQuery: string;
@@ -629,6 +630,44 @@ export const useStore = create<AppState>()(
       await navigator.clipboard.writeText(clipboardText);
     } catch (err) {
       console.error('Copy failed:', err);
+    }
+  },
+
+  // Save the current view to a file. For live sources this dumps the retained
+  // ring buffer (the only place captured lines live); for static files it
+  // exports the current view. In both cases, when a display list is active
+  // (Filtered View or an exclude filter) only the visible lines are written.
+  saveLog: async () => {
+    const { activeFile, liveSources, filteredIndices } = get();
+    if (!activeFile) return false;
+    const isLive = !!liveSources[activeFile];
+    const rawBase = isLive
+      ? (liveSources[activeFile].label || 'capture')
+      : (activeFile.split(/[/\\]/).pop() || 'log').replace(/\.[^.]*$/, '');
+    // Sanitize into a safe file name.
+    const base = rawBase.replace(/[<>:"/\\|?*]+/g, '_').trim() || 'log';
+    const defaultName = `${base}-export.log`;
+    try {
+      const path = await invoke<string | null>('save_file_dialog', { defaultName, extension: 'log' });
+      if (!path) return false;
+      if (isLive) {
+        await invoke('save_stream', {
+          sourceId: activeFile,
+          path,
+          filteredOnly: filteredIndices !== null,
+        });
+      } else {
+        // Empty indices => the backend writes the whole file (full view).
+        await invoke('save_log', {
+          filepath: activeFile,
+          path,
+          indices: filteredIndices ?? [],
+        });
+      }
+      return true;
+    } catch (err) {
+      console.error('Save log failed:', err);
+      return false;
     }
   },
 

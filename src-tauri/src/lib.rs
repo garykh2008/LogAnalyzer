@@ -47,6 +47,21 @@ fn get_lines(state: State<'_, AppState>, filepath: String, indices: Vec<usize>) 
     Ok(lines)
 }
 
+/// Save a static log to `path`. An empty `indices` writes the whole file (full
+/// view); otherwise only the given display lines are written (filtered view).
+#[tauri::command]
+fn save_log(state: State<'_, AppState>, filepath: String, path: String, indices: Vec<usize>) -> Result<usize, String> {
+    let engines = state.engines.read().map_err(|e| e.to_string())?;
+    let engine = engines.get(&filepath).ok_or_else(|| "Log file not loaded".to_string())?;
+
+    let lines: Vec<String> = if indices.is_empty() {
+        (0..engine.line_count()).map(|i| engine.get_line(i)).collect()
+    } else {
+        indices.iter().map(|&i| engine.get_line(i)).collect()
+    };
+    crate::stream::write_lines(&path, &lines)
+}
+
 #[tauri::command]
 fn search_log(state: State<'_, AppState>, filepath: String, query: String, is_regex: bool, case_sensitive: bool) -> Result<Vec<usize>, String> {
     let engines = state.engines.read().map_err(|e| e.to_string())?;
@@ -235,6 +250,7 @@ pub fn run() {
             load_log,
             close_log,
             get_lines,
+            save_log,
             search_log,
             filter_log,
             open_file_dialog,
@@ -252,7 +268,8 @@ pub fn run() {
             stream::set_stream_filters,
             stream::get_stream_lines,
             stream::get_stream_codes,
-            stream::get_stream_filtered
+            stream::get_stream_filtered,
+            stream::save_stream
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

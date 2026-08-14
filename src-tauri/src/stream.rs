@@ -224,6 +224,23 @@ impl LiveEngine {
         self.filtered_abs.iter().copied().collect()
     }
 
+    /// Snapshot of the retained lines for saving to disk. When `filtered_only`
+    /// and a display list is tracked, emit only the currently visible lines;
+    /// otherwise emit the whole retained buffer.
+    fn dump(&self, filtered_only: bool) -> Vec<String> {
+        if filtered_only && self.tracking_needed() {
+            self.filtered_abs
+                .iter()
+                .filter_map(|&abs| {
+                    let rel = abs.checked_sub(self.first_abs)?;
+                    self.lines.get(rel).cloned()
+                })
+                .collect()
+        } else {
+            self.lines.iter().cloned().collect()
+        }
+    }
+
     fn line_at(&self, abs: usize) -> String {
         if abs >= self.first_abs && abs < self.first_abs + self.lines.len() {
             self.lines[abs - self.first_abs].clone()
@@ -754,4 +771,30 @@ pub fn get_stream_codes(
     indices: Vec<usize>,
 ) -> Result<Vec<u8>, String> {
     state.with_engine(&source_id, |eng| indices.iter().map(|&i| eng.code_at(i)).collect())
+}
+
+/// Write log lines to `path`, one per line with a normalized `\n` terminator.
+/// Shared by the live (`save_stream`) and static (`save_log`) save paths.
+pub fn write_lines(path: &str, lines: &[String]) -> Result<usize, String> {
+    use std::io::{BufWriter, Write};
+    let file = File::create(path).map_err(|e| e.to_string())?;
+    let mut w = BufWriter::new(file);
+    for line in lines {
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        writeln!(w, "{}", trimmed).map_err(|e| e.to_string())?;
+    }
+    w.flush().map_err(|e| e.to_string())?;
+    Ok(lines.len())
+}
+
+/// Save a live source's retained buffer to a file. Returns the line count written.
+#[tauri::command]
+pub fn save_stream(
+    state: tauri::State<'_, StreamState>,
+    source_id: String,
+    path: String,
+    filtered_only: bool,
+) -> Result<usize, String> {
+    let lines = state.with_engine(&source_id, |eng| eng.dump(filtered_only))?;
+    write_lines(&path, &lines)
 }

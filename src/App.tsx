@@ -34,6 +34,7 @@ export default function App() {
   const setSelectedLine = useStore((s) => s.setSelectedLine);
   const selectedLines = useStore((s) => s.selectedLines);
   const copySelection = useStore((s) => s.copySelection);
+  const saveLog = useStore((s) => s.saveLog);
   const selectAll = useStore((s) => s.selectAll);
   const filters = useStore((s) => s.filters);
   const showFilteredOnly = useStore((s) => s.showFilteredOnly);
@@ -629,6 +630,20 @@ export default function App() {
                       )}
                     </div>
                   </div>
+                  {activeFile && (
+                    <>
+                      <div className="h-[1px] bg-border my-1" />
+                      <button
+                        onClick={async () => {
+                          setActiveMenu(null);
+                          await saveLog();
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-hover transition-colors"
+                      >
+                        Save Log As...
+                      </button>
+                    </>
+                  )}
                   <div className="h-[1px] bg-border my-1" />
                   <button
                     onClick={() => importFilters()}

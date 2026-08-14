@@ -50,6 +50,10 @@ can't be verified headlessly — ask the user to test those.
   filepath) and *live* streams (`start_file_tail` / `start_dbgview_local` /
   `start_dbgview_remote`, keyed by a synthetic `sourceId` like `stream-3`). `activeFile`
   holds either a filepath or a sourceId; `liveSources[activeFile]` tells them apart.
+  **Any command that touches line content must branch on the source kind**: e.g.
+  `copySelection` / `saveLog` route to `get_stream_lines` / `save_stream` for live
+  sources and `get_lines` / `save_log` for static ones — using the wrong one against a
+  sourceId fails with "Log file not loaded".
 - **`filteredIndices`** = "the display index list for the current view, or `null` for
   identity (show every line)". The viewport maps display slot → raw/absolute line
   through it. It is set whenever lines are hidden: **Filtered View** (`showFilteredOnly`)
