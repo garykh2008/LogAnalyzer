@@ -34,6 +34,7 @@ export default function App() {
   const setSelectedLine = useStore((s) => s.setSelectedLine);
   const selectedLines = useStore((s) => s.selectedLines);
   const copySelection = useStore((s) => s.copySelection);
+  const selectAll = useStore((s) => s.selectAll);
   const filters = useStore((s) => s.filters);
   const showFilteredOnly = useStore((s) => s.showFilteredOnly);
   const toggleShowFilteredOnly = useStore((s) => s.toggleShowFilteredOnly);
@@ -141,6 +142,11 @@ export default function App() {
       if (e.ctrlKey && e.key.toLowerCase() === 'c' && !isInputFocused) {
         e.preventDefault();
         await copySelection();
+      }
+      // 1.5. Ctrl+A -> Select all lines in the current view
+      else if (e.ctrlKey && e.key.toLowerCase() === 'a' && !isInputFocused) {
+        e.preventDefault();
+        selectAll();
       }
       // 2. Ctrl+O -> Open File
       else if (e.ctrlKey && e.key.toLowerCase() === 'o') {
@@ -253,7 +259,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleGlobalKeys);
     return () => window.removeEventListener('keydown', handleGlobalKeys);
-  }, [lineCount, loadLog, toggleShowFilteredOnly, setSelectedLine, selectedLine, selectedLines, copySelection, activeFile, notes, nextSearchMatch, prevSearchMatch, navigateFilterHit, setIsShortcutsOpen, saveNotes]);
+  }, [lineCount, loadLog, toggleShowFilteredOnly, setSelectedLine, selectedLine, selectedLines, copySelection, selectAll, activeFile, notes, nextSearchMatch, prevSearchMatch, navigateFilterHit, setIsShortcutsOpen, saveNotes]);
 
   // Handle active menu closures
   useEffect(() => {
@@ -690,6 +696,16 @@ export default function App() {
                   >
                     <span>Copy Selected Lines</span>
                     <span className="ui-text-xs text-gray-400 font-mono">Ctrl+C</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      selectAll();
+                      setActiveMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Select All Lines</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">Ctrl+A</span>
                   </button>
                   <div className="h-[1px] bg-border my-1" />
                   <button
@@ -1367,6 +1383,9 @@ export default function App() {
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Add/Edit Note at Current Line</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">C</td></tr>
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Remove Note at Current Line</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Delete</td></tr>
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Copy Selection</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + C</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Select All Lines</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + A</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Extend Selection (Range)</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Shift + Click</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Toggle Line in Selection</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + Click</td></tr>
                     </tbody>
                   </table>
                 </div>

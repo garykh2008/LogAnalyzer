@@ -100,6 +100,9 @@ separate step, not handled by this script.)
 | `Ctrl + H` | Toggle Filter Mode |
 | `Ctrl + V` | Paste Clipboard as New Tab |
 | `Ctrl + C` | Copy Selected Lines |
+| `Ctrl + A` | Select All Lines (current view) |
+| `Shift + Click` | Extend selection (range) |
+| `Ctrl + Click` | Toggle a line in the selection |
 | `Ctrl + Shift + L` | Toggle Log Files Panel |
 | `Ctrl + Shift + F` | Toggle Filters Panel |
 | `Ctrl + Shift + N` | Toggle Notes Panel |

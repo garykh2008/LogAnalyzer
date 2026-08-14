@@ -150,8 +150,9 @@ interface AppState {
   // Selection
   selectedLine: number | null;
   selectedLines: number[];
-  setSelectedLine: (line: number | null, isMulti?: boolean) => void;
+  setSelectedLine: (line: number | null, isMulti?: boolean, isRange?: boolean) => void;
   clearSelection: () => void;
+  selectAll: () => void;
   copySelection: () => Promise<void>;
 
   // Search
@@ -546,10 +547,37 @@ export const useStore = create<AppState>()(
   // Selection
   selectedLine: null,
   selectedLines: [],
-  setSelectedLine: (line, isMulti = false) => {
-    const { selectedLines, showFilteredOnly, filteredIndices } = get();
+  setSelectedLine: (line, isMulti = false, isRange = false) => {
+    const { selectedLines, selectedLine, showFilteredOnly, filteredIndices } = get();
     if (line === null) {
       set({ selectedLine: null, selectedLines: [] });
+      return;
+    }
+
+    // Range (Shift): select everything between the anchor (last plain/ctrl click)
+    // and the target, in *display* order — a contiguous slice of the display list
+    // (or a contiguous raw/absolute range in identity view). The anchor stays put
+    // so repeated shift-clicks re-extend from the same origin (Windows behavior).
+    if (isRange && selectedLine !== null && selectedLine !== line) {
+      let range: number[];
+      if (filteredIndices) {
+        const ia = filteredIndices.indexOf(selectedLine);
+        const ib = filteredIndices.indexOf(line);
+        if (ia === -1 || ib === -1) {
+          range = [line];
+        } else {
+          const [lo, hi] = ia < ib ? [ia, ib] : [ib, ia];
+          range = filteredIndices.slice(lo, hi + 1);
+        }
+      } else {
+        // Identity view (static full log, or live full buffer): raw/absolute
+        // indices are contiguous in display order.
+        const lo = Math.min(selectedLine, line);
+        const hi = Math.max(selectedLine, line);
+        range = [];
+        for (let i = lo; i <= hi; i++) range.push(i);
+      }
+      set({ selectedLines: range });
       return;
     }
 
@@ -569,12 +597,34 @@ export const useStore = create<AppState>()(
     }
   },
   clearSelection: () => set({ selectedLine: null, selectedLines: [] }),
+  // Select every line in the current display view (Ctrl+A). Operates in display
+  // space so it respects Filtered View / exclude filters, for static and live alike.
+  selectAll: () => {
+    const { activeFile, filteredIndices, liveSources, lineCount } = get();
+    if (!activeFile) return;
+    let all: number[];
+    if (filteredIndices) {
+      all = [...filteredIndices];
+    } else {
+      const live = liveSources[activeFile];
+      if (live) {
+        all = Array.from({ length: live.bufferLen }, (_, i) => live.firstAbs + i);
+      } else {
+        all = Array.from({ length: lineCount }, (_, i) => i);
+      }
+    }
+    set({ selectedLines: all, selectedLine: all.length > 0 ? all[all.length - 1] : null });
+  },
   copySelection: async () => {
-    const { selectedLines, activeFile } = get();
+    const { selectedLines, activeFile, liveSources } = get();
     if (selectedLines.length === 0 || !activeFile) return;
     const sorted = [...selectedLines].sort((a, b) => a - b);
     try {
-      const lines = await invoke<string[]>('get_lines', { filepath: activeFile, indices: sorted });
+      // Live sources hold lines in the streaming ring buffer (keyed by absolute
+      // index), not the static engine — route the fetch accordingly.
+      const lines = liveSources[activeFile]
+        ? await invoke<string[]>('get_stream_lines', { sourceId: activeFile, indices: sorted })
+        : await invoke<string[]>('get_lines', { filepath: activeFile, indices: sorted });
       const clipboardText = lines.map(l => l.replace(/[\r\n]+$/, '')).join('\n');
       await navigator.clipboard.writeText(clipboardText);
     } catch (err) {

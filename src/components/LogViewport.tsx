@@ -261,7 +261,7 @@ export const LogViewport: React.FC = () => {
   // Selection click handler (prevents jump)
   const handleLineClick = (rawIdx: number, e: React.MouseEvent) => {
     setIsManualSelection(true);
-    setSelectedLine(rawIdx, e.ctrlKey || e.shiftKey);
+    setSelectedLine(rawIdx, e.ctrlKey, e.shiftKey);
   };
 
   // Sync scrollbar position (only for search results jumps or non-manual anchors)
@@ -457,7 +457,11 @@ export const LogViewport: React.FC = () => {
 
   const handleContextMenu = (e: React.MouseEvent, line: number) => {
     e.preventDefault();
-    setSelectedLine(line, e.ctrlKey || e.shiftKey);
+    // Right-clicking an unselected line selects it; right-clicking within an
+    // existing (multi/range) selection keeps it so the copy targets everything.
+    if (!selectedLines.includes(line)) {
+      setSelectedLine(line, e.ctrlKey, e.shiftKey);
+    }
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
