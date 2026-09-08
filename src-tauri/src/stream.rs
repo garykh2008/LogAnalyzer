@@ -285,25 +285,51 @@ pub struct StreamDelta {
     pub filtered_trimmed: usize,
 }
 
-/// A running live source: its engine plus a stop flag and producer thread.
+/// A running live source: its engine plus a stop flag, pause flag, and
+/// producer thread.
 pub struct LiveSource {
     pub engine: Arc<Mutex<LiveEngine>>,
     stop: Arc<AtomicBool>,
+    /// When set, the producer stops feeding the engine (see
+    /// `set_stream_paused`): the ring buffer freezes so nothing is evicted
+    /// underneath a paused view, and the producer resumes from its saved
+    /// position with no data lost.
+    paused: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     /// For DbgView sources: writing this file signals the elevated watcher to
     /// terminate DbgView and clean up (see `start_dbgview_local`).
     stop_file: Option<PathBuf>,
+    /// Temp files owned by this source (e.g. the local watch script + log
+    /// path). Removed best-effort once the source is stopped.
+    cleanup_files: Vec<PathBuf>,
 }
 
 impl LiveSource {
     fn stop(&mut self) {
         // Signal the elevated watcher (if any) before stopping the tail thread.
         if let Some(sf) = &self.stop_file {
-            let _ = std::fs::write(sf, b"stop");
+            if std::fs::write(sf, b"stop").is_ok() {
+                // Wait (bounded) for the elevated watcher to kill DbgView and
+                // consume the stop file, so a quick stop -> start can't overlap
+                // two DbgView instances writing logs (which produces gaps).
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                while std::time::Instant::now() < deadline && sf.exists() {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
         }
         self.stop.store(true, Ordering::Relaxed);
         if let Some(h) = self.handle.take() {
             let _ = h.join();
+        }
+        // Remove our own artifacts now that DbgView is gone and the tail
+        // thread is joined (best-effort; the watcher already removed the stop
+        // file, log / script may still be on disk).
+        for p in self.cleanup_files.drain(..) {
+            let _ = std::fs::remove_file(p);
+        }
+        if let Some(sf) = &self.stop_file {
+            let _ = std::fs::remove_file(sf);
         }
     }
 }
@@ -312,19 +338,47 @@ impl LiveSource {
 pub struct StreamState {
     sources: RwLock<HashMap<String, LiveSource>>,
     seq: AtomicU64,
+    /// Boot-stability salt so per-run temp paths / task names never collide
+    /// across app launches (a stale elevated DbgView from a previous run can
+    /// otherwise keep writing to a file a fresh capture also reuses).
+    run_id: String,
 }
 
 impl StreamState {
     pub fn new() -> Self {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let run_nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        // `run_id` is only used to build per-run unique names, so the
+        // sanitized current time is sufficient (trailing digits stay intact).
+        let run_id: String = run_nanos.to_string().chars().filter(|c| c.is_ascii_alphanumeric()).collect();
         StreamState {
             sources: RwLock::new(HashMap::new()),
             seq: AtomicU64::new(0),
+            run_id,
         }
     }
 
     fn next_id(&self) -> String {
         let n = self.seq.fetch_add(1, Ordering::Relaxed);
-        format!("stream-{}", n)
+        format!("stream-{}-{}", self.run_id, n)
+    }
+
+    /// Stop every live source: write the DbgView stop files, join the producer
+    /// threads, and remove temp files. Invoked on app exit so an app restart no
+    /// longer leaks an elevated DbgView (or orphaned remote task) that keeps
+    /// capturing.
+    pub fn shutdown(&self) {
+        let mut sources = match self.sources.write() {
+            Ok(w) => w,
+            Err(_) => return,
+        };
+        let mut stopped: Vec<LiveSource> = sources.drain().map(|(_, s)| s).collect();
+        for src in stopped.iter_mut() {
+            src.stop();
+        }
     }
 
     fn with_engine<T>(&self, source_id: &str, f: impl FnOnce(&mut LiveEngine) -> T) -> Result<T, String> {
@@ -335,49 +389,69 @@ impl StreamState {
     }
 }
 
+/// A file-tail producer whose `offset`/`carry` are re-openable, so the
+/// producer may be paused (skipping its reads) and resumed without losing or
+/// duplicating data.
+struct TailPos {
+    offset: u64,
+    carry: String,
+}
+
 /// Spawn the generic file-tail producer: poll the file, read newly appended
 /// bytes, split into lines, append to the engine, and emit a delta per batch.
+/// While `paused` is set the producer skips reads entirely (the ring buffer
+/// freezes); on resume it picks up exactly where it left off.
 fn spawn_file_tail(
     app: AppHandle,
     source_id: String,
     path: String,
     engine: Arc<Mutex<LiveEngine>>,
     stop: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
-        let mut offset: u64 = 0;
-        let mut carry = String::new();
+        let mut pos = TailPos { offset: 0, carry: String::new() };
 
         while !stop.load(Ordering::Relaxed) {
+            // Paused: keep sleeping until resumed or stopped. The producer must
+            // NOT treat "still paused" as a stop signal — otherwise pausing for
+            // longer than one sleep window would kill the thread permanently
+            // and resume (start) would never capture again.
+            while paused.load(Ordering::Relaxed) {
+                if stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(POLL_MS / 8));
+            }
             if let Ok(mut f) = File::open(&path) {
                 let len = f.metadata().map(|m| m.len()).unwrap_or(0);
 
                 // File shrank (truncated/rotated) -> restart from the top.
-                if len < offset {
-                    offset = 0;
-                    carry.clear();
+                if len < pos.offset {
+                    pos.offset = 0;
+                    pos.carry.clear();
                 }
 
-                if len > offset {
-                    if f.seek(SeekFrom::Start(offset)).is_ok() {
-                        let to_read = (len - offset) as usize;
+                if len > pos.offset {
+                    if f.seek(SeekFrom::Start(pos.offset)).is_ok() {
+                        let to_read = (len - pos.offset) as usize;
                         let mut buf = vec![0u8; to_read];
                         if let Ok(n) = f.read(&mut buf) {
                             buf.truncate(n);
-                            offset += n as u64;
+                            pos.offset += n as u64;
 
                             // NOTE (M1): UTF-8 lossy decode. Encoding detection
                             // (DbgView output can be ANSI/OEM) comes in a later pass.
-                            carry.push_str(&String::from_utf8_lossy(&buf));
+                            pos.carry.push_str(&String::from_utf8_lossy(&buf));
 
                             // Split complete lines; keep the trailing partial line.
-                            let mut parts: Vec<&str> = carry.split('\n').collect();
+                            let mut parts: Vec<&str> = pos.carry.split('\n').collect();
                             let last = parts.pop().unwrap_or("").to_string();
                             let batch: Vec<String> = parts
                                 .into_iter()
                                 .map(|p| p.trim_end_matches('\r').to_string())
                                 .collect();
-                            carry = last;
+                            pos.carry = last;
 
                             if !batch.is_empty() {
                                 let delta = {
@@ -411,6 +485,7 @@ pub fn start_file_tail(
     let source_id = state.next_id();
     let engine = Arc::new(Mutex::new(LiveEngine::new(RING_CAP)));
     let stop = Arc::new(AtomicBool::new(false));
+    let paused = Arc::new(AtomicBool::new(false));
 
     let handle = spawn_file_tail(
         app,
@@ -418,6 +493,7 @@ pub fn start_file_tail(
         path,
         Arc::clone(&engine),
         Arc::clone(&stop),
+        Arc::clone(&paused),
     );
 
     let mut sources = state.sources.write().map_err(|e| e.to_string())?;
@@ -426,8 +502,10 @@ pub fn start_file_tail(
         LiveSource {
             engine,
             stop,
+            paused,
             handle: Some(handle),
             stop_file: None,
+            cleanup_files: Vec::new(),
         },
     );
     Ok(source_id)
@@ -520,6 +598,7 @@ fn spawn_ssh_dbgview(
     dbgview_path: String,
     engine: Arc<Mutex<LiveEngine>>,
     stop: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let sess = match remote::connect(&cfg) {
@@ -534,10 +613,20 @@ fn spawn_ssh_dbgview(
         let log = format!("C:\\Windows\\Temp\\loganalyzer_{}.log", safe);
         let task = format!("LogAnalyzer_{}", safe);
 
+        // Remove any scheduled tasks left behind by older/aborted capture
+        // sessions (name changed across runs, so stale tasks from before this
+        // fix are still named `LogAnalyzer_stream-<n>`), then clear DbgView so
+        // the new capture starts from a single instance.
+        let sweep = format!(
+            "$ErrorActionPreference='SilentlyContinue'\n\
+             Get-ScheduledTask -TaskName 'LogAnalyzer_*' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false\n\
+             Get-Process Dbgview* -ErrorAction SilentlyContinue | Stop-Process -Force",
+        );
+        let _ = remote::run_ps(&sess, &sweep);
+
         let setup = format!(
             "$ErrorActionPreference='SilentlyContinue'\n\
              reg add \"HKCU\\Software\\Sysinternals\\DebugView\" /v EulaAccepted /t REG_DWORD /d 1 /f | Out-Null\n\
-             Get-Process Dbgview* | Stop-Process -Force\n\
              Remove-Item -LiteralPath '{log}' -Force\n\
              New-Item -ItemType File -Path '{log}' -Force | Out-Null\n\
              Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false\n\
@@ -577,6 +666,14 @@ fn spawn_ssh_dbgview(
         let mut buf = [0u8; 8192];
 
         while !stop.load(Ordering::Relaxed) {
+            // While paused, don't drain the SSH stream: buffering new remote
+            // lines and then flushing them all at once on resume would overflow
+            // the 500k ring (evicting the lines the user paused to read). The
+            // remote `Get-Content -Wait` just keeps writing to the tail file.
+            if paused.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(POLL_MS / 8));
+                continue;
+            }
             match ch.read(&mut buf) {
                 Ok(0) => {
                     if ch.eof() {
@@ -648,6 +745,7 @@ pub fn start_dbgview_remote(
     let source_id = state.next_id();
     let engine = Arc::new(Mutex::new(LiveEngine::new(RING_CAP)));
     let stop = Arc::new(AtomicBool::new(false));
+    let paused = Arc::new(AtomicBool::new(false));
     let handle = spawn_ssh_dbgview(
         app,
         source_id.clone(),
@@ -655,6 +753,7 @@ pub fn start_dbgview_remote(
         config.dbgview_path,
         Arc::clone(&engine),
         Arc::clone(&stop),
+        Arc::clone(&paused),
     );
 
     let mut sources = state.sources.write().map_err(|e| e.to_string())?;
@@ -663,8 +762,10 @@ pub fn start_dbgview_remote(
         LiveSource {
             engine,
             stop,
+            paused,
             handle: Some(handle),
             stop_file: None,
+            cleanup_files: Vec::new(),
         },
     );
     Ok(source_id)
@@ -699,6 +800,7 @@ pub fn start_dbgview_local(
         let _ = std::fs::remove_file(&log);
         let _ = std::fs::remove_file(&stop);
         std::fs::write(&log, b"").map_err(|e| e.to_string())?;
+        let cleanup_files = vec![log.clone(), ps1.clone()];
 
         std::fs::write(&ps1, build_watcher_script(&dbgview_path, &log, &stop))
             .map_err(|e| e.to_string())?;
@@ -707,12 +809,14 @@ pub fn start_dbgview_local(
 
         let engine = Arc::new(Mutex::new(LiveEngine::new(RING_CAP)));
         let stop_flag = Arc::new(AtomicBool::new(false));
+        let paused = Arc::new(AtomicBool::new(false));
         let handle = spawn_file_tail(
             app,
             source_id.clone(),
             log.to_string_lossy().to_string(),
             Arc::clone(&engine),
             Arc::clone(&stop_flag),
+            Arc::clone(&paused),
         );
 
         let mut sources = state.sources.write().map_err(|e| e.to_string())?;
@@ -721,8 +825,10 @@ pub fn start_dbgview_local(
             LiveSource {
                 engine,
                 stop: stop_flag,
+                paused,
                 handle: Some(handle),
                 stop_file: Some(stop),
+                cleanup_files,
             },
         );
         Ok(source_id)
@@ -752,6 +858,22 @@ pub fn set_stream_filters(
 ) -> Result<(), String> {
     let compiled = compile_filters(&filters)?;
     state.with_engine(&source_id, move |eng| eng.set_filters(compiled, show_filtered_only))
+}
+
+/// Pause / resume a live source's producer (see `LiveSource::paused`). Pausing
+/// is per-source, so only the source currently on screen freezes.
+#[tauri::command]
+pub fn set_stream_paused(
+    state: tauri::State<'_, StreamState>,
+    source_id: String,
+    paused: bool,
+) -> Result<(), String> {
+    let sources = state.sources.read().map_err(|e| e.to_string())?;
+    let src = sources
+        .get(&source_id)
+        .ok_or_else(|| "Stream not found".to_string())?;
+    src.paused.store(paused, Ordering::Relaxed);
+    Ok(())
 }
 
 #[tauri::command]

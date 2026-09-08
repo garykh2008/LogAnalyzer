@@ -5,7 +5,7 @@ mod stream;
 
 use std::collections::HashMap;
 use std::sync::RwLock;
-use tauri::{State, Emitter};
+use tauri::{State, Emitter, Manager};
 use crate::engine::{LogEngine, FilterItem};
 use crate::stream::StreamState;
 
@@ -219,6 +219,16 @@ pub fn run() {
         })
         .manage(StreamState::new())
         .plugin(tauri_plugin_opener::init())
+        .on_window_event(|window, event| {
+            // On app exit, stop every live source so a stale elevated DbgView
+            // (or remote scheduled task) doesn't survive and keep capturing to
+            // a log file a future run would reuse (causing interleaved gaps).
+            if let tauri::WindowEvent::Destroyed = event {
+                if let Some(stream) = window.app_handle().try_state::<StreamState>() {
+                    stream.shutdown();
+                }
+            }
+        })
         .setup(move |app| {
             let has_logs = !cli.log_files.is_empty();
             let has_filter = cli.filter_file.is_some();
@@ -265,6 +275,7 @@ pub fn run() {
             stream::start_dbgview_remote,
             stream::stop_stream,
             stream::clear_stream,
+            stream::set_stream_paused,
             stream::set_stream_filters,
             stream::get_stream_lines,
             stream::get_stream_codes,

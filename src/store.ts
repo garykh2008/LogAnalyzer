@@ -473,10 +473,18 @@ export const useStore = create<AppState>()(
 
   setLivePaused: (paused) => {
     set({ livePaused: paused });
+    const s = get();
+    const id = s.activeFile;
+    // Gate the backend producer so the ring buffer stops growing underneath a
+    // paused view. Without this, a paused capture silently evicts the lines the
+    // user is reading (the ring keeps filling to its 500k cap and drops the
+    // front), and previously-added lines render blank on resume.
+    if (id && s.liveSources[id]) {
+      invoke('set_stream_paused', { sourceId: id, paused })
+        .catch((err) => console.error('set_stream_paused failed:', err));
+    }
     // On resume, flush the latest pending snapshot into the live view.
     if (!paused) {
-      const s = get();
-      const id = s.activeFile;
       const pend = id ? s.livePending[id] : undefined;
       if (id && pend) {
         set({ liveSources: { ...s.liveSources, [id]: pend }, lineCount: pend.bufferLen });
