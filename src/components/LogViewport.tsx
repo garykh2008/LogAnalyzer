@@ -50,6 +50,7 @@ export const LogViewport: React.FC = () => {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
   const heatmapRef = useRef<HTMLCanvasElement>(null);
 
   const [visibleLines, setVisibleLines] = useState<string[]>([]);
@@ -206,6 +207,16 @@ export const LogViewport: React.FC = () => {
       return;
     }
     e.preventDefault();
+    // Shift+wheel (or horizontal delta) scrolls the log horizontally.
+    const cx = contentScrollRef.current;
+    if (e.shiftKey && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+      if (cx) cx.scrollLeft += e.deltaY;
+      return;
+    }
+    if (e.deltaX && !e.shiftKey) {
+      if (cx) cx.scrollLeft += e.deltaX;
+      return;
+    }
     // deltaMode 0 = pixels, 1 = lines, 2 = pages
     let lines: number;
     if (e.deltaMode === 1) {
@@ -623,7 +634,8 @@ export const LogViewport: React.FC = () => {
             )}
 
             <div
-              className="absolute inset-0 select-text"
+              ref={contentScrollRef}
+              className="absolute inset-0 select-text overflow-x-auto overflow-y-hidden"
               style={{
                 fontFamily: editorFontFamily,
                 fontSize: `${editorFontSize}px`,
@@ -681,7 +693,7 @@ export const LogViewport: React.FC = () => {
                       paddingBottom: `${lineSpacing / 2}px`,
                       ...inlineStyle,
                     }}
-                    className={`flex flex-row items-center border-b border-gray-100 dark:border-[#303031]/10 cursor-pointer ${rowBg}`}
+                    className={`flex flex-row items-center border-b border-gray-100 dark:border-[#303031]/10 cursor-pointer w-max min-w-full ${rowBg}`}
                   >
                     {/* Line numbers gutter */}
                     {showLineNumbers && (
@@ -699,7 +711,7 @@ export const LogViewport: React.FC = () => {
                     {/* Log text content */}
                     <div
                       style={{ color: adjustedFg || undefined }}
-                      className="flex-1 px-4 truncate select-text whitespace-pre text-foreground"
+                      className="grow shrink-0 px-4 select-text whitespace-pre text-foreground"
                     >
                       {renderLineContent(lineText, searchQuery)}
                     </div>
