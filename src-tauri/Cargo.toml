@@ -1,5 +1,9 @@
 [package]
 name = "loganalyzer"
+# Version source of truth is ../package.json: tauri.conf.json points at it, and
+# the Windows exe/bundle version is derived from there (verified — flipping
+# package.json alone moves the generated resource.rc). This field is only cargo's
+# own crate metadata; kept aligned so nothing reads as a stale version.
 version = "3.1.0"
 description = "A high-performance diagnostic log viewer with pattern matching and filtering"
 authors = ["LogAnalyzer Team"]

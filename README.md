@@ -1,4 +1,4 @@
-# Log Analyzer V3.1 (Tauri Release)
+# Log Analyzer (Tauri Release)
 
 Log Analyzer is a lightweight, ultra-high-performance diagnostic log viewer, filtering, and annotation tool. Built on Vite + React + Rust (Tauri v2), it delivers seamless handling of massive log files (100M+ lines) with fluid scrolling and instant search.
 
