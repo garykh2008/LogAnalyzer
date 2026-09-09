@@ -1,6 +1,6 @@
 [package]
 name = "loganalyzer"
-version = "3.0.0"
+version = "3.1.0"
 description = "A high-performance diagnostic log viewer with pattern matching and filtering"
 authors = ["LogAnalyzer Team"]
 edition = "2021"

@@ -948,7 +948,7 @@ export default function App() {
 
         {/* Middle: Active Filename */}
         <div data-tauri-drag-region className="flex-1 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 truncate px-4">
-          {displayFilename ? `${displayFilename} - Log Analyzer` : 'Log Analyzer V3.0'}
+          {displayFilename ? `${displayFilename} - Log Analyzer` : 'Log Analyzer V3.1'}
         </div>
 
         {/* Right: Window Controls */}
@@ -1491,7 +1491,7 @@ export default function App() {
           <div className="bg-card border border-border shadow-2xl rounded-2xl w-[380px] flex flex-col p-5 overflow-hidden text-xs text-center items-center">
             <img src={appLogo} className="w-12 h-12 mb-3 animate-pulse select-none" />
             <h3 className="text-sm font-bold text-foreground mb-1">Log Analyzer</h3>
-            <span className="ui-text-xs text-accent font-semibold px-2 py-0.5 rounded-full bg-accent/10 mb-4">V3.0 (Tauri Release)</span>
+            <span className="ui-text-xs text-accent font-semibold px-2 py-0.5 rounded-full bg-accent/10 mb-4">V3.1 (Tauri Release)</span>
             
             <div className="text-gray-500 dark:text-gray-400 font-sans leading-relaxed flex flex-col gap-2 mb-6">
               <p>An advanced diagnostic log viewer designed for high-performance inspection and pattern matching.</p>
