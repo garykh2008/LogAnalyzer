@@ -75,6 +75,7 @@ export default function App() {
   const startDbgviewLocal = useStore((s) => s.startDbgviewLocal);
   const startDbgviewRemote = useStore((s) => s.startDbgviewRemote);
   const applyStreamDelta = useStore((s) => s.applyStreamDelta);
+  const openNewFilter = useStore((s) => s.openNewFilter);
 
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -196,6 +197,11 @@ export default function App() {
         setActiveTab('notes');
         setIsSidebarOpen(true);
       }
+      // 7.5. Ctrl+N -> New Filter (empty keyword)
+      else if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        openNewFilter();
+      }
       // 8. Ctrl+G -> Go to Line
       else if (e.ctrlKey && e.key.toLowerCase() === 'g') {
         e.preventDefault();
@@ -260,7 +266,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleGlobalKeys);
     return () => window.removeEventListener('keydown', handleGlobalKeys);
-  }, [lineCount, loadLog, toggleShowFilteredOnly, setSelectedLine, selectedLine, selectedLines, copySelection, selectAll, activeFile, notes, nextSearchMatch, prevSearchMatch, navigateFilterHit, setIsShortcutsOpen, saveNotes]);
+  }, [lineCount, loadLog, toggleShowFilteredOnly, setSelectedLine, selectedLine, selectedLines, copySelection, selectAll, activeFile, notes, nextSearchMatch, prevSearchMatch, navigateFilterHit, setIsShortcutsOpen, saveNotes, openNewFilter]);
 
   // Handle active menu closures
   useEffect(() => {
@@ -645,6 +651,16 @@ export default function App() {
                     </>
                   )}
                   <div className="h-[1px] bg-border my-1" />
+                  <button
+                    onClick={() => {
+                      openNewFilter();
+                      setActiveMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>New Filter...</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">Ctrl+N</span>
+                  </button>
                   <button
                     onClick={() => importFilters()}
                     className="w-full text-left px-3 py-2 hover:bg-hover transition-colors"
@@ -1372,6 +1388,7 @@ export default function App() {
                   <table className="w-full text-left">
                     <tbody>
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Toggle Find Overlay</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + F</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">New Filter (empty keyword)</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + N</td></tr>
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Toggle Show Filtered Only</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + H</td></tr>
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Find Next Match</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">F3</td></tr>
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Find Previous Match</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">F2</td></tr>

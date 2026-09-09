@@ -204,6 +204,7 @@ interface AppState {
   filterBgColor: string;
   setFilterEditor: (state: Partial<{ isAddingFilter: boolean, editingFilterIdx: number | null, filterText: string, filterIsRegex: boolean, filterIsExclude: boolean, filterIsEvent: boolean, filterFgColor: string, filterBgColor: string }>) => void;
   openAddFilter: (initialText: string) => void;
+  openNewFilter: () => void;
   resetFilterEditor: () => void;
 
   // Workspace layout states
@@ -1050,6 +1051,15 @@ export const useStore = create<AppState>()(
       filterFgColor: '#000000',
       filterBgColor: '#ffffff'
     });
+  },
+  // Ctrl+N: open the Create Filter dialog with an empty keyword. The editor modal
+  // lives inside the Filters panel, so the sidebar must be mounted on that tab.
+  // Ignored while the editor is already up — it would wipe an in-progress edit.
+  openNewFilter: () => {
+    const s = get();
+    if (s.isAddingFilter || s.editingFilterIdx !== null) return;
+    s.openAddFilter('');
+    set({ activeTab: 'filters', isSidebarOpen: true });
   },
   resetFilterEditor: () => set({
     isAddingFilter: false,

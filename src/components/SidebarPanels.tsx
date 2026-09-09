@@ -240,7 +240,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
             <button
               onClick={() => setFilterEditor({ isAddingFilter: true })}
               className="p-1 rounded-md hover:bg-hover text-accent cursor-pointer transition-colors"
-              title="Add Filter"
+              title="Add Filter (Ctrl+N)"
             >
               <Plus size={16} />
             </button>

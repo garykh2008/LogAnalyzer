@@ -100,6 +100,7 @@ separate step, not handled by this script.)
 | `Ctrl + G` | Go to Line |
 | `Ctrl + F` | Toggle Search Box |
 | `Ctrl + H` | Toggle Filter Mode |
+| `Ctrl + N` | New Filter (empty keyword) |
 | `Ctrl + V` | Paste Clipboard as New Tab |
 | `Ctrl + C` | Copy Selected Lines |
 | `Ctrl + A` | Select All Lines (current view) |
