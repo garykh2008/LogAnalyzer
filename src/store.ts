@@ -641,10 +641,11 @@ export const useStore = create<AppState>()(
     }
   },
 
-  // Save the current view to a file. For live sources this dumps the retained
-  // ring buffer (the only place captured lines live); for static files it
-  // exports the current view. In both cases, when a display list is active
-  // (Filtered View or an exclude filter) only the visible lines are written.
+  // Save log lines to a file. Live captures always dump the complete retained
+  // buffer regardless of the current mode: a capture export must not silently
+  // drop lines just because a filter / exclude is active on screen. Static
+  // files export the current view (filtered view / excludes write only the
+  // visible lines).
   saveLog: async () => {
     const { activeFile, liveSources, filteredIndices } = get();
     if (!activeFile) return false;
@@ -659,11 +660,10 @@ export const useStore = create<AppState>()(
       const path = await invoke<string | null>('save_file_dialog', { defaultName, extension: 'log' });
       if (!path) return false;
       if (isLive) {
-        await invoke('save_stream', {
-          sourceId: activeFile,
-          path,
-          filteredOnly: filteredIndices !== null,
-        });
+        // Captures are saved in full no matter the view mode — the ring buffer
+        // is the only place captured lines live, so a filtered export would
+        // permanently lose the hidden lines.
+        await invoke('save_stream', { sourceId: activeFile, path });
       } else {
         // Empty indices => the backend writes the whole file (full view).
         await invoke('save_log', {

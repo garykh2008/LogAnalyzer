@@ -224,21 +224,12 @@ impl LiveEngine {
         self.filtered_abs.iter().copied().collect()
     }
 
-    /// Snapshot of the retained lines for saving to disk. When `filtered_only`
-    /// and a display list is tracked, emit only the currently visible lines;
-    /// otherwise emit the whole retained buffer.
-    fn dump(&self, filtered_only: bool) -> Vec<String> {
-        if filtered_only && self.tracking_needed() {
-            self.filtered_abs
-                .iter()
-                .filter_map(|&abs| {
-                    let rel = abs.checked_sub(self.first_abs)?;
-                    self.lines.get(rel).cloned()
-                })
-                .collect()
-        } else {
-            self.lines.iter().cloned().collect()
-        }
+    /// Snapshot of the retained lines for saving to disk. A live capture is
+    /// always dumped in full: the ring buffer is the only place captured lines
+    /// live, so a filtered export would permanently lose the currently hidden
+    /// lines (excluded / not matching the current view).
+    fn dump(&self) -> Vec<String> {
+        self.lines.iter().cloned().collect()
     }
 
     fn line_at(&self, abs: usize) -> String {
@@ -916,14 +907,15 @@ pub fn write_lines(path: &str, lines: &[String]) -> Result<usize, String> {
     Ok(lines.len())
 }
 
-/// Save a live source's retained buffer to a file. Returns the line count written.
+/// Save a live source's complete retained buffer to a file. Always writes the
+/// whole buffer (capture export must not be filtered by the current view).
+/// Returns the line count written.
 #[tauri::command]
 pub fn save_stream(
     state: tauri::State<'_, StreamState>,
     source_id: String,
     path: String,
-    filtered_only: bool,
 ) -> Result<usize, String> {
-    let lines = state.with_engine(&source_id, |eng| eng.dump(filtered_only))?;
+    let lines = state.with_engine(&source_id, |eng| eng.dump())?;
     write_lines(&path, &lines)
 }
