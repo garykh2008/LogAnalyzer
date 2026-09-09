@@ -19,6 +19,7 @@ import {
   Check,
   Sun,
   Moon,
+  TriangleAlert,
   Info
 } from 'lucide-react';
 
@@ -1207,7 +1208,12 @@ export default function App() {
 
                     {enableLiveStream && (
                       <div className="flex flex-col gap-1.5">
-                        <label className="font-semibold text-gray-600 dark:text-zinc-400">DbgView.exe Path</label>
+                        <label className="flex items-center gap-1.5 font-semibold text-gray-600 dark:text-zinc-400">
+                          <span>DbgView.exe Path</span>
+                          <span className="ui-text-3xs font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-full px-1.5 py-0.5 whitespace-nowrap">
+                            v4.9+ recommended
+                          </span>
+                        </label>
                         <span className="ui-text-xs text-gray-400">
                           Bring your own Sysinternals DebugView. Kernel capture launches it elevated (one UAC prompt).
                         </span>
@@ -1228,6 +1234,17 @@ export default function App() {
                           >
                             Browse...
                           </button>
+                        </div>
+                        {/* Version guidance: older DebugView builds don't behave
+                            for our capture flow, so surface it right at the picker. */}
+                        <div className="flex items-start gap-2 mt-0.5 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-amber-700 dark:text-amber-300">
+                          <TriangleAlert size={14} className="shrink-0 mt-0.5" />
+                          <span className="ui-text-xs leading-relaxed">
+                            <span className="font-bold">Use DebugView v4.9 or newer.</span>
+                            {' '}Older builds are not supported for capture. Check the version in
+                            Dbgview.exe <span className="font-mono">Help &gt; About</span>, or download
+                            the latest from the Sysinternals site.
+                          </span>
                         </div>
                       </div>
                     )}

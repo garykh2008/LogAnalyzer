@@ -40,9 +40,9 @@ pill shows the total and any dropped count.
 
 *   **Tail File (Live)** — follow any growing text file in real time.
 *   **Capture DbgView (Kernel)** — local capture. Bring your own Sysinternals
-    `Dbgview.exe` (set its path in Settings). Launches it elevated (**one UAC
-    prompt**) with kernel capture (`/k`) and streams the output; stopping needs
-    no further prompt.
+    `Dbgview.exe` (**v4.9 or newer recommended** — set its path in Settings).
+    Launches it elevated (**one UAC prompt**) with kernel capture (`/k`) and
+    streams the output; stopping needs no further prompt.
 *   **Capture DbgView (Remote)** — capture a target machine over SSH. Enter its
     host/user/password and the path to `Dbgview.exe` on the target; LogAnalyzer
     runs it there as a Highest-privilege scheduled task and tails the log back.
