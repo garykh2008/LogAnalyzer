@@ -338,6 +338,9 @@ export const useStore = create<AppState>()(
         loading: false,
         selectedLine: null,
         selectedLines: [],
+        // Opening a file jumps the sidebar to Log Files.
+        activeTab: 'files',
+        isSidebarOpen: true,
       });
       get().addRecentFile(filepath);
       await get().loadNotesForFile(filepath);
@@ -366,7 +369,8 @@ export const useStore = create<AppState>()(
       for (const filepath of files) {
         if (!updated.includes(filepath)) updated.push(filepath);
       }
-      set({ loadedFiles: updated, loading: false });
+      // Opening a folder jumps the sidebar to Log Files.
+      set({ loadedFiles: updated, loading: false, activeTab: 'files', isSidebarOpen: true });
       // Skip if a live source is currently active (don't steal the view).
       if (!get().activeFile || !get().liveSources[get().activeFile!]) {
         await get().setActiveFile(files[0]);
@@ -1011,7 +1015,8 @@ export const useStore = create<AppState>()(
         hits: 0,
       }));
 
-      set({ filters: newFilters, currentFilterFile: path, filtersModified: false });
+      // Importing filters jumps the sidebar to the Filters panel.
+      set({ filters: newFilters, currentFilterFile: path, filtersModified: false, activeTab: 'filters', isSidebarOpen: true });
       await get().applyFilters();
       return true;
     } catch (err) {
@@ -1110,9 +1115,10 @@ export const useStore = create<AppState>()(
     filterBgColor: 'transparent'
   }),
 
-  // Workspace layout states
+  // Workspace layout states — sidebar starts closed; actions below jump to the
+  // relevant tab (and re-open the sidebar) when they need it.
   activeTab: 'filters',
-  isSidebarOpen: true,
+  isSidebarOpen: false,
   setActiveTab: (tab) => set({ activeTab: tab }),
   setIsSidebarOpen: (isOpen) => set({ isSidebarOpen: isOpen }),
   selectedFilterIdx: null,
@@ -1180,7 +1186,11 @@ export const useStore = create<AppState>()(
   // Notes
   notes: {},
   noteEditLine: null,
-  setNoteEditLine: (line) => set({ noteEditLine: line }),
+  // Opening the note editor jumps the sidebar to Notes (the editor dialog itself
+  // is viewport-global). Skipping the null close-call keeps closing from re-opening it.
+  setNoteEditLine: (line) => set(line === null
+    ? { noteEditLine: null }
+    : { noteEditLine: line, activeTab: 'notes', isSidebarOpen: true }),
   addNote: (filepath, line, text) => {
     set((state) => {
       const fileNotes = state.notes[filepath] || {};
