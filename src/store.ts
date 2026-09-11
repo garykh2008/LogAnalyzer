@@ -123,6 +123,7 @@ interface AppState {
   loading: boolean;
   setActiveFile: (file: string | null) => Promise<void>;
   loadLog: (filepath: string) => Promise<void>;
+  loadFolder: () => Promise<void>;
   closeLog: (filepath: string) => Promise<void>;
 
   // Live streaming (opt-in feature)
@@ -343,6 +344,35 @@ export const useStore = create<AppState>()(
       await get().applyFilters();
     } catch (err) {
       console.error('Failed to load log:', err);
+      set({ loading: false });
+    }
+  },
+
+  loadFolder: async () => {
+    try {
+      const files = await invoke<string[]>('open_folder_dialog');
+      if (!files || files.length === 0) return;
+      set({ loading: true });
+      // Load all engine-side first (cheap: mmap + index), then show the first one.
+      for (const filepath of files) {
+        try {
+          await invoke<number>('load_log', { filepath });
+        } catch (err) {
+          console.error(`Failed to load ${filepath}:`, err);
+        }
+      }
+      const currentLoaded = get().loadedFiles;
+      const updated = [...currentLoaded];
+      for (const filepath of files) {
+        if (!updated.includes(filepath)) updated.push(filepath);
+      }
+      set({ loadedFiles: updated, loading: false });
+      // Skip if a live source is currently active (don't steal the view).
+      if (!get().activeFile || !get().liveSources[get().activeFile!]) {
+        await get().setActiveFile(files[0]);
+      }
+    } catch (err) {
+      console.error('Failed to open folder:', err);
       set({ loading: false });
     }
   },
@@ -666,7 +696,7 @@ export const useStore = create<AppState>()(
     const base = rawBase.replace(/[<>:"/\\|?*]+/g, '_').trim() || 'log';
     const defaultName = `${base}-export.log`;
     try {
-      const path = await invoke<string | null>('save_file_dialog', { defaultName, extension: 'log' });
+      const path = await invoke<string | null>('save_file_dialog', { kind: 'save_log', defaultName, extension: 'log' });
       if (!path) return false;
       if (isLive) {
         // Captures are saved in full no matter the view mode — the ring buffer
@@ -970,7 +1000,7 @@ export const useStore = create<AppState>()(
 
   importFilters: async () => {
     try {
-      const path = await invoke<string | null>('open_file_dialog');
+      const path = await invoke<string | null>('open_file_dialog', { kind: 'filter' });
       if (!path) return false;
       const xmlText = await invoke<string>('read_text_file', { path });
       const loaded = parseTatFilters(xmlText);
@@ -1010,7 +1040,7 @@ export const useStore = create<AppState>()(
 
   saveFiltersAs: async () => {
     try {
-      const path = await invoke<string | null>('save_file_dialog', { defaultName: 'filters.tat', extension: 'tat' });
+      const path = await invoke<string | null>('save_file_dialog', { kind: 'filter', defaultName: 'filters.tat', extension: 'tat' });
       if (!path) return false;
       const xmlContent = generateTatFiltersXml(get().filters);
       await invoke('write_text_file', { path, content: xmlContent });

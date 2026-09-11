@@ -20,7 +20,7 @@ Log Analyzer is a lightweight, ultra-high-performance diagnostic log viewer, fil
     *   Export notes to a plain-text summary file.
 *   **Live Streaming & Kernel Capture** (opt-in): Tail a growing file in real time, or capture Windows kernel/user debug output live via DebugView — locally or from a remote target over SSH. See below.
 *   **Save / Export Log**: Write the current view to a file via **File → Save Log As...** (or the save button on the live control pill). Live captures — which otherwise live only in memory — can be persisted to disk. When Filter Mode or an exclude filter is active, only the visible lines are written.
-*   **Multi-file Tabs**: Open multiple log files simultaneously and switch between them via the sidebar file list.
+*   **Multi-file Tabs**: Open multiple log files simultaneously and switch between them via the sidebar file list. **Open Folder...** (**File → Open Folder...**, `Ctrl+Shift+O`) loads every `.log`/`.txt`/`.tat` file inside in one go.
 *   **Clipboard & Drag-and-Drop**: Paste text (Ctrl+V) to instantly open clipboard content as a new tab, or drag-and-drop log files onto the window.
 *   **Recent Files & Cascading Menus**: Open recent paths from the File menu, persisted in local storage.
 *   **Frameless Titlebar**: Custom-drawn titlebar with native drag regions, matching the OS window chrome.
@@ -96,6 +96,7 @@ separate step, not handled by this script.)
 | Shortcut | Action |
 | :--- | :--- |
 | `Ctrl + O` | Open Log File |
+| `Ctrl + Shift + O` | Open Folder (load all log files inside) |
 | `Ctrl + S` | Save Notes |
 | `Ctrl + G` | Go to Line |
 | `Ctrl + F` | Toggle Search Box |

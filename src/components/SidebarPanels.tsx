@@ -51,7 +51,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
 
   const handleOpenFileDialog = async () => {
     try {
-      const path = await invoke<string | null>('open_file_dialog');
+      const path = await invoke<string | null>('open_file_dialog', { kind: 'log' });
       if (path) {
         await loadLog(path);
       }
@@ -279,6 +279,7 @@ export const SidebarPanels: React.FC<SidebarPanelsProps> = ({ activeTab }) => {
                   e.stopPropagation();
                   try {
                     const savePath = await invoke<string | null>('save_file_dialog', {
+                      kind: 'save_log',
                       defaultName: 'clipboard.log',
                       extension: 'log',
                     });

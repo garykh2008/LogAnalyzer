@@ -13,6 +13,39 @@ struct AppState {
     engines: RwLock<HashMap<String, LogEngine>>,
 }
 
+/// Per-purpose last-used directory for file dialogs, keyed by dialog kind
+/// ("log", "folder", "filter", "save_log", "save_notes", "exe"). "filter" is
+/// shared by Import Filters and Save Filters As so they track the same folder.
+/// Without this, Windows gives every dialog the same single remembered
+/// location, so opening a log drags Import Filters (and friends) along.
+#[derive(Default)]
+struct DialogDirs(RwLock<HashMap<String, std::path::PathBuf>>);
+
+impl DialogDirs {
+    /// Start a dialog for `kind` from its remembered directory, if still valid.
+    fn apply(&self, dialog: rfd::FileDialog, kind: &str) -> rfd::FileDialog {
+        let dir = self.0.read().ok().and_then(|m| m.get(kind).cloned());
+        match dir {
+            Some(d) if d.is_dir() => dialog.set_directory(d),
+            _ => dialog,
+        }
+    }
+
+    /// Remember the directory containing `picked` for `kind`.
+    fn remember(&self, kind: &str, picked: &std::path::Path) {
+        let dir = if picked.is_dir() {
+            picked.to_path_buf()
+        } else {
+            picked.parent().map(|p| p.to_path_buf()).unwrap_or_default()
+        };
+        if !dir.as_os_str().is_empty() && dir.is_dir() {
+            if let Ok(mut m) = self.0.write() {
+                m.insert(kind.to_string(), dir);
+            }
+        }
+    }
+}
+
 #[tauri::command]
 fn load_log(state: State<'_, AppState>, filepath: String) -> Result<usize, String> {
     {
@@ -78,28 +111,63 @@ fn filter_log(state: State<'_, AppState>, filepath: String, filters: Vec<FilterI
     engine.filter(&filters)
 }
 
+/// `kind` selects the remembered start directory: "log" or "filter".
 #[tauri::command]
-fn open_file_dialog() -> Result<Option<String>, String> {
-    let file = rfd::FileDialog::new()
-        .add_filter("Log Files", &["log", "txt", "tat"])
-        .pick_file();
+fn open_file_dialog(state: State<'_, DialogDirs>, kind: String) -> Result<Option<String>, String> {
+    let dialog = state
+        .apply(rfd::FileDialog::new(), &kind)
+        .add_filter("Log Files", &["log", "txt", "tat"]);
+    let file = dialog.pick_file();
+    if let Some(p) = &file {
+        state.remember(&kind, p);
+    }
     Ok(file.map(|p| p.to_string_lossy().to_string()))
 }
 
+/// Pick a folder and return its log-like files (non-recursive, sorted).
 #[tauri::command]
-fn open_exe_dialog() -> Result<Option<String>, String> {
-    let file = rfd::FileDialog::new()
-        .add_filter("Executable", &["exe"])
-        .pick_file();
-    Ok(file.map(|p| p.to_string_lossy().to_string()))
+fn open_folder_dialog(state: State<'_, DialogDirs>) -> Result<Vec<String>, String> {
+    let dialog = state.apply(rfd::FileDialog::new(), "folder");
+    let Some(dir) = dialog.pick_folder() else {
+        return Ok(Vec::new());
+    };
+    state.remember("folder", &dir);
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.is_file()
+                && p.extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| matches!(e.to_ascii_lowercase().as_str(), "log" | "txt" | "tat"))
+                    .unwrap_or(false)
+        })
+        .collect();
+    files.sort();
+    Ok(files.into_iter().map(|p| p.to_string_lossy().to_string()).collect())
 }
 
 #[tauri::command]
-fn save_file_dialog(default_name: String, extension: String) -> Result<Option<String>, String> {
-    let file = rfd::FileDialog::new()
+fn open_exe_dialog(state: State<'_, DialogDirs>) -> Result<Option<String>, String> {
+    let dialog = state.apply(rfd::FileDialog::new(), "exe").add_filter("Executable", &["exe"]);
+    let file = dialog.pick_file();
+    if let Some(p) = &file {
+        state.remember("exe", p);
+    }
+    Ok(file.map(|p| p.to_string_lossy().to_string()))
+}
+
+/// `kind` selects the remembered start directory, e.g. "save_log" / "save_notes" / "filter".
+#[tauri::command]
+fn save_file_dialog(state: State<'_, DialogDirs>, kind: String, default_name: String, extension: String) -> Result<Option<String>, String> {
+    let dialog = state
+        .apply(rfd::FileDialog::new(), &kind)
         .set_file_name(&default_name)
-        .add_filter("Files", &[&extension])
-        .save_file();
+        .add_filter("Files", &[&extension]);
+    let file = dialog.save_file();
+    if let Some(p) = &file {
+        state.remember(&kind, p);
+    }
     Ok(file.map(|p| p.to_string_lossy().to_string()))
 }
 
@@ -217,6 +285,7 @@ pub fn run() {
         .manage(AppState {
             engines: RwLock::new(HashMap::new()),
         })
+        .manage(DialogDirs::default())
         .manage(StreamState::new())
         .plugin(tauri_plugin_opener::init())
         .on_window_event(|window, event| {
@@ -264,6 +333,7 @@ pub fn run() {
             search_log,
             filter_log,
             open_file_dialog,
+            open_folder_dialog,
             open_exe_dialog,
             save_file_dialog,
             read_text_file,

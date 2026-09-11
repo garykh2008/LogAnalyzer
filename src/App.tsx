@@ -72,6 +72,7 @@ export default function App() {
   const remotePort = useStore((s) => s.remotePort);
   const remoteUser = useStore((s) => s.remoteUser);
   const remoteDbgviewPath = useStore((s) => s.remoteDbgviewPath);
+  const loadFolder = useStore((s) => s.loadFolder);
   const startFileTail = useStore((s) => s.startFileTail);
   const startDbgviewLocal = useStore((s) => s.startDbgviewLocal);
   const startDbgviewRemote = useStore((s) => s.startDbgviewRemote);
@@ -145,6 +146,7 @@ export default function App() {
 
     try {
       const path = await invoke<string | null>('save_file_dialog', {
+        kind: 'save_notes',
         defaultName: 'notes.txt',
         extension: 'txt',
       });
@@ -194,11 +196,16 @@ export default function App() {
         e.preventDefault();
         selectAll();
       }
+      // 1.9. Ctrl+Shift+O -> Open Folder (load all log files inside)
+      else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        await loadFolder();
+      }
       // 2. Ctrl+O -> Open File
       else if (e.ctrlKey && e.key.toLowerCase() === 'o') {
         e.preventDefault();
         try {
-          const path = await invoke<string | null>('open_file_dialog');
+          const path = await invoke<string | null>('open_file_dialog', { kind: 'log' });
           if (path) await loadLog(path);
         } catch (err) {
           console.error(err);
@@ -578,7 +585,7 @@ export default function App() {
                 <div className="absolute top-full left-0 mt-1 w-52 bg-card border border-border rounded-lg shadow-2xl py-1.5 z-55 text-xs font-normal">
                   <button
                     onClick={async () => {
-                      const path = await invoke<string | null>('open_file_dialog');
+                      const path = await invoke<string | null>('open_file_dialog', { kind: 'log' });
                       if (path) await loadLog(path);
                       setActiveMenu(null);
                     }}
@@ -587,11 +594,21 @@ export default function App() {
                     <span>Open Log...</span>
                     <span className="ui-text-xs text-gray-400 font-mono">Ctrl+O</span>
                   </button>
+                  <button
+                    onClick={async () => {
+                      setActiveMenu(null);
+                      await loadFolder();
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Open Folder...</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">Ctrl+Shift+O</span>
+                  </button>
 
                   {enableLiveStream && (
                     <button
                       onClick={async () => {
-                        const path = await invoke<string | null>('open_file_dialog');
+                        const path = await invoke<string | null>('open_file_dialog', { kind: 'log' });
                         if (path) await startFileTail(path);
                         setActiveMenu(null);
                       }}
@@ -696,6 +713,35 @@ export default function App() {
                   )}
                   <div className="h-[1px] bg-border my-1" />
                   <button
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="w-full text-left px-3 py-2 hover:bg-hover transition-colors"
+                  >
+                    Preferences...
+                  </button>
+                  <div className="h-[1px] bg-border my-1" />
+                  <button
+                    onClick={() => appWindow.close()}
+                    className="w-full text-left px-3 py-2 hover:bg-red-500/10 text-red-500 flex justify-between items-center transition-colors"
+                  >
+                    <span>Exit</span>
+                    <span className="ui-text-xs text-red-500/60 font-mono">Ctrl+Q</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Filter Menu */}
+            <div className="relative">
+              <button
+                onClick={(e) => handleMenuClick(e, 'filter')}
+                onMouseEnter={() => handleMenuMouseEnter('filter')}
+                className="px-2.5 py-1 rounded-md hover:bg-hover transition-colors cursor-default"
+              >
+                Filter
+              </button>
+              {activeMenu === 'filter' && (
+                <div className="absolute top-full left-0 mt-1 w-52 bg-card border border-border rounded-lg shadow-2xl py-1.5 z-55 text-xs font-normal">
+                  <button
                     onClick={() => {
                       openNewFilter();
                       setActiveMenu(null);
@@ -705,6 +751,18 @@ export default function App() {
                     <span>New Filter...</span>
                     <span className="ui-text-xs text-gray-400 font-mono">Ctrl+N</span>
                   </button>
+                  <button
+                    onClick={() => {
+                      setActiveTab('filters');
+                      setIsSidebarOpen(true);
+                      setActiveMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-hover flex justify-between items-center transition-colors"
+                  >
+                    <span>Filters Panel</span>
+                    <span className="ui-text-xs text-gray-400 font-mono">Ctrl+Shift+F</span>
+                  </button>
+                  <div className="h-[1px] bg-border my-1" />
                   <button
                     onClick={() => importFilters()}
                     className="w-full text-left px-3 py-2 hover:bg-hover transition-colors"
@@ -735,21 +793,6 @@ export default function App() {
                       Clear All Filters
                     </button>
                   )}
-                  <div className="h-[1px] bg-border my-1" />
-                  <button
-                    onClick={() => setIsSettingsOpen(true)}
-                    className="w-full text-left px-3 py-2 hover:bg-hover transition-colors"
-                  >
-                    Preferences...
-                  </button>
-                  <div className="h-[1px] bg-border my-1" />
-                  <button
-                    onClick={() => appWindow.close()}
-                    className="w-full text-left px-3 py-2 hover:bg-red-500/10 text-red-500 flex justify-between items-center transition-colors"
-                  >
-                    <span>Exit</span>
-                    <span className="ui-text-xs text-red-500/60 font-mono">Ctrl+Q</span>
-                  </button>
                 </div>
               )}
             </div>
@@ -1445,6 +1488,7 @@ export default function App() {
                   <table className="w-full text-left">
                     <tbody>
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Open Log File</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + O</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Open Folder</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + Shift + O</td></tr>
                       <tr className="border-b border-border/40"><td className="py-1.5 text-gray-500 font-medium">Go to Line...</td><td className="py-1.5 text-right font-mono font-semibold text-gray-400">Ctrl + G</td></tr>
                     </tbody>
                   </table>
