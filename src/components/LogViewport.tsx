@@ -29,6 +29,7 @@ export const LogViewport: React.FC = () => {
   const showFilteredOnly = useStore((s) => s.showFilteredOnly);
   const loadLog = useStore((s) => s.loadLog);
   const copySelection = useStore((s) => s.copySelection);
+  const reportCopy = useStore((s) => s.reportCopy);
   const theme = useStore((s) => s.theme);
   const setPreferences = useStore((s) => s.setPreferences);
   const openAddFilter = useStore((s) => s.openAddFilter);
@@ -65,13 +66,42 @@ export const LogViewport: React.FC = () => {
   const [noteText, setNoteText] = useState('');
 
   // Context Menu State
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; line: number } | null>(null);
+  // `nativeText`: substring captured if a mouse text-selection was active when
+  // the menu opened, so Copy can grab it before the menu click clears the range.
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; line: number; nativeText: string | null } | null>(null);
 
   // Position preservation state
   const [pendingAnchor, setPendingAnchor] = useState<{ raw: number; offset: number } | null>(null);
 
   // Track if selection changes are manual clicks (to prevent scroll jumps)
   const [isManualSelection, setIsManualSelection] = useState(false);
+
+  // Mouse-down anchor, used to tell a plain click from a text-selection drag.
+  // A drag inside one row still fires click in Chromium, which would otherwise
+  // reset the line selection (and scroll-sync) right after the user圈selected.
+  const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
+
+  // Native (mouse-dragged) text selection lives in the DOM, not the store.
+  // Returns the selected text, or null when there is no real selection.
+  const getNativeSelectionText = (): string | null => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return null;
+    const text = sel.toString();
+    return text.length > 0 ? text : null;
+  };
+
+  const clearNativeSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) sel.removeAllRanges();
+  };
+
+  // A drag counts as text selection once the pointer moved more than a couple
+  // of pixels (sub-pixel jitter on a deliberate click must stay a click).
+  const isSelectionDrag = (e: React.MouseEvent): boolean => {
+    const start = mouseDownPos.current;
+    if (!start) return false;
+    return Math.abs(e.clientX - start.x) > 2 || Math.abs(e.clientY - start.y) > 2;
+  };
 
   // For live sources: when a display list exists (filtered view, or full view
   // with excludes) map through it; otherwise show the whole retained buffer.
@@ -272,6 +302,16 @@ export const LogViewport: React.FC = () => {
 
   // Selection click handler (prevents jump)
   const handleLineClick = (rawIdx: number, e: React.MouseEvent) => {
+    // If this click is the tail of a text-selection drag, leave the line
+    // selection alone — the user was copying a substring, not picking a row.
+    if (isSelectionDrag(e)) {
+      mouseDownPos.current = null;
+      return;
+    }
+    mouseDownPos.current = null;
+    // A deliberate row click supersedes any leftover native selection, so the
+    // next Ctrl+C unambiguously targets the line selection.
+    clearNativeSelection();
     setIsManualSelection(true);
     setSelectedLine(rawIdx, e.ctrlKey, e.shiftKey);
   };
@@ -469,16 +509,33 @@ export const LogViewport: React.FC = () => {
 
   const handleContextMenu = (e: React.MouseEvent, line: number) => {
     e.preventDefault();
+    // Capture any dragged text selection before clicks clear it.
+    const nativeText = getNativeSelectionText();
     // Right-clicking an unselected line selects it; right-clicking within an
     // existing (multi/range) selection keeps it so the copy targets everything.
-    if (!selectedLines.includes(line)) {
+    if (!nativeText && !selectedLines.includes(line)) {
       setSelectedLine(line, e.ctrlKey, e.shiftKey);
     }
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
-      line: line
+      line: line,
+      nativeText,
     });
+  };
+
+  // Context-menu / menu-bar copy: prefer the dragged substring, else the lines.
+  const handleContextCopy = (nativeText: string | null) => {
+    if (nativeText) {
+      // Programmatic write fires no `copy` event, so report the flash directly.
+      void navigator.clipboard.writeText(nativeText).then(() =>
+        reportCopy(`Copied ${nativeText.length.toLocaleString()} chars`),
+      );
+      setContextMenu(null);
+      return;
+    }
+    copySelection();
+    setContextMenu(null);
   };
 
   const handleDoubleClickLine = (lineText: string) => {
@@ -520,11 +577,13 @@ export const LogViewport: React.FC = () => {
   return (
     <div
       ref={containerRef}
+      data-log-viewport
       tabIndex={0}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       onKeyDown={handleKeyDown}
+      onMouseDown={(e) => { mouseDownPos.current = { x: e.clientX, y: e.clientY }; }}
       className={`relative flex-1 flex flex-row overflow-hidden bg-background select-text outline-none ${
         isDropActive ? 'border-2 border-dashed border-accent' : ''
       }`}
@@ -750,11 +809,11 @@ export const LogViewport: React.FC = () => {
           className="fixed z-50 bg-card border border-border shadow-2xl rounded-lg py-1.5 min-w-[150px] text-xs font-normal"
         >
           <button
-            onClick={() => copySelection()}
+            onClick={() => handleContextCopy(contextMenu.nativeText)}
             className="w-full text-left px-3 py-1.5 hover:bg-hover flex items-center gap-2 cursor-pointer transition-colors"
           >
             <Copy size={12} className="text-gray-400" />
-            <span>Copy</span>
+            <span>{contextMenu.nativeText ? 'Copy Selected Text' : 'Copy'}</span>
           </button>
           <div className="h-[1px] bg-border my-1" />
           <button

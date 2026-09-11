@@ -154,6 +154,11 @@ interface AppState {
   clearSelection: () => void;
   selectAll: () => void;
   copySelection: () => Promise<void>;
+  // Flashed by the status bar after a copy actually happens: copySelection
+  // sets it for line copies; App's `copy` listener reports native text copies.
+  // `seq` bumps every time so an identical repeat still re-triggers the flash.
+  copyFlash: { text: string; seq: number } | null;
+  reportCopy: (text: string) => void;
   saveLog: () => Promise<boolean>;
 
   // Search
@@ -637,10 +642,13 @@ export const useStore = create<AppState>()(
         : await invoke<string[]>('get_lines', { filepath: activeFile, indices: sorted });
       const clipboardText = lines.map(l => l.replace(/[\r\n]+$/, '')).join('\n');
       await navigator.clipboard.writeText(clipboardText);
+      get().reportCopy(`Copied ${lines.length.toLocaleString()} line${lines.length === 1 ? '' : 's'}`);
     } catch (err) {
       console.error('Copy failed:', err);
     }
   },
+  copyFlash: null,
+  reportCopy: (text) => set((s) => ({ copyFlash: { text, seq: (s.copyFlash?.seq ?? 0) + 1 } })),
 
   // Save log lines to a file. Live captures always dump the complete retained
   // buffer regardless of the current mode: a capture export must not silently

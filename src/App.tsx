@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStore, StreamDelta } from './store';
 import { LogViewport } from './components/LogViewport';
 import { SidebarPanels } from './components/SidebarPanels';
@@ -93,6 +93,40 @@ export default function App() {
   // Paste-from-clipboard feedback
   const [pasteMsg, setPasteMsg] = useState<string | null>(null);
 
+  // Status-bar copy feedback: the store flashes line copies (copySelection);
+  // the `copy` listener below reports native (mouse-dragged) text copies.
+  // Showing a hint up front read like a command prompt rather than a result —
+  // so we only announce AFTER an actual copy, then fade out.
+  const copyFlash = useStore((s) => s.copyFlash);
+  const reportCopy = useStore((s) => s.reportCopy);
+  const [copyMsg, setCopyMsg] = useState<string | null>(null);
+  const copyMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!copyFlash) return;
+    if (copyMsgTimer.current) clearTimeout(copyMsgTimer.current);
+    setCopyMsg(copyFlash.text);
+    copyMsgTimer.current = setTimeout(() => setCopyMsg(null), 3000);
+  }, [copyFlash?.seq]);
+  useEffect(() => () => {
+    if (copyMsgTimer.current) clearTimeout(copyMsgTimer.current);
+  }, []);
+
+  // Native copy of a mouse-dragged selection inside the log viewport: the
+  // browser performs the copy itself, we only observe it to report the result.
+  useEffect(() => {
+    const onCopy = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+      const vp = document.querySelector('[data-log-viewport]');
+      const anchor = sel.anchorNode;
+      if (!vp || !anchor || !vp.contains(anchor)) return;
+      const len = sel.toString().length;
+      if (len > 0) reportCopy(`Copied ${len.toLocaleString()} chars`);
+    };
+    document.addEventListener('copy', onCopy);
+    return () => document.removeEventListener('copy', onCopy);
+  }, [reportCopy]);
+
   // Remote DbgView connect dialog
   const [isRemoteOpen, setIsRemoteOpen] = useState(false);
   const [remotePassword, setRemotePassword] = useState('');
@@ -141,8 +175,17 @@ export default function App() {
       const activeEl = document.activeElement;
       const isInputFocused = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
 
-      // 1. Ctrl+C -> Copy Selection
+      // 1. Ctrl+C -> Copy. If the user has mouse-dragged a native text selection
+      // inside the log view, let the browser's native copy run (don't preventDefault)
+      // so the exact selected substring is copied. Otherwise copy the clicked
+      // (Ctrl/Shift multi-) line selection via the store.
       if (e.ctrlKey && e.key.toLowerCase() === 'c' && !isInputFocused) {
+        const sel = window.getSelection();
+        const hasNativeSelection = !!sel && !sel.isCollapsed && sel.toString().length > 0;
+        if (hasNativeSelection) {
+          // Native copy handles it; do NOT preventDefault, do NOT run line copy.
+          return;
+        }
         e.preventDefault();
         await copySelection();
       }
@@ -1127,6 +1170,13 @@ export default function App() {
           {selectedLine !== null && (
             <span className="font-mono font-semibold text-gray-600 dark:text-gray-300">
               Ln {selectedLine + 1}
+            </span>
+          )}
+
+          {copyMsg && (
+            <span className="flex items-center gap-1 font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+              <Check size={11} />
+              {copyMsg}
             </span>
           )}
 
