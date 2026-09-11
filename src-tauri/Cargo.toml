@@ -4,7 +4,7 @@ name = "loganalyzer"
 # the Windows exe/bundle version is derived from there (verified — flipping
 # package.json alone moves the generated resource.rc). This field is only cargo's
 # own crate metadata; kept aligned so nothing reads as a stale version.
-version = "3.1.1"
+version = "3.2.0"
 description = "A high-performance diagnostic log viewer with pattern matching and filtering"
 authors = ["LogAnalyzer Team"]
 edition = "2021"
