@@ -113,6 +113,9 @@ interface AppState {
   defaultEncoding: string;
   uiFontSize: number;
   uiFontFamily: string;
+  // Startup filters: a .tat file imported automatically on every launch.
+  autoLoadFilters: boolean;
+  autoLoadFilterPath: string;
   setTheme: (theme: 'dark' | 'light') => void;
   setPreferences: (prefs: Partial<Omit<AppState, 'setTheme' | 'setPreferences'>>) => void;
 
@@ -248,6 +251,8 @@ export const useStore = create<AppState>()(
   defaultEncoding: 'UTF-8',
   uiFontSize: 12,
   uiFontFamily: 'Inter',
+  autoLoadFilters: false,
+  autoLoadFilterPath: '',
 
   setTheme: (theme) => {
     set({ theme });
@@ -1279,6 +1284,8 @@ export const useStore = create<AppState>()(
         defaultEncoding: state.defaultEncoding,
         uiFontSize: state.uiFontSize,
         uiFontFamily: state.uiFontFamily,
+        autoLoadFilters: state.autoLoadFilters,
+        autoLoadFilterPath: state.autoLoadFilterPath,
         recentFiles: state.recentFiles,
         enableLiveStream: state.enableLiveStream,
         dbgviewPath: state.dbgviewPath,

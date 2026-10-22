@@ -25,6 +25,11 @@ import {
 
 const appWindow = getCurrentWindow();
 
+// Module scope, not a ref: React StrictMode remounts effects in dev, and a ref
+// reset on remount would either re-import the default filter or (with a cleanup)
+// cancel the pending timer and never import it at all. One flag per app launch.
+let startupFilterConsumed = false;
+
 export default function App() {
   const theme = useStore((s) => s.theme);
   const setTheme = useStore((s) => s.setTheme);
@@ -62,6 +67,9 @@ export default function App() {
   const defaultEncoding = useStore((s) => s.defaultEncoding);
   const uiFontSize = useStore((s) => s.uiFontSize);
   const uiFontFamily = useStore((s) => s.uiFontFamily);
+  const autoLoadFilters = useStore((s) => s.autoLoadFilters);
+  const autoLoadFilterPath = useStore((s) => s.autoLoadFilterPath);
+  const loadFiltersFromPath = useStore((s) => s.loadFiltersFromPath);
   const setPreferences = useStore((s) => s.setPreferences);
   const nextSearchMatch = useStore((s) => s.nextSearchMatch);
   const prevSearchMatch = useStore((s) => s.prevSearchMatch);
@@ -85,6 +93,9 @@ export default function App() {
   // Settings page overlays
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'logView' | 'appearance'>('general');
+  // Path of the startup filter that failed to import this session (surfaced in
+  // General Settings, where the path is configured).
+  const [startupFilterError, setStartupFilterError] = useState<string | null>(null);
 
   // Help page overlays
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
@@ -377,6 +388,24 @@ export default function App() {
       if (unlistenFilter) unlistenFilter();
     };
   }, [loadLog]);
+
+  // Startup filters: import the configured default .tat once per launch. Runs
+  // late enough that a CLI `-f` filter (applied above) wins — it sets
+  // currentFilterFile, which makes this a no-op. One-shot: toggling the setting
+  // later must not re-import.
+  useEffect(() => {
+    if (startupFilterConsumed) return;
+    startupFilterConsumed = true;
+    if (!autoLoadFilters || !autoLoadFilterPath) return;
+
+    setTimeout(async () => {
+      if (useStore.getState().currentFilterFile) return; // CLI filter already applied
+      const ok = await loadFiltersFromPath(autoLoadFilterPath);
+      // Keep the failure visible: the settings page is the only place the path
+      // is shown, so a silently dropped default would look like "nothing happened".
+      if (!ok) setStartupFilterError(autoLoadFilterPath);
+    }, 1000);
+  }, [autoLoadFilters, autoLoadFilterPath, loadFiltersFromPath]);
 
   // Listen to live stream append deltas from the backend
   useEffect(() => {
@@ -1341,6 +1370,68 @@ export default function App() {
                         </div>
                       </div>
                     )}
+
+                    {/* Default filter file: imported automatically on every launch. */}
+                    <div className="flex flex-col gap-1.5 border-t border-border pt-4">
+                      <label className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-hover">
+                        <input
+                          type="checkbox"
+                          checked={autoLoadFilters}
+                          disabled={!autoLoadFilterPath}
+                          onChange={(e) => setPreferences({ autoLoadFilters: e.target.checked })}
+                          className="rounded text-accent border-border cursor-pointer disabled:cursor-not-allowed"
+                        />
+                        <span className={`font-semibold ${autoLoadFilterPath ? 'text-gray-600 dark:text-zinc-400' : 'text-gray-400 dark:text-zinc-500'}`}>
+                          Import Default Filter on Startup
+                        </span>
+                      </label>
+                      <span className="ui-text-xs text-gray-400">
+                        Load a saved filter file (.tat) automatically every time the app starts.
+                        A filter passed on the command line (<span className="font-mono">-f</span>) takes precedence.
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={autoLoadFilterPath}
+                          onChange={(e) => setPreferences({ autoLoadFilterPath: e.target.value, autoLoadFilters: !!e.target.value && autoLoadFilters })}
+                          placeholder="C:\\Filters\\default.tat"
+                          className="flex-1 bg-sidebar border border-border rounded-lg p-2 font-mono focus:outline-none focus:border-accent"
+                        />
+                        <button
+                          onClick={async () => {
+                            const path = await invoke<string | null>('open_file_dialog', { kind: 'filter' });
+                            if (path) {
+                              setPreferences({ autoLoadFilterPath: path, autoLoadFilters: true });
+                              setStartupFilterError(null);
+                            }
+                          }}
+                          className="px-3 py-2 border border-border rounded-lg hover:bg-hover transition-colors cursor-pointer shrink-0 font-semibold"
+                        >
+                          Browse...
+                        </button>
+                        {(autoLoadFilterPath || startupFilterError) && (
+                          <button
+                            title="Clear default filter"
+                            onClick={() => {
+                              setPreferences({ autoLoadFilterPath: '', autoLoadFilters: false });
+                              setStartupFilterError(null);
+                            }}
+                            className="p-2 border border-border rounded-lg hover:bg-hover transition-colors cursor-pointer shrink-0 text-gray-500"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+                      {startupFilterError && (
+                        <div className="flex items-start gap-2 mt-0.5 bg-red-500/10 border border-red-500/30 rounded-lg p-2.5 text-red-600 dark:text-red-400">
+                          <TriangleAlert size={14} className="shrink-0 mt-0.5" />
+                          <span className="ui-text-xs leading-relaxed">
+                            Could not import <span className="font-mono break-all">{startupFilterError}</span> on startup —
+                            the file may have moved or been deleted.
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
 
