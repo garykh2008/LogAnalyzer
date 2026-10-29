@@ -76,6 +76,11 @@ export default function App() {
   const navigateFilterHit = useStore((s) => s.navigateFilterHit);
   const enableLiveStream = useStore((s) => s.enableLiveStream);
   const dbgviewPath = useStore((s) => s.dbgviewPath);
+  // Mirrors `detect_flavor` in stream.rs: the exe kind is inferred from the
+  // filename, so the settings page can show which front-end will be driven.
+  const dbgviewFlavor: 'cli' | 'gui' = /cli/i.test(
+    dbgviewPath.split(/[\\/]/).pop()?.replace(/\.exe$/i, '') ?? ''
+  ) ? 'cli' : 'gui';
   const remoteHost = useStore((s) => s.remoteHost);
   const remotePort = useStore((s) => s.remotePort);
   const remoteUser = useStore((s) => s.remoteUser);
@@ -1331,13 +1336,21 @@ export default function App() {
                     {enableLiveStream && (
                       <div className="flex flex-col gap-1.5">
                         <label className="flex items-center gap-1.5 font-semibold text-gray-600 dark:text-zinc-400">
-                          <span>DbgView.exe Path</span>
-                          <span className="ui-text-3xs font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-full px-1.5 py-0.5 whitespace-nowrap">
-                            v4.9+ recommended
+                          <span>DbgView Path</span>
+                          <span className="ui-text-3xs font-bold text-blue-600 dark:text-blue-400 bg-blue-500/10 border border-blue-500/30 rounded-full px-1.5 py-0.5 whitespace-nowrap">
+                            cli supported
                           </span>
                         </label>
                         <span className="ui-text-xs text-gray-400">
                           Bring your own Sysinternals DebugView. Kernel capture launches it elevated (one UAC prompt).
+                          {dbgviewPath && (
+                            <>
+                              {' '}Selected:{' '}
+                              <span className="font-mono font-semibold text-accent">
+                                {dbgviewFlavor === 'cli' ? 'DbgViewCli' : 'DbgView (GUI)'}
+                              </span>
+                            </>
+                          )}
                         </span>
                         <div className="flex items-center gap-2">
                           <input
@@ -1366,6 +1379,17 @@ export default function App() {
                             {' '}Older builds are not supported for capture. Check the version in
                             Dbgview.exe <span className="font-mono">Help &gt; About</span>, or download
                             the latest from the Sysinternals site.
+                          </span>
+                        </div>
+                        {/* The exe kind is inferred from the filename, so say which
+                            front-end will actually be driven — otherwise picking the
+                            CLI but getting GUI behaviour would be unexplainable. */}
+                        <div className="flex items-start gap-2 text-gray-500 dark:text-zinc-400">
+                          <Info size={14} className="shrink-0 mt-0.5" />
+                          <span className="ui-text-xs leading-relaxed">
+                            Point this at <span className="font-mono">Dbgview.exe</span> or{' '}
+                            <span className="font-mono">DbgViewCli.exe</span> (v5.02+); the
+                            argument style is detected from the file name.
                           </span>
                         </div>
                       </div>

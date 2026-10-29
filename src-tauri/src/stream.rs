@@ -283,13 +283,23 @@ pub struct LiveSource {
     stop: Arc<AtomicBool>,
     /// When set, the producer stops feeding the engine (see
     /// `set_stream_paused`): the ring buffer freezes so nothing is evicted
-    /// underneath a paused view, and the producer resumes from its saved
-    /// position with no data lost.
+    /// underneath a paused view.
     paused: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     /// For DbgView sources: writing this file signals the elevated watcher to
     /// terminate DbgView and clean up (see `start_dbgview_local`).
     stop_file: Option<PathBuf>,
+    /// Capture exe for this source, set only for DbgView captures. Used to
+    /// pause/resume the capture itself (`--pause` / `--resume`) rather than
+    /// just the reading side, so resuming starts from the current moment
+    /// instead of replaying everything logged during the pause.
+    dbgview_exe: Option<String>,
+    /// Local captures: set on resume so the tailer jumps to the current end of
+    /// the log file, dropping whatever was written while paused. Without it a
+    /// resume would replay the whole paused stretch at once. (Remote captures
+    /// clear their carry buffer in the producer instead, since their reads go
+    /// through SSH rather than a seekable file handle.)
+    resume_seek: Arc<AtomicBool>,
     /// Temp files owned by this source (e.g. the local watch script + log
     /// path). Removed best-effort once the source is stopped.
     cleanup_files: Vec<PathBuf>,
@@ -391,7 +401,10 @@ struct TailPos {
 /// Spawn the generic file-tail producer: poll the file, read newly appended
 /// bytes, split into lines, append to the engine, and emit a delta per batch.
 /// While `paused` is set the producer skips reads entirely (the ring buffer
-/// freezes); on resume it picks up exactly where it left off.
+/// freezes). `resume_seek` makes it jump to the current end of the file on
+/// resume instead of picking up where it left off, so a paused stretch is
+/// dropped rather than replayed — used by DbgView captures, where the user
+/// expects resume to mean "from now on".
 fn spawn_file_tail(
     app: AppHandle,
     source_id: String,
@@ -399,6 +412,7 @@ fn spawn_file_tail(
     engine: Arc<Mutex<LiveEngine>>,
     stop: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
+    resume_seek: Option<Arc<AtomicBool>>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut pos = TailPos { offset: 0, carry: String::new() };
@@ -413,6 +427,13 @@ fn spawn_file_tail(
                     return;
                 }
                 std::thread::sleep(Duration::from_millis(POLL_MS / 8));
+            }
+            // Resumed with the seek flag raised: skip the paused stretch.
+            if let Some(flag) = &resume_seek {
+                if flag.swap(false, Ordering::Relaxed) {
+                    pos.offset = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(pos.offset);
+                    pos.carry.clear();
+                }
             }
             if let Ok(mut f) = File::open(&path) {
                 let len = f.metadata().map(|m| m.len()).unwrap_or(0);
@@ -485,6 +506,7 @@ pub fn start_file_tail(
         Arc::clone(&engine),
         Arc::clone(&stop),
         Arc::clone(&paused),
+        None,
     );
 
     let mut sources = state.sources.write().map_err(|e| e.to_string())?;
@@ -496,35 +518,160 @@ pub fn start_file_tail(
             paused,
             handle: Some(handle),
             stop_file: None,
+            dbgview_exe: None,
+            resume_seek: Arc::new(AtomicBool::new(false)),
             cleanup_files: Vec::new(),
         },
     );
     Ok(source_id)
 }
 
+/// Which capture front-end the configured path points at. Sysinternals shipped
+/// `DbgViewCli.exe` with DebugView v5.02: same capture engine (kernel via
+/// Dbgv.sys, Win32 via the DBWIN buffer), but a real command line — `--log` for
+/// the output file, `--stop`/`--status` for runtime control, no GUI window.
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, PartialEq)]
+enum DbgViewFlavor {
+    /// Classic GUI `Dbgview.exe` (v4.x and earlier 5.x): `/k /l <file>`, killed
+    /// by process name when the stop file appears.
+    Gui,
+    /// `DbgViewCli.exe` (v5.02+): long-option CLI, stops itself on `--stop`.
+    Cli,
+}
+
+/// Detected from the file name, so one path setting keeps working for both the
+/// GUI and CLI builds without adding a mode the user has to understand.
+#[cfg(target_os = "windows")]
+fn detect_flavor(exe: &str) -> DbgViewFlavor {
+    let stem = Path::new(exe)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if stem.contains("cli") {
+        DbgViewFlavor::Cli
+    } else {
+        DbgViewFlavor::Gui
+    }
+}
+
+/// The `--stop`/`--status` invocations only reach the running instance's control
+/// channel; they do not capture anything, so they need no elevation even when
+/// the capturing instance itself holds Highest.
+#[cfg(target_os = "windows")]
+fn cli_argument_list(flavor: DbgViewFlavor, log: &str) -> Vec<String> {
+    match flavor {
+        DbgViewFlavor::Cli => vec![
+            "--capture".into(),
+            "--kernel".into(),
+            // Kernel-only: user-mode OutputDebugString is not wanted here, and
+            // skipping it keeps us out of the Win32 path entirely.
+            "--no-win32".into(),
+            // Latest line complete on write, so the tailer never sees a line
+            // without its terminating CR.
+            "--no-force-cr".into(),
+            "--verbose-kernel".into(),
+            // Clock time with milliseconds: the format the analyzer's timestamp
+            // parsing expects (GUI `/t` equivalent).
+            "--clock-ms".into(),
+            "--no-banner".into(),
+            "--log".into(),
+            log.to_string(),
+        ],
+        // NB: we deliberately do NOT pass `/g` (Capture Global Win32 / session 0).
+        // That switch makes DebugView the global `OutputDebugString` reader, which
+        // forces every session-0 process (services) to synchronize on the DBWIN
+        // protocol and wait for our hidden, file-logging instance to drain each
+        // call — throttling user-mode debuggers/services (e.g. socket-based test
+        // harnesses) and hanging them. Kernel capture (`/k`) uses the Dbgv.sys
+        // driver and is unaffected by it.
+        DbgViewFlavor::Gui => vec![
+            "/t".into(),
+            "/f".into(),
+            "/v".into(),
+            "/k".into(),
+            "/l".into(),
+            log.to_string(),
+        ],
+    }
+}
+
+/// Pause/resume helper for a local CLI capture. Returns `None` for the GUI
+/// build, which has no runtime control channel: its pause stays "stop reading
+/// the log", the only thing a GUI instance allows.
+#[cfg(target_os = "windows")]
+fn cli_pause_command(dbgview: &str, paused: bool) -> Option<Vec<&'static str>> {
+    if detect_flavor(dbgview) != DbgViewFlavor::Cli {
+        return None;
+    }
+    Some(if paused {
+        vec!["--pause", "--no-banner"]
+    } else {
+        vec!["--resume", "--no-banner"]
+    })
+}
+
+/// Argument string for the remote scheduled task, which takes one quoted
+/// command line rather than an array. `log` is emitted verbatim, so the caller
+/// must have already escaped it for the surrounding PowerShell string.
+#[cfg(target_os = "windows")]
+fn remote_argument_line(flavor: DbgViewFlavor, log: &str) -> String {
+    match flavor {
+        DbgViewFlavor::Cli => format!(
+            "--capture --kernel --no-win32 --no-force-cr --verbose-kernel --clock-ms --no-banner --log \"{log}\""
+        ),
+        DbgViewFlavor::Gui => format!("/t /f /v /k /l \"{log}\""),
+    }
+}
+
 /// Build the elevated PowerShell watcher: it accepts the EULA, kills any stale
 /// DbgView, launches DbgView with kernel capture logging to `log`, then waits
 /// for `stop` to appear (written by the app) before terminating DbgView.
-///
-/// NB: we deliberately do NOT pass `/g` (Capture Global Win32 / session 0). That
-/// switch makes DebugView the global `OutputDebugString` reader, which forces
-/// every session-0 process (services) to synchronize on the DBWIN protocol and
-/// wait for our hidden, file-logging instance to drain each call — throttling
-/// user-mode debuggers/services (e.g. socket-based test harnesses) and hanging
-/// them. Kernel capture (`/k`) uses the Dbgv.sys driver and is unaffected by it.
 #[cfg(target_os = "windows")]
 fn build_watcher_script(dbgview: &str, log: &Path, stop: &Path) -> String {
     let esc = |s: &str| s.replace('\'', "''");
+    let flavor = detect_flavor(dbgview);
+    let args = cli_argument_list(flavor, &log.to_string_lossy())
+        .iter()
+        .map(|a| format!("'{}'", esc(a)))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    // The CLI exits on its own `--stop`; the GUI needs a process kill. Either
+    // way a sweep follows, since a GUI instance is never asked politely and a
+    // stale instance from an aborted run must not survive into the next one.
+    // The CLI gets a bounded grace period first: killing it mid-flush would drop
+    // the last lines of the log the tailer may still be reading.
+    let shutdown = if flavor == DbgViewFlavor::Cli {
+        format!(
+            "& '{dbg}' --stop --no-banner | Out-Null\n\
+             $deadline = (Get-Date).AddSeconds(3)\n\
+             while ((Get-Date) -lt $deadline -and (Get-Process 'DbgViewCli' -ErrorAction SilentlyContinue)) {{ Start-Sleep -Milliseconds 100 }}\n\
+             Get-Process Dbgview* | Stop-Process -Force\n",
+            dbg = esc(dbgview),
+        )
+    } else {
+        "Get-Process Dbgview* | Stop-Process -Force\n".to_string()
+    };
+
+    // `-WindowStyle Hidden` on the capture launch: DbgViewCli is a console app,
+    // so without it a console window pops up and stays up for the whole
+    // capture. The GUI build draws its own window and ignores nothing here.
+    let hidden = if flavor == DbgViewFlavor::Cli { "-WindowStyle Hidden " } else { "" };
+
     format!(
         "$ErrorActionPreference='SilentlyContinue'\n\
          reg add \"HKCU\\Software\\Sysinternals\\DebugView\" /v EulaAccepted /t REG_DWORD /d 1 /f | Out-Null\n\
          Get-Process Dbgview* | Stop-Process -Force\n\
-         Start-Process -FilePath '{dbg}' -ArgumentList '/t','/f','/v','/k','/l','{log}'\n\
+         Start-Process {hidden}-FilePath '{dbg}' -ArgumentList {args}\n\
          while (-not (Test-Path -LiteralPath '{stop}')) {{ Start-Sleep -Milliseconds 300 }}\n\
-         Get-Process Dbgview* | Stop-Process -Force\n\
+         {shutdown}\
          Remove-Item -LiteralPath '{stop}' -Force\n",
+        hidden = hidden,
         dbg = esc(dbgview),
-        log = esc(&log.to_string_lossy()),
+        args = args,
+        shutdown = shutdown,
         stop = esc(&stop.to_string_lossy()),
     )
 }
@@ -579,6 +726,21 @@ pub struct RemoteDbgConfig {
     pub dbgview_path: String,
 }
 
+/// Pause/resume a remote capture at the source. Opens its own short-lived SSH
+/// session rather than sharing the tailer's, so a pause never has to wait on a
+/// blocking `Get-Content -Wait` channel. Returns Ok(false) when the target runs
+/// the GUI build, which has no runtime control channel.
+fn remote_set_paused(cfg: &SshConfig, dbgview_path: &str, paused: bool) -> Result<bool, String> {
+    if detect_flavor(dbgview_path) != DbgViewFlavor::Cli {
+        return Ok(false);
+    }
+    let flag = if paused { "--pause" } else { "--resume" };
+    let script = format!("& '{}' {flag} --no-banner", ps_escape(dbgview_path));
+    let sess = remote::connect(cfg)?;
+    remote::run_ps(&sess, &script)?;
+    Ok(true)
+}
+
 /// Producer thread for a remote DbgView source: SSH to the target, run DbgView
 /// elevated (scheduled task, RunLevel Highest) logging to a temp file, then tail
 /// that file over SSH (`Get-Content -Wait`) and feed the engine. Cleans up on stop.
@@ -615,19 +777,22 @@ fn spawn_ssh_dbgview(
         );
         let _ = remote::run_ps(&sess, &sweep);
 
+        // The scheduled task runs whichever build the target path points at, so
+        // its argument line is chosen by the same filename sniff used locally.
+        let flavor = detect_flavor(&dbgview_path);
         let setup = format!(
             "$ErrorActionPreference='SilentlyContinue'\n\
              reg add \"HKCU\\Software\\Sysinternals\\DebugView\" /v EulaAccepted /t REG_DWORD /d 1 /f | Out-Null\n\
              Remove-Item -LiteralPath '{log}' -Force\n\
              New-Item -ItemType File -Path '{log}' -Force | Out-Null\n\
              Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false\n\
-             $a = New-ScheduledTaskAction -Execute '{dbg}' -Argument '/t /f /v /k /l \"{logq}\"'\n\
+             $a = New-ScheduledTaskAction -Execute '{dbg}' -Argument '{args}'\n\
              $p = New-ScheduledTaskPrincipal -UserId '{user}' -RunLevel Highest -LogonType Password\n\
              $t = New-ScheduledTask -Action $a -Principal $p\n\
              Register-ScheduledTask -TaskName '{task}' -InputObject $t -User '{user}' -Password '{pass}' -Force | Out-Null\n\
              Start-ScheduledTask -TaskName '{task}'\n",
             log = ps_escape(&log),
-            logq = log,
+            args = ps_escape(&remote_argument_line(flavor, &log)),
             task = ps_escape(&task),
             dbg = ps_escape(&dbgview_path),
             user = ps_escape(&cfg.user),
@@ -656,12 +821,61 @@ fn spawn_ssh_dbgview(
         let mut carry = String::new();
         let mut buf = [0u8; 8192];
 
+        // Pause is applied at the source: this thread owns the SSH session and
+        // is the only one allowed to touch it, so the frontend's request is
+        // handed over here. `announced` tracks the last state pushed to the
+        // target, so the control command is issued once per transition.
+        let mut announced: Option<bool> = None;
+        // Set when a paused capture resumes: the first loop iteration past the
+        // pause throws away everything buffered during it (see below).
+        let mut drain_until_quiet = false;
+
         while !stop.load(Ordering::Relaxed) {
-            // While paused, don't drain the SSH stream: buffering new remote
-            // lines and then flushing them all at once on resume would overflow
-            // the 500k ring (evicting the lines the user paused to read). The
-            // remote `Get-Content -Wait` just keeps writing to the tail file.
-            if paused.load(Ordering::Relaxed) {
+            let want_paused = paused.load(Ordering::Relaxed);
+
+            // Resuming means "from now on": everything the target wrote while we
+            // were paused is still queued in the SSH channel, so throw it away
+            // rather than replaying the paused stretch into the ring. Drain
+            // BEFORE sending --resume, so the first lines of the resumed capture
+            // are not discarded along with the backlog.
+            if !want_paused && drain_until_quiet {
+                drain_until_quiet = false;
+                carry.clear();
+                loop {
+                    match ch.read(&mut buf) {
+                        // Ok(0) is EOF on a non-blocking channel; no data is
+                        // reported as WouldBlock below.
+                        Ok(0) => break,
+                        Ok(_) => continue,
+                        Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
+                        Err(_) => break,
+                    }
+                }
+            }
+
+            if announced != Some(want_paused) {
+                let sent = match remote_set_paused(&cfg, &dbgview_path, want_paused) {
+                    Ok(supported) => supported,
+                    Err(e) => {
+                        // Report but keep tailing: a failed pause must not kill
+                        // a capture that is otherwise running fine.
+                        eprintln!("Remote pause request failed: {}", e);
+                        false
+                    }
+                };
+                if sent {
+                    announced = Some(want_paused);
+                } else {
+                    // GUI target: no control channel, so fall back to the old
+                    // behaviour of just not reading.
+                    announced = None;
+                }
+            }
+
+            // While paused, don't drain the SSH stream: leaving the backlog in
+            // the channel keeps the ring frozen at the paused view.
+            if want_paused {
+                drain_until_quiet = true;
                 std::thread::sleep(Duration::from_millis(POLL_MS / 8));
                 continue;
             }
@@ -701,13 +915,28 @@ fn spawn_ssh_dbgview(
             }
         }
 
-        // Cleanup: stop DbgView and remove the task/log on the target.
+        // Cleanup: stop DbgView and remove the task/log on the target. The CLI
+        // flushes its log on `--stop`, so it is asked first; the process sweep
+        // afterwards covers the GUI build and any instance that ignored us.
         sess.set_blocking(true);
+        let stop_capture = if detect_flavor(&dbgview_path) == DbgViewFlavor::Cli {
+            // Bounded grace period so the CLI can flush its log before the sweep.
+            format!(
+                "& '{dbg}' --stop --no-banner | Out-Null\n\
+                 $deadline = (Get-Date).AddSeconds(3)\n\
+                 while ((Get-Date) -lt $deadline -and (Get-Process 'DbgViewCli' -ErrorAction SilentlyContinue)) {{ Start-Sleep -Milliseconds 100 }}\n",
+                dbg = ps_escape(&dbgview_path),
+            )
+        } else {
+            String::new()
+        };
         let cleanup = format!(
             "$ErrorActionPreference='SilentlyContinue'\n\
+             {stop_capture}\
              Get-Process Dbgview* | Stop-Process -Force\n\
              Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false\n\
              Remove-Item -LiteralPath '{log}' -Force\n",
+            stop_capture = stop_capture,
             task = ps_escape(&task),
             log = ps_escape(&log),
         );
@@ -737,6 +966,7 @@ pub fn start_dbgview_remote(
     let engine = Arc::new(Mutex::new(LiveEngine::new(RING_CAP)));
     let stop = Arc::new(AtomicBool::new(false));
     let paused = Arc::new(AtomicBool::new(false));
+    let dbgview_exe = config.dbgview_path.clone();
     let handle = spawn_ssh_dbgview(
         app,
         source_id.clone(),
@@ -756,6 +986,10 @@ pub fn start_dbgview_remote(
             paused,
             handle: Some(handle),
             stop_file: None,
+            // Remote capture pauses at the source over SSH (see
+            // `set_stream_paused`), so the log stays empty while paused.
+            dbgview_exe: Some(dbgview_exe),
+            resume_seek: Arc::new(AtomicBool::new(false)),
             cleanup_files: Vec::new(),
         },
     );
@@ -801,6 +1035,7 @@ pub fn start_dbgview_local(
         let engine = Arc::new(Mutex::new(LiveEngine::new(RING_CAP)));
         let stop_flag = Arc::new(AtomicBool::new(false));
         let paused = Arc::new(AtomicBool::new(false));
+        let resume_seek = Arc::new(AtomicBool::new(false));
         let handle = spawn_file_tail(
             app,
             source_id.clone(),
@@ -808,6 +1043,7 @@ pub fn start_dbgview_local(
             Arc::clone(&engine),
             Arc::clone(&stop_flag),
             Arc::clone(&paused),
+            Some(Arc::clone(&resume_seek)),
         );
 
         let mut sources = state.sources.write().map_err(|e| e.to_string())?;
@@ -819,6 +1055,8 @@ pub fn start_dbgview_local(
                 paused,
                 handle: Some(handle),
                 stop_file: Some(stop),
+                dbgview_exe: Some(dbgview_path),
+                resume_seek,
                 cleanup_files,
             },
         );
@@ -863,6 +1101,38 @@ pub fn set_stream_paused(
     let src = sources
         .get(&source_id)
         .ok_or_else(|| "Stream not found".to_string())?;
+
+    // CLI captures can stop capturing outright: `--pause` halts output at the
+    // source, so nothing accumulates in the log file and resuming picks up from
+    // the current moment. Do this BEFORE flagging the producer, so no lines
+    // written between the two are read late.
+    // Best-effort: if the CLI's control channel rejects a non-elevated caller
+    // the capture simply keeps running, and the resume seek below still gives
+    // the user "start from now" — only the wasted disk writes differ.
+    #[cfg(target_os = "windows")]
+    if let Some(exe) = &src.dbgview_exe {
+        if let Some(args) = cli_pause_command(exe, paused) {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            match std::process::Command::new(exe)
+                .args(&args)
+                .creation_flags(CREATE_NO_WINDOW)
+                .status()
+            {
+                Ok(s) if !s.success() => {
+                    eprintln!("DbgViewCli {} returned {:?}", args[0], s.code());
+                }
+                Err(e) => eprintln!("DbgViewCli {} failed: {}", args[0], e),
+                _ => {}
+            }
+        }
+    }
+
+    // Resume skips the paused stretch: flag the tailer to jump to the current
+    // end of the file rather than replaying everything written while frozen.
+    if !paused {
+        src.resume_seek.store(true, Ordering::Relaxed);
+    }
     src.paused.store(paused, Ordering::Relaxed);
     Ok(())
 }
