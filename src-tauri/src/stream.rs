@@ -70,9 +70,15 @@ fn compile_filters(filters: &[FilterItem]) -> Result<Vec<CompiledFilter>, String
     Ok(compiled)
 }
 
-fn classify_line(line: &str, filters: &[CompiledFilter]) -> u8 {
+/// Classify one line. Returns its tag code plus the index (into `filters`) of
+/// the filter it was credited to.
+///
+/// A line is credited to at most one filter — the first exclude match, else the
+/// first highlight match — mirroring `engine.rs::filter` so hit counts agree
+/// between a static file and a live capture.
+fn classify_line(line: &str, filters: &[CompiledFilter]) -> (u8, Option<usize>) {
     // Exclude pass first (matches engine.rs): any exclude hit => code 1.
-    for f in filters.iter() {
+    for (i, f) in filters.iter().enumerate() {
         if !f.is_exclude {
             continue;
         }
@@ -82,7 +88,7 @@ fn classify_line(line: &str, filters: &[CompiledFilter]) -> u8 {
             line.contains(&f.text)
         };
         if matched {
-            return 1;
+            return (1, Some(i));
         }
     }
     // Highlight pass: first non-exclude match => 2 + its index.
@@ -96,11 +102,14 @@ fn classify_line(line: &str, filters: &[CompiledFilter]) -> u8 {
             line.contains(&f.text)
         };
         if matched {
-            return (2 + i) as u8;
+            return ((2 + i) as u8, Some(i));
         }
     }
-    0
+    (0, None)
 }
+
+/// Sentinel in `LiveEngine::matched` for "this line matched no filter".
+const NO_MATCH: u16 = u16::MAX;
 
 /// Ring buffer of live log lines with absolute line numbering. Absolute indices
 /// stay stable across front-eviction so selections/notes keyed by absolute
@@ -108,6 +117,11 @@ fn classify_line(line: &str, filters: &[CompiledFilter]) -> u8 {
 pub struct LiveEngine {
     lines: VecDeque<String>,
     codes: VecDeque<u8>,
+    /// Index into `filters` of the filter each line was credited to, or
+    /// `NO_MATCH`. Kept parallel to `lines` so hit counts stay exact as the ring
+    /// evicts the front (a per-filter total would have to be decremented
+    /// blindly, since evicted lines are gone).
+    matched: VecDeque<u16>,
     /// Absolute index of the front element in the ring buffer.
     first_abs: usize,
     /// Total lines ever appended (== first_abs + lines.len()).
@@ -131,6 +145,7 @@ impl LiveEngine {
         LiveEngine {
             lines: VecDeque::new(),
             codes: VecDeque::new(),
+            matched: VecDeque::new(),
             first_abs: 0,
             total: 0,
             cap,
@@ -168,9 +183,11 @@ impl LiveEngine {
         let mut trimmed = 0usize;
         for line in batch {
             let abs = self.total;
-            let code = classify_line(&line, &self.filters);
+            let (code, matched) = classify_line(&line, &self.filters);
             self.lines.push_back(line);
             self.codes.push_back(code);
+            self.matched
+                .push_back(matched.map_or(NO_MATCH, |m| m.min(NO_MATCH as usize - 1) as u16));
             self.total += 1;
             if self.tracking_needed() && self.is_visible(code) {
                 self.filtered_abs.push_back(abs);
@@ -179,6 +196,7 @@ impl LiveEngine {
             if self.lines.len() > self.cap {
                 self.lines.pop_front();
                 self.codes.pop_front();
+                self.matched.pop_front();
                 self.first_abs += 1;
                 self.dropped += 1;
                 while let Some(&front) = self.filtered_abs.front() {
@@ -197,6 +215,7 @@ impl LiveEngine {
     fn clear(&mut self) {
         self.lines.clear();
         self.codes.clear();
+        self.matched.clear();
         self.filtered_abs.clear();
         self.first_abs = 0;
         self.total = 0;
@@ -212,12 +231,43 @@ impl LiveEngine {
         self.filtered_abs.clear();
         let track = self.tracking_needed();
         for i in 0..self.lines.len() {
-            let code = classify_line(&self.lines[i], &self.filters);
+            let (code, matched) = classify_line(&self.lines[i], &self.filters);
             self.codes[i] = code;
+            self.matched[i] = matched.map_or(NO_MATCH, |m| m.min(NO_MATCH as usize - 1) as u16);
             if track && self.is_visible(code) {
                 self.filtered_abs.push_back(self.first_abs + i);
             }
         }
+    }
+
+    /// Absolute indices of the retained lines credited to `index` (an
+    /// enabled-filter position), ascending. Backs filter-hit navigation for a
+    /// live source, which has no whole-file `tagCodes` array to scan.
+    fn filter_hits(&self, index: usize) -> Vec<usize> {
+        if index >= self.filters.len() {
+            return Vec::new();
+        }
+        let want = index as u16;
+        self.matched
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &m)| if m == want { Some(self.first_abs + i) } else { None })
+            .collect()
+    }
+
+    /// Hit count per filter, indexed like `self.filters` (which is the enabled
+    /// filter list, so it lines up with the codes/palette). Counts the retained
+    /// window only: evicted lines are gone, matching the live view's scope.
+    fn hit_counts(&self) -> Vec<usize> {
+        let mut counts = vec![0usize; self.filters.len()];
+        for &m in self.matched.iter() {
+            if m != NO_MATCH {
+                if let Some(c) = counts.get_mut(m as usize) {
+                    *c += 1;
+                }
+            }
+        }
+        counts
     }
 
     fn filtered_snapshot(&self) -> Vec<usize> {
@@ -330,6 +380,7 @@ impl LiveEngine {
             dropped: self.dropped,
             filtered_added,
             filtered_trimmed,
+            hit_counts: self.hit_counts(),
         }
     }
 }
@@ -347,6 +398,11 @@ pub struct StreamDelta {
     pub dropped: usize,
     pub filtered_added: Vec<usize>,
     pub filtered_trimmed: usize,
+    /// Hit count per enabled filter, indexed by enabled-filter position (so it
+    /// lines up with the frontend's `filters` after skipping disabled ones).
+    /// Recounted from the retained window on every batch: the ring evicts the
+    /// front, so a running total would drift.
+    pub hit_counts: Vec<usize>,
 }
 
 /// Result of a live-stream search. `matches` are absolute indices of the
@@ -1164,15 +1220,21 @@ pub fn clear_stream(state: tauri::State<'_, StreamState>, source_id: String) -> 
     state.with_engine(&source_id, |eng| eng.clear())
 }
 
+/// Push the filter set to a live source and return the per-filter hit counts
+/// over the lines already captured (indexed by enabled-filter position, the same
+/// order as the frontend's `filters` with disabled ones removed).
 #[tauri::command]
 pub fn set_stream_filters(
     state: tauri::State<'_, StreamState>,
     source_id: String,
     filters: Vec<FilterItem>,
     show_filtered_only: bool,
-) -> Result<(), String> {
+) -> Result<Vec<usize>, String> {
     let compiled = compile_filters(&filters)?;
-    state.with_engine(&source_id, move |eng| eng.set_filters(compiled, show_filtered_only))
+    state.with_engine(&source_id, move |eng| {
+        eng.set_filters(compiled, show_filtered_only);
+        eng.hit_counts()
+    })
 }
 
 /// Pause / resume a live source's producer (see `LiveSource::paused`). Pausing
@@ -1238,6 +1300,18 @@ pub fn get_stream_filtered(
     source_id: String,
 ) -> Result<Vec<usize>, String> {
     state.with_engine(&source_id, |eng| eng.filtered_snapshot())
+}
+
+/// Absolute indices of the retained lines credited to one enabled filter, for
+/// Ctrl+Left/Right filter-hit navigation on a live source. `filter_index` is the
+/// enabled-filter position (the frontend's filters with disabled ones removed).
+#[tauri::command]
+pub fn get_stream_filter_hits(
+    state: tauri::State<'_, StreamState>,
+    source_id: String,
+    filter_index: usize,
+) -> Result<Vec<usize>, String> {
+    state.with_engine(&source_id, |eng| eng.filter_hits(filter_index))
 }
 
 /// Search the retained window of a live source. `from_abs` continues an earlier

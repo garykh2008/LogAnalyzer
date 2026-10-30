@@ -45,10 +45,44 @@ export interface StreamDelta {
   dropped: number;
   filteredAdded: number[];  // newly matched absolute indices this batch
   filteredTrimmed: number;  // matched indices evicted from the front this batch
+  hitCounts: number[];      // hit count per enabled filter (enabled-filter position)
 }
 
 /// Debounce handle for the live-search re-scan triggered by stream deltas.
 let liveSearchTimer: ReturnType<typeof setTimeout> | null = null;
+
+/// Nearest hit strictly after `start` in an ascending index list, or before it
+/// when `reverse`; wraps around at either end. Returns -1 when there is no hit.
+function pickNeighbor(hits: number[], start: number, reverse: boolean): number {
+  if (hits.length === 0) return -1;
+  if (reverse) {
+    for (let i = hits.length - 1; i >= 0; i--) {
+      if (hits[i] < start) return hits[i];
+    }
+    // Nothing above `start`: wrap to the last hit overall.
+    return hits[hits.length - 1];
+  }
+  for (let i = 0; i < hits.length; i++) {
+    if (hits[i] > start) return hits[i];
+  }
+  // Nothing below `start`: wrap to the first hit overall.
+  return hits[0];
+}
+
+/// Stamp backend hit counts onto the filter list. The counts are indexed by
+/// *enabled* filter position (the backend only ever sees enabled filters), so
+/// they are matched up against the enabled subset in order; disabled filters
+/// report 0.
+function applyHitCounts(
+  filters: FilterItem[],
+  hitCounts: number[] | null
+): FilterItem[] {
+  let i = 0;
+  return filters.map((f) => {
+    const hits = f.enabled && hitCounts ? hitCounts[i++] ?? 0 : 0;
+    return f.hits === hits ? f : { ...f, hits };
+  });
+}
 
 function parseTatFilters(xmlText: string): Omit<FilterItem, 'idx' | 'hits'>[] {
   const parser = new DOMParser();
@@ -314,7 +348,23 @@ export const useStore = create<AppState>()(
     // Switching sources invalidates any search: results are keyed by the
     // absolute/raw line index of the source they were found in.
     if (!file) {
-      set({ activeFile: null, lineCount: 0, selectedLine: null, selectedLines: [], searchResults: [], activeSearchResults: [], searchIndex: -1, searchScannedTotal: 0 });
+      // Nothing is open, so there is nothing left to count: drop the per-filter
+      // hit counts (and any transient display state) from the closed source
+      // rather than leaving its numbers in the Filters panel.
+      set({
+        activeFile: null,
+        lineCount: 0,
+        selectedLine: null,
+        selectedLines: [],
+        searchResults: [],
+        activeSearchResults: [],
+        searchIndex: -1,
+        searchScannedTotal: 0,
+        filteredIndices: null,
+        tagCodes: [],
+        timelineEvents: [],
+        filters: applyHitCounts(get().filters, null),
+      });
       return;
     }
     // Live source: no file to load; drive the view from stream metadata.
@@ -602,13 +652,15 @@ export const useStore = create<AppState>()(
         patch.activeSearchResults = [];
         patch.searchIndex = -1;
         patch.searchScannedTotal = 0;
+        // The buffer is empty, so every per-filter count is zero.
+        patch.filters = applyHitCounts(s.filters, null);
       }
       return patch;
     });
   },
 
   applyStreamDelta: (delta) => {
-    const { sourceId, total, firstAbs, bufferLen, dropped, filteredAdded, filteredTrimmed } = delta;
+    const { sourceId, total, firstAbs, bufferLen, dropped, filteredAdded, filteredTrimmed, hitCounts } = delta;
     set((s) => {
       const existing = s.liveSources[sourceId] || s.livePending[sourceId];
       if (!existing) return {} as Partial<AppState>;
@@ -624,6 +676,9 @@ export const useStore = create<AppState>()(
       patch.liveSources = { ...s.liveSources, [sourceId]: meta };
       if (s.activeFile === sourceId) {
         patch.lineCount = bufferLen;
+        // The counts cover the retained window only, so they are a snapshot to
+        // stamp, never an increment.
+        patch.filters = applyHitCounts(s.filters, hitCounts);
         // Maintain the display index list incrementally when one is in use
         // (filtered view, or full view with excludes): drop evicted entries off
         // the front, append newly visible indices.
@@ -1024,7 +1079,14 @@ export const useStore = create<AppState>()(
 
   applyFilters: async () => {
     const { activeFile, filters, showFilteredOnly } = get();
-    if (!activeFile) return;
+    // No open source: there is nothing to count against, so clear the stale hit
+    // counts from whichever file was open last instead of leaving them behind.
+    if (!activeFile) {
+      if (filters.some((f) => f.hits !== 0)) {
+        set({ filters: filters.map((f) => (f.hits === 0 ? f : { ...f, hits: 0 })) });
+      }
+      return;
+    }
 
     const rustFilters = filters
       .filter((f) => f.enabled)
@@ -1056,8 +1118,9 @@ export const useStore = create<AppState>()(
     const usesDisplayList = showFilteredOnly || hasExclude;
 
     if (get().liveSources[activeFile]) {
+      let hitCounts: number[] | null = null;
       try {
-        await invoke('set_stream_filters', {
+        hitCounts = await invoke<number[]>('set_stream_filters', {
           sourceId: activeFile,
           filters: rustFilters,
           showFilteredOnly,
@@ -1083,6 +1146,7 @@ export const useStore = create<AppState>()(
         filteredIndices: fi,
         tagCodes: [],
         liveCodesTick: s.liveCodesTick + 1,
+        filters: applyHitCounts(s.filters, hitCounts),
         activeSearchResults: activeResults,
         // Keep the user's ordinal when it still exists, otherwise fall back to
         // the first match (or none).
@@ -1109,14 +1173,6 @@ export const useStore = create<AppState>()(
           palette[activeCount + 2] = { fg: f.fg_color, bg: f.bg_color };
           activeCount++;
         }
-      });
-
-      const updatedFilters = get().filters.map((f) => {
-        const enabledIdx = rustFilters.findIndex((rf) => rf.idx === f.idx);
-        return {
-          ...f,
-          hits: enabledIdx !== -1 ? hitCounts[enabledIdx] : 0,
-        };
       });
 
       // Resolve the display index list for the current mode:
@@ -1147,7 +1203,7 @@ export const useStore = create<AppState>()(
         filteredIndices: displayIndices,
         filterPalette: palette,
         timelineEvents: events,
-        filters: updatedFilters,
+        filters: applyHitCounts(get().filters, hitCounts),
         activeSearchResults: activeResults,
       });
     } catch (err) {
@@ -1277,26 +1333,44 @@ export const useStore = create<AppState>()(
   selectedFilterIdx: null,
   setSelectedFilterIdx: (idx) => set({ selectedFilterIdx: idx }),
   navigateFilterHit: (reverse = false) => {
-    const { filters, tagCodes, selectedLine, selectedFilterIdx, activeFile } = get();
-    if (!activeFile || selectedFilterIdx === null || selectedFilterIdx < 0 || tagCodes.length === 0) return;
+    const { filters, tagCodes, selectedLine, selectedFilterIdx, activeFile, liveSources } = get();
+    if (!activeFile || selectedFilterIdx === null || selectedFilterIdx < 0) return;
 
-    // Find the target tag code for the selected filter
+    // Position of the selected filter among the *enabled* ones (the backend only
+    // sees enabled filters, and codes/hit counts are indexed that way).
+    let enabledPos = 0;
     let targetCode = -1;
-    let currJ = 0;
     filters.forEach((f, i) => {
-      if (f.enabled) {
-        if (i === selectedFilterIdx) {
-          targetCode = currJ + 2;
-        }
-        currJ++;
-      }
+      if (!f.enabled) return;
+      if (i === selectedFilterIdx) targetCode = enabledPos + 2;
+      enabledPos++;
     });
-
-    if (targetCode === -1) return;
+    if (targetCode === -1) return; // selected filter is disabled
 
     const start = selectedLine !== null ? selectedLine : 0;
-    let found = -1;
 
+    // Live source: per-line codes live in the backend ring buffer (the frontend
+    // only ever holds the visible window's codes, and `tagCodes` stays empty),
+    // so ask it for this filter's hit indices instead of scanning locally.
+    if (liveSources[activeFile]) {
+      const filterIndex = targetCode - 2;
+      invoke<number[]>('get_stream_filter_hits', { sourceId: activeFile, filterIndex })
+        .then((hits) => {
+          // Guard: the user may have moved on while the query was in flight.
+          const now = get();
+          if (now.activeFile !== activeFile || now.selectedFilterIdx !== selectedFilterIdx) return;
+          const found = pickNeighbor(hits, start, reverse);
+          if (found !== -1) now.setSelectedLine(found);
+        })
+        .catch((err) => console.error('get_stream_filter_hits failed:', err));
+      return;
+    }
+
+    if (tagCodes.length === 0) return;
+
+    // Static source: the full code array is in memory, so scan it directly
+    // rather than materialising every hit index on each key press.
+    let found = -1;
     if (reverse) {
       for (let r = start - 1; r >= 0; r--) {
         if (tagCodes[r] === targetCode) {
@@ -1304,7 +1378,6 @@ export const useStore = create<AppState>()(
           break;
         }
       }
-      // Wrap around to bottom if not found from current pos
       if (found === -1) {
         for (let r = tagCodes.length - 1; r > start; r--) {
           if (tagCodes[r] === targetCode) {
@@ -1320,7 +1393,6 @@ export const useStore = create<AppState>()(
           break;
         }
       }
-      // Wrap around to top if not found from current pos
       if (found === -1) {
         for (let r = 0; r < start; r++) {
           if (tagCodes[r] === targetCode) {
@@ -1331,9 +1403,7 @@ export const useStore = create<AppState>()(
       }
     }
 
-    if (found !== -1) {
-      get().setSelectedLine(found);
-    }
+    if (found !== -1) get().setSelectedLine(found);
   },
 
   // Notes
