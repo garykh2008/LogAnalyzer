@@ -12,6 +12,11 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ isOpen, onClose })
   const isRegexSearch = useStore((s) => s.isRegexSearch);
   const isCaseSensitiveSearch = useStore((s) => s.isCaseSensitiveSearch);
   const activeSearchResults = useStore((s) => s.activeSearchResults);
+  // A live source puts its capture control bar in the viewport's top-right
+  // corner (LogViewport), so the overlay drops below it instead of covering it.
+  const activeFile = useStore((s) => s.activeFile);
+  const liveSources = useStore((s) => s.liveSources);
+  const isLive = !!activeFile && !!liveSources[activeFile];
   const searchIndex = useStore((s) => s.searchIndex);
   const isSearching = useStore((s) => s.isSearching);
   const setSearchQuery = useStore((s) => s.setSearchQuery);
@@ -67,7 +72,11 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ isOpen, onClose })
   const currentMatch = matchCount > 0 && searchIndex !== -1 ? searchIndex + 1 : 0;
 
   return (
-    <div className="absolute top-4 right-10 z-35 w-[420px] bg-card border border-border rounded-xl shadow-2xl p-2 select-none backdrop-blur-[2px]">
+    <div
+      className={`absolute ${
+        isLive ? 'top-12' : 'top-4'
+      } right-10 z-35 w-[420px] bg-card border border-border rounded-xl shadow-2xl p-2 select-none backdrop-blur-[2px]`}
+    >
       <div className="flex items-center gap-1.5 relative">
         <div className="flex-1 relative">
           <input

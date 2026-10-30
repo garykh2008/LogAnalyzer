@@ -349,6 +349,7 @@ pub fn run() {
             stream::set_stream_filters,
             stream::get_stream_lines,
             stream::get_stream_codes,
+            stream::search_stream,
             stream::get_stream_filtered,
             stream::save_stream
         ])

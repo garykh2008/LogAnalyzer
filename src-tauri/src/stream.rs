@@ -224,6 +224,79 @@ impl LiveEngine {
         self.filtered_abs.iter().copied().collect()
     }
 
+    /// Absolute indices of retained lines at or after `from_abs` that match the
+    /// query, using the same semantics as `LogEngine::search` (substring or
+    /// regex, case-insensitive unless asked otherwise).
+    ///
+    /// `from_abs` lets a live search continue incrementally: the caller passes
+    /// back the `scanned_total` of its previous call so a running capture only
+    /// scans the lines appended since then.
+    fn search(
+        &self,
+        query: &str,
+        is_regex: bool,
+        case_sensitive: bool,
+        from_abs: usize,
+    ) -> Result<StreamSearchResult, String> {
+        use rayon::prelude::*;
+
+        let is_match: Box<dyn Fn(&str) -> bool + Sync> = if is_regex {
+            let re = regex::RegexBuilder::new(query)
+                .case_insensitive(!case_sensitive)
+                .build()
+                .map_err(|e| e.to_string())?;
+            Box::new(move |line: &str| re.is_match(line))
+        } else if case_sensitive {
+            let needle = query.to_string();
+            Box::new(move |line: &str| line.contains(&needle))
+        } else {
+            let needle = query.to_lowercase();
+            Box::new(move |line: &str| line.to_lowercase().contains(&needle))
+        };
+
+        // Lines before the ring front are gone; nothing below it can match.
+        // `skip` is the offset into the virtual concatenation of the ring's two
+        // slices (`VecDeque` is not contiguous).
+        let skip = from_abs.max(self.first_abs) - self.first_abs;
+        let base = self.first_abs;
+
+        let (front, back) = self.lines.as_slices();
+        let mut matches: Vec<usize> = Vec::new();
+
+        if skip < front.len() {
+            let mut hits: Vec<usize> = front[skip..]
+                .par_iter()
+                .enumerate()
+                .filter_map(|(i, line)| if is_match(line) { Some(skip + i) } else { None })
+                .collect();
+            matches.append(&mut hits);
+        }
+        // The back slice starts at virtual offset `front.len()`; when `skip`
+        // lands inside it, only the tail from that offset is in range.
+        let back_skip = skip.saturating_sub(front.len());
+        if back_skip < back.len() {
+            let mut hits: Vec<usize> = back[back_skip..]
+                .par_iter()
+                .enumerate()
+                .filter_map(|(i, line)| {
+                    if is_match(line) { Some(back_skip + i) } else { None }
+                })
+                .collect();
+            matches.append(&mut hits);
+        }
+
+        // Slice-relative offsets -> absolute line indices.
+        for m in matches.iter_mut() {
+            *m += base;
+        }
+
+        Ok(StreamSearchResult {
+            matches,
+            scanned_total: self.total,
+            first_abs: self.first_abs,
+        })
+    }
+
     /// Snapshot of the retained lines for saving to disk. A live capture is
     /// always dumped in full: the ring buffer is the only place captured lines
     /// live, so a filtered export would permanently lose the currently hidden
@@ -274,6 +347,19 @@ pub struct StreamDelta {
     pub dropped: usize,
     pub filtered_added: Vec<usize>,
     pub filtered_trimmed: usize,
+}
+
+/// Result of a live-stream search. `matches` are absolute indices of the
+/// retained lines that matched; `scanned_total` is the engine's `total` at scan
+/// time, so the caller can ask for only the lines appended since then on the
+/// next pass. `first_abs` is the ring front, so the caller can drop matches that
+/// have since been evicted.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamSearchResult {
+    pub matches: Vec<usize>,
+    pub scanned_total: usize,
+    pub first_abs: usize,
 }
 
 /// A running live source: its engine plus a stop flag, pause flag, and
@@ -1152,6 +1238,24 @@ pub fn get_stream_filtered(
     source_id: String,
 ) -> Result<Vec<usize>, String> {
     state.with_engine(&source_id, |eng| eng.filtered_snapshot())
+}
+
+/// Search the retained window of a live source. `from_abs` continues an earlier
+/// search: pass the previous result's `scannedTotal` to scan only the lines
+/// appended since. Returns every match from `from_abs` on, so the caller merges
+/// (and trims evicted entries) on its side.
+#[tauri::command]
+pub fn search_stream(
+    state: tauri::State<'_, StreamState>,
+    source_id: String,
+    query: String,
+    is_regex: bool,
+    case_sensitive: bool,
+    from_abs: usize,
+) -> Result<StreamSearchResult, String> {
+    state.with_engine(&source_id, |eng| {
+        eng.search(&query, is_regex, case_sensitive, from_abs)
+    })?
 }
 
 #[tauri::command]

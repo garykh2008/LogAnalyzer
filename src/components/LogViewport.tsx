@@ -15,6 +15,8 @@ export const LogViewport: React.FC = () => {
   const selectedLines = useStore((s) => s.selectedLines);
   const setSelectedLine = useStore((s) => s.setSelectedLine);
   const searchQuery = useStore((s) => s.searchQuery);
+  const isRegexSearch = useStore((s) => s.isRegexSearch);
+  const isCaseSensitiveSearch = useStore((s) => s.isCaseSensitiveSearch);
   const activeSearchResults = useStore((s) => s.activeSearchResults);
   const tagCodes = useStore((s) => s.tagCodes);
   const filteredIndices = useStore((s) => s.filteredIndices);
@@ -332,14 +334,21 @@ export const LogViewport: React.FC = () => {
       if (displayIdx === -1) return;
     }
 
-    const denom = Math.max(1, totalDisplayLines - 1);
-    const pct = displayIdx / denom;
+    // Center the target row vertically: put half a screen of context above it
+    // (clamped at both ends, so the first/last matches still land on screen).
+    // The scrollbar is then positioned from the resulting start index — the same
+    // mapping handleScroll uses — so a later scroll event can't snap the view.
+    const newStart = Math.max(
+      0,
+      Math.min(displayIdx - Math.floor((fitCount - 1) / 2), totalDisplayLines - fitCount)
+    );
+    const safeStart = isNaN(newStart) ? 0 : newStart;
+
+    const pct = safeStart / Math.max(1, totalDisplayLines - fitCount);
     const maxScroll = scrollRef.current.scrollHeight - scrollRef.current.clientHeight;
-    
     scrollRef.current.scrollTop = isNaN(pct) ? 0 : pct * maxScroll;
-    const newStart = Math.max(0, Math.min(displayIdx - 2, totalDisplayLines - fitCount));
-    setStartIndex(isNaN(newStart) ? 0 : newStart);
-  }, [selectedLine, totalDisplayLines, filteredIndices]);
+    setStartIndex(safeStart);
+  }, [selectedLine, totalDisplayLines, filteredIndices, fitCount]);
 
   // Preservation recording
   const recordAnchor = () => {
@@ -460,28 +469,46 @@ export const LogViewport: React.FC = () => {
     ctx.fillRect(0, viewY, canvas.width, Math.max(4, viewH));
   }, [activeSearchResults, totalDisplayLines, filteredIndices, startIndex, visibleCount]);
 
-  // Highlighting matches
+  // Highlighting matches. Mirrors the search options exactly (regex vs literal,
+  // case sensitivity) so what's highlighted always agrees with the match count.
   const renderLineContent = (text: string, query: string) => {
     if (!query) return <span>{text}</span>;
+
+    // Walk the matches with exec() rather than split(): a user regex may itself
+    // contain capture groups, which `split` would interleave into its output.
+    let re: RegExp;
     try {
-      const escapedQuery = query.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
-      const regex = new RegExp(`(${escapedQuery})`, 'gi');
-      const parts = text.split(regex);
-      
-      return (
-        <span>
-          {parts.map((part, i) =>
-            regex.test(part) ? (
-              <mark key={i} className="bg-amber-500/30 dark:bg-amber-500/50 text-foreground rounded-[2px] px-0.5 font-semibold">{part}</mark>
-            ) : (
-              part
-            )
-          )}
-        </span>
-      );
+      const pattern = isRegexSearch
+        ? query
+        : query.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
+      re = new RegExp(pattern, isCaseSensitiveSearch ? 'g' : 'gi');
     } catch {
       return <span>{text}</span>;
     }
+
+    const parts: React.ReactNode[] = [];
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      // Zero-length match: emit it as-is and advance, or exec() never terminates.
+      if (m[0] === '') {
+        re.lastIndex += 1;
+        continue;
+      }
+      if (m.index > last) parts.push(text.slice(last, m.index));
+      parts.push(
+        <mark
+          key={`m${m.index}`}
+          className="bg-amber-500/30 dark:bg-amber-500/50 text-foreground rounded-[2px] px-0.5 font-semibold"
+        >
+          {m[0]}
+        </mark>
+      );
+      last = m.index + m[0].length;
+    }
+    if (parts.length === 0) return <span>{text}</span>;
+    if (last < text.length) parts.push(text.slice(last));
+    return <span>{parts}</span>;
   };
 
   // Drag and drop

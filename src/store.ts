@@ -29,6 +29,13 @@ export interface LiveSourceMeta {
   dropped: number;    // lines evicted from the front
 }
 
+/** Result of a live-stream search (`search_stream` command). */
+export interface StreamSearchResult {
+  matches: number[];      // absolute indices of matching retained lines
+  scannedTotal: number;   // engine `total` at scan time; pass back as `fromAbs`
+  firstAbs: number;       // ring-buffer front at scan time
+}
+
 /** Delta payload emitted by the backend on each stream batch. */
 export interface StreamDelta {
   sourceId: string;
@@ -39,6 +46,9 @@ export interface StreamDelta {
   filteredAdded: number[];  // newly matched absolute indices this batch
   filteredTrimmed: number;  // matched indices evicted from the front this batch
 }
+
+/// Debounce handle for the live-search re-scan triggered by stream deltas.
+let liveSearchTimer: ReturnType<typeof setTimeout> | null = null;
 
 function parseTatFilters(xmlText: string): Omit<FilterItem, 'idx' | 'hits'>[] {
   const parser = new DOMParser();
@@ -173,8 +183,13 @@ interface AppState {
   activeSearchResults: number[];
   searchIndex: number;
   isSearching: boolean;
+  // Live search bookkeeping: engine `total` at the last live scan, so a running
+  // capture only rescans lines appended since. 0 for static files (unused).
+  searchScannedTotal: number;
   setSearchQuery: (query: string, isRegex: boolean, isCaseSensitive: boolean) => void;
   runSearch: () => Promise<void>;
+  resolveSearchResults: (results: number[], displayIndices: number[] | null) => { results: number[]; activeResults: number[] };
+  extendLiveSearch: (sourceId: string) => Promise<void>;
   nextSearchMatch: () => void;
   prevSearchMatch: () => void;
   clearSearch: () => void;
@@ -296,8 +311,10 @@ export const useStore = create<AppState>()(
   },
 
   setActiveFile: async (file) => {
+    // Switching sources invalidates any search: results are keyed by the
+    // absolute/raw line index of the source they were found in.
     if (!file) {
-      set({ activeFile: null, lineCount: 0, selectedLine: null, selectedLines: [], searchResults: [], searchIndex: -1 });
+      set({ activeFile: null, lineCount: 0, selectedLine: null, selectedLines: [], searchResults: [], activeSearchResults: [], searchIndex: -1, searchScannedTotal: 0 });
       return;
     }
     // Live source: no file to load; drive the view from stream metadata.
@@ -313,9 +330,14 @@ export const useStore = create<AppState>()(
         searchResults: [],
         activeSearchResults: [],
         searchIndex: -1,
+        searchScannedTotal: 0,
         loading: false,
       });
       await get().applyFilters();
+      // The search box keeps its query across sources, so re-run it against the
+      // newly activated one (this is the live path — the static path is covered
+      // by the same call below).
+      if (get().searchQuery) await get().runSearch();
       return;
     }
     set({ activeFile: file, loading: true });
@@ -324,6 +346,7 @@ export const useStore = create<AppState>()(
       set({ lineCount, loading: false });
       await get().loadNotesForFile(file);
       await get().applyFilters();
+      if (get().searchQuery) await get().runSearch();
     } catch (err) {
       console.error('Failed to switch to file:', err);
       set({ loading: false });
@@ -343,6 +366,12 @@ export const useStore = create<AppState>()(
         loading: false,
         selectedLine: null,
         selectedLines: [],
+        // Results are per-source; a fresh file starts with an empty match set
+        // (the open search box re-runs below).
+        searchResults: [],
+        activeSearchResults: [],
+        searchIndex: -1,
+        searchScannedTotal: 0,
         // Opening a file jumps the sidebar to Log Files.
         activeTab: 'files',
         isSidebarOpen: true,
@@ -350,6 +379,7 @@ export const useStore = create<AppState>()(
       get().addRecentFile(filepath);
       await get().loadNotesForFile(filepath);
       await get().applyFilters();
+      if (get().searchQuery) await get().runSearch();
     } catch (err) {
       console.error('Failed to load log:', err);
       set({ loading: false });
@@ -503,9 +533,14 @@ export const useStore = create<AppState>()(
     set((s) => {
       const next = { ...s.liveSources };
       delete next[sourceId];
+      // Its results reference absolute indices of a buffer that is now gone.
+      const clearSearch = wasActive
+        ? { searchResults: [], activeSearchResults: [], searchIndex: -1, searchScannedTotal: 0 }
+        : {};
       return {
         liveSources: next,
         loadedFiles: s.loadedFiles.filter((f) => f !== sourceId),
+        ...clearSearch,
       };
     });
     if (wasActive) {
@@ -562,6 +597,11 @@ export const useStore = create<AppState>()(
         // The buffer (and its matched-index list) is wiped; reset the display
         // list so incremental deltas don't append onto stale absolute indices.
         if (Array.isArray(s.filteredIndices)) patch.filteredIndices = [];
+        // Search results reference absolute indices that no longer exist.
+        patch.searchResults = [];
+        patch.activeSearchResults = [];
+        patch.searchIndex = -1;
+        patch.searchScannedTotal = 0;
       }
       return patch;
     });
@@ -596,6 +636,18 @@ export const useStore = create<AppState>()(
       }
       return patch;
     });
+    // Keep an open search in sync with the growing buffer. Debounced: a busy
+    // kernel capture appends every poll (~80ms) and each delta would otherwise
+    // kick off its own scan. Only the active source is extended (see the guard
+    // inside extendLiveSearch), and only when lines were actually added.
+    const active = get().activeFile;
+    if (active === sourceId && get().searchQuery) {
+      if (liveSearchTimer) clearTimeout(liveSearchTimer);
+      liveSearchTimer = setTimeout(() => {
+        liveSearchTimer = null;
+        void get().extendLiveSearch(sourceId);
+      }, 250);
+    }
   },
 
   // Selection
@@ -735,23 +787,51 @@ export const useStore = create<AppState>()(
   activeSearchResults: [],
   searchIndex: -1,
   isSearching: false,
+  searchScannedTotal: 0,
 
   setSearchQuery: (query, isRegex, isCaseSensitive) => {
     set({ searchQuery: query, isRegexSearch: isRegex, isCaseSensitiveSearch: isCaseSensitive });
   },
 
   runSearch: async () => {
-    const { activeFile, searchQuery, isRegexSearch, isCaseSensitiveSearch, showFilteredOnly, filteredIndices } = get();
+    const { activeFile, searchQuery, isRegexSearch, isCaseSensitiveSearch, filteredIndices } = get();
     if (!activeFile || !searchQuery) {
-      set({ searchResults: [], activeSearchResults: [], searchIndex: -1 });
-      return;
-    }
-    // Search over live streams is not supported yet (M1).
-    if (get().liveSources[activeFile]) {
-      set({ searchResults: [], activeSearchResults: [], searchIndex: -1 });
+      set({ searchResults: [], activeSearchResults: [], searchIndex: -1, searchScannedTotal: 0 });
       return;
     }
     set({ isSearching: true });
+
+    // Live source: scan the backend's retained ring buffer (the whole buffer on
+    // a fresh query; `extendLiveSearch` handles later appends incrementally).
+    if (get().liveSources[activeFile]) {
+      try {
+        const res = await invoke<StreamSearchResult>('search_stream', {
+          sourceId: activeFile,
+          query: searchQuery,
+          isRegex: isRegexSearch,
+          caseSensitive: isCaseSensitiveSearch,
+          fromAbs: 0,
+        });
+        const { results, activeResults } = get().resolveSearchResults(
+          res.matches,
+          // A non-null display list means lines are hidden (filtered view OR an
+          // enabled exclude filter), so matches on hidden lines don't count.
+          get().filteredIndices,
+        );
+        set({
+          searchResults: results,
+          activeSearchResults: activeResults,
+          searchIndex: activeResults.length > 0 ? 0 : -1,
+          searchScannedTotal: res.scannedTotal,
+          isSearching: false,
+        });
+      } catch (err) {
+        console.error('Live search failed:', err);
+        set({ isSearching: false, searchResults: [], activeSearchResults: [], searchIndex: -1 });
+      }
+      return;
+    }
+
     try {
       const results = await invoke<number[]>('search_log', {
         filepath: activeFile,
@@ -760,11 +840,10 @@ export const useStore = create<AppState>()(
         caseSensitive: isCaseSensitiveSearch,
       });
 
-      let activeResults = results;
-      if (showFilteredOnly && filteredIndices) {
-        const filterSet = new Set(filteredIndices);
-        activeResults = results.filter((r) => filterSet.has(r));
-      }
+      // Same display-list restriction as the live path: a non-null list means
+      // lines are hidden (filtered view or excludes), so matches on them don't
+      // show up in the match count.
+      const { activeResults } = get().resolveSearchResults(results, filteredIndices);
 
       set({
         searchResults: results,
@@ -775,6 +854,62 @@ export const useStore = create<AppState>()(
     } catch (err) {
       console.error('Search failed:', err);
       set({ isSearching: false, searchResults: [], activeSearchResults: [], searchIndex: -1 });
+    }
+  },
+
+  // Shared post-processing for both search paths: apply the display-list
+  // restriction (filtered view / excludes hide matching lines) to the raw match
+  // list. Kept as an action so the live path can reuse it.
+  resolveSearchResults: (results, displayIndices) => {
+    if (!displayIndices) return { results, activeResults: results };
+    const visible = new Set(displayIndices);
+    return { results, activeResults: results.filter((r) => visible.has(r)) };
+  },
+
+  // Re-run the live search incrementally as new lines stream in. Called from
+  // applyStreamDelta; cheap when nothing was appended (no new lines to scan).
+  extendLiveSearch: async (sourceId) => {
+    const { activeFile, searchQuery, isRegexSearch, isCaseSensitiveSearch, searchScannedTotal, searchIndex } = get();
+    if (!searchQuery || activeFile !== sourceId) return;
+    const meta = get().liveSources[sourceId];
+    if (!meta || meta.total <= searchScannedTotal) return;
+
+    try {
+      const res = await invoke<StreamSearchResult>('search_stream', {
+        sourceId,
+        query: searchQuery,
+        isRegex: isRegexSearch,
+        caseSensitive: isCaseSensitiveSearch,
+        fromAbs: searchScannedTotal,
+      });
+      // Guard against a query change / source switch while the scan was running.
+      const now = get();
+      if (now.activeFile !== sourceId || now.searchQuery !== searchQuery) return;
+
+      // Merge: drop matches evicted from the ring front, then append new ones.
+      const merged = now.searchResults.filter((r) => r >= res.firstAbs);
+      for (const m of res.matches) {
+        if (merged.length === 0 || m > merged[merged.length - 1]) merged.push(m);
+      }
+      const { activeResults } = now.resolveSearchResults(
+        merged,
+        now.filteredIndices,
+      );
+      set({
+        searchResults: merged,
+        activeSearchResults: activeResults,
+        searchScannedTotal: res.scannedTotal,
+        // Keep the user on the same match ordinal; clamp when matches shrank
+        // (front eviction) and clear it once there are none left.
+        searchIndex:
+          activeResults.length === 0
+            ? -1
+            : searchIndex >= activeResults.length
+            ? activeResults.length - 1
+            : searchIndex,
+      });
+    } catch (err) {
+      console.error('Live search extend failed:', err);
     }
   },
 
@@ -820,7 +955,7 @@ export const useStore = create<AppState>()(
     set({ searchIndex: prevIdx, selectedLine: targetLine, selectedLines: [targetLine] });
   },
 
-  clearSearch: () => set({ searchQuery: '', searchResults: [], activeSearchResults: [], searchIndex: -1 }),
+  clearSearch: () => set({ searchQuery: '', searchResults: [], activeSearchResults: [], searchIndex: -1, searchScannedTotal: 0 }),
 
   // Filters
   filters: [],
@@ -939,11 +1074,24 @@ export const useStore = create<AppState>()(
           fi = [];
         }
       }
+      // Hiding lines hides matches on them too, so re-derive the active set
+      // against the new display list (same contract as the static path).
+      const { searchIndex } = get();
+      const { activeResults } = get().resolveSearchResults(get().searchResults, fi);
       set((s) => ({
         filterPalette: palette,
         filteredIndices: fi,
         tagCodes: [],
         liveCodesTick: s.liveCodesTick + 1,
+        activeSearchResults: activeResults,
+        // Keep the user's ordinal when it still exists, otherwise fall back to
+        // the first match (or none).
+        searchIndex:
+          activeResults.length === 0
+            ? -1
+            : searchIndex >= 0 && searchIndex < activeResults.length
+            ? searchIndex
+            : 0,
       }));
       return;
     }
