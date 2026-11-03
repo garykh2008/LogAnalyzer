@@ -944,10 +944,26 @@ fn spawn_ssh_dbgview(
             eprintln!("Remote DbgView setup failed: {}", e);
         }
 
-        // Give the scheduled task a moment to launch DbgView.
-        std::thread::sleep(Duration::from_secs(2));
+        // Wait for the scheduled task to actually start DbgView and write its
+        // first line, instead of sleeping a fixed 2s. Polling is both faster to
+        // first output and, crucially, keeps us from attaching before the file
+        // has content: `-Tail 0` (the old behaviour) starts at the current end
+        // of the file, so anything DbgView wrote during a fixed sleep was
+        // silently dropped. Bounded, so a quiet target still attaches.
+        let wait_script = format!(
+            "$ErrorActionPreference='SilentlyContinue'\n\
+             $deadline = (Get-Date).AddSeconds(15)\n\
+             while ((Get-Date) -lt $deadline -and (Get-Item -LiteralPath '{log}').Length -eq 0) {{\n\
+                 Start-Sleep -Milliseconds 100\n\
+             }}",
+            log = ps_escape(&log),
+        );
+        let _ = remote::run_ps(&sess, &wait_script);
 
-        let stream_script = format!("Get-Content -LiteralPath '{}' -Wait -Tail 0", ps_escape(&log));
+        // No `-Tail`: on an existing file `-Wait` replays the content written so
+        // far and then follows appends, so lines DbgView captured while we were
+        // attaching are not skipped.
+        let stream_script = format!("Get-Content -LiteralPath '{}' -Wait", ps_escape(&log));
         let mut ch = match sess.channel_session() {
             Ok(c) => c,
             Err(e) => {

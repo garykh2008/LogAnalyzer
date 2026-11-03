@@ -25,13 +25,41 @@ pub fn connect(cfg: &SshConfig) -> Result<Session, String> {
 
     let mut sess = Session::new().map_err(|e| e.to_string())?;
     sess.set_tcp_stream(tcp);
-    sess.handshake().map_err(|e| format!("SSH handshake failed: {}", e))?;
+    sess.handshake().map_err(|e| {
+        let mut msg = format!("SSH handshake failed: {}", e);
+        // A KEX_FAILURE (-5) is almost always an algorithm mismatch rather than
+        // a network problem: the target offers only kex/host-key methods this
+        // libssh2 build can't do. Say which ones it *can* do, otherwise the user
+        // is stuck comparing against working `ssh.exe` with no way to tell why.
+        // libssh2's own LIBSSH2_ERROR_KEX_FAILURE; ssh2 does not re-export the
+        // constant, so match the value it documents.
+        const KEX_FAILURE: i32 = -5;
+        if let ssh2::ErrorCode::Session(code) = e.code() {
+            if code == KEX_FAILURE {
+                msg.push_str(&format!(
+                    "\nClient supports kex [{}] and hostkey [{}]; \
+                     the target must offer at least one of each.",
+                    supported(&sess, ssh2::MethodType::Kex),
+                    supported(&sess, ssh2::MethodType::HostKey),
+                ));
+            }
+        }
+        msg
+    })?;
     sess.userauth_password(&cfg.user, &cfg.password)
         .map_err(|e| format!("SSH authentication failed: {}", e))?;
     if !sess.authenticated() {
         return Err("SSH authentication failed".to_string());
     }
     Ok(sess)
+}
+
+/// Comma-joined list of the algorithms this build supports, for error messages.
+fn supported(sess: &Session, kind: ssh2::MethodType) -> String {
+    match sess.supported_algs(kind) {
+        Ok(algs) => algs.join(", "),
+        Err(_) => "?".to_string(),
+    }
 }
 
 /// Wrap a PowerShell script as a full `powershell -EncodedCommand <b64>` command

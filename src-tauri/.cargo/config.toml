@@ -1,0 +1,23 @@
+# Build environment for this crate only.
+#
+# `libssh2-sys` is built with libssh2's OpenSSL backend (see the `ssh2` features
+# in Cargo.toml), so `openssl-src` compiles OpenSSL from source and needs a
+# **full** Perl: `Configure` pulls in `Locale::Maketext::Simple` via
+# `Params::Check`.
+#
+# The Perl bundled with Git for Windows is not enough — it ships without
+# `Locale::Maketext::Simple`, so `perl ./Configure` dies with
+#   Can't locate Locale/Maketext/Simple.pm in @INC
+# and the build fails in `openssl-sys`. Scoop's `perl` package does have it, but
+# installs no shim, so PATH alone resolves `perl` to the Git one. `OPENSSL_SRC_PERL`
+# (read by openssl-src) pins the interpreter regardless of PATH order, so the
+# build behaves the same from Git Bash, PowerShell, or an IDE.
+#
+# Machine-specific by design. If the path below does not exist (a different
+# machine, and CI on windows-latest where Strawberry Perl is already on PATH),
+# the override simply resolves to a missing file — so keep it working by putting
+# the interpreter path in your own environment instead:
+#   Local setup, once:  scoop install perl
+#   Then either leave this file alone or set OPENSSL_SRC_PERL to your perl.exe.
+[env]
+OPENSSL_SRC_PERL = "C:\\Users\\gary\\scoop\\apps\\perl\\current\\perl\\bin\\perl.exe"

@@ -32,6 +32,11 @@ memmap2 = "0.9"
 encoding_rs = "0.8"
 rfd = "0.14"
 glob = "0.3"
-ssh2 = "0.9"
+# `openssl-on-win32` switches libssh2 off the WinCNG backend. WinCNG cannot do
+# ed25519/ECDSA in the vendored build (LIBSSH2_ECDSA_WINCNG is never defined), so
+# curve25519/ECDH kex and every modern host key are missing; a stock Windows
+# OpenSSH target then rejects the handshake with "Unable to exchange encryption
+# keys" (-5, KEX_FAILURE). OpenSSL restores the full modern algorithm set.
+ssh2 = { version = "0.9", features = ["openssl-on-win32", "vendored-openssl"] }
 base64 = "0.22"
 
