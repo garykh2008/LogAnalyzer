@@ -1,0 +1,25 @@
+# Copy to `config.toml` (same directory) if your local build needs it.
+# That file is gitignored: it holds a machine-specific path.
+#
+# WHY: `libssh2-sys` is built with libssh2's OpenSSL backend (see the `ssh2`
+# features in Cargo.toml), so `openssl-src` compiles OpenSSL from source, which
+# needs a **full** Perl — `Configure` pulls in `Locale::Maketext::Simple` via
+# `Params::Check`.
+#
+# The Perl bundled with Git for Windows is not enough: it ships without
+# `Locale::Maketext::Simple`, so `perl ./Configure` dies with
+#     Can't locate Locale/Maketext/Simple.pm in @INC
+# and the build fails in `openssl-sys`. Scoop's `perl` package does have it, but
+# installs no shim, so PATH alone still resolves `perl` to the Git one.
+#
+# `OPENSSL_SRC_PERL` (read by openssl-src) pins the interpreter regardless of
+# PATH order, so the build behaves the same from Git Bash, PowerShell, or an IDE.
+#
+# CI does NOT need this: windows-latest ships Strawberry Perl on PATH, and this
+# file is not committed. Set it only when a local build fails as above.
+#
+#   1. scoop install perl      (or any Strawberry Perl)
+#   2. copy this file to config.toml
+#   3. point the path below at your perl.exe
+[env]
+OPENSSL_SRC_PERL = "C:\\Users\\<you>\\scoop\\apps\\perl\\current\\perl\\bin\\perl.exe"

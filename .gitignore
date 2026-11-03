@@ -13,6 +13,11 @@ dist-ssr
 *.local
 *.tsbuildinfo
 
+# Machine-specific cargo config. Used to point OPENSSL_SRC_PERL at a full Perl
+# (see src-tauri/.cargo/config.toml.example); must never be committed — the path
+# only exists on the machine that wrote it, and CI would fail on it.
+src-tauri/.cargo/config.toml
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
